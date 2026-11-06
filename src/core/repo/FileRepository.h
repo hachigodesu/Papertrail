@@ -1,0 +1,70 @@
+#pragma once
+
+#include <QList>
+#include <QString>
+
+#include <optional>
+
+namespace papertrail::core {
+
+class Database;
+
+struct LibraryRoot {
+    qint64 id = 0;
+    QString uuid;
+    QString name;
+    QString path;
+};
+
+enum class FileStatus { Ok, Missing, Offline, Unreadable };
+
+struct FileRecord {
+    qint64 id = 0;
+    qint64 rootId = 0;
+    QString relativePath; // Always stored with forward slashes.
+    qint64 size = 0;
+    qint64 modifiedAt = 0;
+    QString sha256; // Null until the file has been hashed.
+    QString format;
+    std::optional<int> pageCount;
+    std::optional<bool> hasTextLayer; // Unset until the file has been read.
+    FileStatus status = FileStatus::Ok;
+};
+
+class FileRepository {
+public:
+    explicit FileRepository(Database &db) : m_db(db) {}
+
+    qint64 addRoot(const QString &name, const QString &path);
+    QList<LibraryRoot> roots();
+
+    // Points a root at a new location. Its files keep their relative paths and links.
+    void repointRoot(qint64 rootId, const QString &newPath);
+
+    // Marks a root's files offline (an unplugged drive, say), or brings them back.
+    // Files with another problem keep that status.
+    void setRootOnline(qint64 rootId, bool online);
+
+    // Removes a root and its file records. Publications stay, with no file linked.
+    void removeRoot(qint64 rootId);
+
+    // Inserts a file, or updates the existing record for the same root and relative path.
+    qint64 upsert(FileRecord &file);
+
+    std::optional<FileRecord> get(qint64 id);
+    QList<FileRecord> withHash(const QString &sha256);
+    void setHash(qint64 fileId, const QString &sha256);
+    void setStatus(qint64 fileId, FileStatus status);
+
+    // Links a file to a publication. Making it primary replaces any earlier primary file.
+    void link(qint64 publicationId, qint64 fileId, bool primary = false);
+    void unlink(qint64 publicationId, qint64 fileId);
+    QList<FileRecord> filesFor(qint64 publicationId);
+
+    QString absolutePath(qint64 fileId);
+
+private:
+    Database &m_db;
+};
+
+} // namespace papertrail::core

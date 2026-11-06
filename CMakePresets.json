@@ -65,13 +65,27 @@
       "name": "windows-debug",
       "configurePreset": "windows-debug",
       "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "perf" } },
       "environment": { "QT_QPA_PLATFORM": "offscreen" }
     },
     {
       "name": "linux-debug",
       "configurePreset": "linux-debug",
       "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "perf" } },
       "environment": { "QT_QPA_PLATFORM": "offscreen" }
+    },
+    {
+      "name": "windows-perf",
+      "configurePreset": "windows-release",
+      "output": { "verbosity": "verbose" },
+      "filter": { "include": { "label": "perf" } }
+    },
+    {
+      "name": "linux-perf",
+      "configurePreset": "linux-release",
+      "output": { "verbosity": "verbose" },
+      "filter": { "include": { "label": "perf" } }
     }
   ]
 }

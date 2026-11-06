@@ -1,0 +1,347 @@
+#include "core/db/Schema.h"
+
+#include "core/db/Database.h"
+
+#include <string>
+
+namespace papertrail::core {
+
+namespace {
+
+// Never edit a released migration: add a new one.
+const char *const kMigration1 = R"sql(
+CREATE TABLE library_root (
+    id          INTEGER PRIMARY KEY,
+    uuid        TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    path        TEXT NOT NULL UNIQUE,
+    created_at  INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE file (
+    id              INTEGER PRIMARY KEY,
+    root_id         INTEGER NOT NULL REFERENCES library_root(id) ON DELETE CASCADE,
+    relative_path   TEXT NOT NULL,
+    file_name       TEXT NOT NULL,
+    size            INTEGER NOT NULL,
+    modified_at     INTEGER NOT NULL,
+    sha256          TEXT,
+    format          TEXT NOT NULL,
+    page_count      INTEGER,
+    has_text_layer  INTEGER CHECK (has_text_layer IN (0, 1)),
+    status          TEXT NOT NULL DEFAULT 'ok'
+                    CHECK (status IN ('ok', 'missing', 'offline', 'unreadable')),
+    UNIQUE (root_id, relative_path)
+) STRICT;
+CREATE INDEX file_sha256 ON file(sha256);
+CREATE INDEX file_size ON file(size);
+CREATE INDEX file_name ON file(file_name);
+CREATE INDEX file_status ON file(status);
+CREATE INDEX file_format ON file(format);
+
+CREATE TABLE publication (
+    id                  INTEGER PRIMARY KEY,
+    uuid                TEXT NOT NULL UNIQUE,
+    type                TEXT NOT NULL CHECK (type IN (
+                            'journal_volume', 'journal_article', 'conference_proceedings',
+                            'conference_paper', 'textbook', 'book', 'book_chapter', 'thesis',
+                            'dissertation', 'technical_report', 'standard', 'preprint', 'other')),
+    parent_id           INTEGER REFERENCES publication(id) ON DELETE CASCADE,
+    page_start          INTEGER,
+    page_end            INTEGER,
+
+    title               TEXT NOT NULL DEFAULT '',
+    subtitle            TEXT,
+    abstract            TEXT,
+    year                INTEGER,
+    month               INTEGER CHECK (month BETWEEN 1 AND 12),
+    day                 INTEGER CHECK (day BETWEEN 1 AND 31),
+    language            TEXT,
+    url                 TEXT,
+    edition             TEXT,
+    series              TEXT,
+
+    doi                 TEXT,
+    isbn10              TEXT,
+    isbn13              TEXT,
+    issn                TEXT,
+    eissn               TEXT,
+    arxiv_id            TEXT,
+    pmid                TEXT,
+
+    container_title     TEXT,
+    volume              TEXT,
+    issue               TEXT,
+    pages               TEXT,
+    publisher           TEXT,
+    place               TEXT,
+
+    conference_name     TEXT,
+    conference_location TEXT,
+
+    institution         TEXT,
+    department          TEXT,
+    degree              TEXT,
+
+    report_number       TEXT,
+
+    standard_number     TEXT,
+    standard_body       TEXT,
+    standard_revision   TEXT,
+    standard_status     TEXT,
+
+    read_status         TEXT NOT NULL DEFAULT 'unread'
+                        CHECK (read_status IN ('unread', 'reading', 'read')),
+    rating              INTEGER CHECK (rating BETWEEN 1 AND 5),
+    notes               TEXT,
+    extra_json          TEXT,
+
+    needs_review        INTEGER NOT NULL DEFAULT 0 CHECK (needs_review IN (0, 1)),
+
+    -- Kept up to date by the application, so sorting and list display need no joins.
+    title_sort          TEXT NOT NULL DEFAULT '',
+    first_author_sort   TEXT NOT NULL DEFAULT '',
+    authors_display     TEXT NOT NULL DEFAULT '',
+
+    created_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL
+) STRICT;
+CREATE INDEX publication_parent ON publication(parent_id);
+CREATE INDEX publication_year ON publication(year);
+
+-- One index per way of sorting a list, with and without a tab's type, so a page never needs
+-- to sort the whole library. The coalesce keeps records with no year last in both directions,
+-- and has to match the ORDER BY in LibraryQuery.
+CREATE INDEX publication_title_sort ON publication(title_sort);
+CREATE INDEX publication_first_author_sort ON publication(first_author_sort);
+CREATE INDEX publication_year_asc ON publication(coalesce(year, 99999), title_sort);
+CREATE INDEX publication_year_desc ON publication(coalesce(year, -1) DESC, title_sort);
+CREATE INDEX publication_created ON publication(created_at);
+CREATE INDEX publication_type_title ON publication(type, title_sort);
+CREATE INDEX publication_type_author ON publication(type, first_author_sort);
+CREATE INDEX publication_type_year_asc ON publication(type, coalesce(year, 99999), title_sort);
+CREATE INDEX publication_type_year_desc ON publication(type, coalesce(year, -1) DESC, title_sort);
+CREATE INDEX publication_type_created ON publication(type, created_at);
+
+CREATE INDEX publication_container ON publication(container_title);
+CREATE INDEX publication_publisher ON publication(publisher);
+CREATE INDEX publication_conference ON publication(conference_name);
+CREATE INDEX publication_institution ON publication(institution);
+CREATE INDEX publication_language ON publication(language);
+CREATE INDEX publication_read_status ON publication(read_status);
+CREATE INDEX publication_needs_review ON publication(needs_review) WHERE needs_review = 1;
+CREATE INDEX publication_doi ON publication(doi);
+CREATE INDEX publication_isbn13 ON publication(isbn13);
+CREATE INDEX publication_arxiv ON publication(arxiv_id);
+
+CREATE TABLE publication_file (
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    file_id         INTEGER NOT NULL REFERENCES file(id) ON DELETE CASCADE,
+    is_primary      INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1)),
+    PRIMARY KEY (publication_id, file_id)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX publication_file_file ON publication_file(file_id, publication_id);
+
+CREATE TABLE person (
+    id          INTEGER PRIMARY KEY,
+    name_key    TEXT NOT NULL UNIQUE,
+    family_name TEXT NOT NULL,
+    given_name  TEXT NOT NULL DEFAULT ''
+) STRICT;
+
+CREATE TABLE publication_person (
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    person_id       INTEGER NOT NULL REFERENCES person(id),
+    role            TEXT NOT NULL CHECK (role IN ('author', 'editor', 'translator', 'advisor')),
+    position        INTEGER NOT NULL,
+    PRIMARY KEY (publication_id, role, position)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX publication_person_person ON publication_person(person_id, role, publication_id);
+
+CREATE TABLE tag (
+    id          INTEGER PRIMARY KEY,
+    uuid        TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    parent_id   INTEGER REFERENCES tag(id) ON DELETE CASCADE,
+    colour      TEXT,
+    created_at  INTEGER NOT NULL
+) STRICT;
+-- Two NULL parents don't count as equal in a UNIQUE constraint, so roots need their own index.
+CREATE UNIQUE INDEX tag_sibling_name ON tag(parent_id, name COLLATE NOCASE) WHERE parent_id IS NOT NULL;
+CREATE UNIQUE INDEX tag_root_name ON tag(name COLLATE NOCASE) WHERE parent_id IS NULL;
+CREATE INDEX tag_parent ON tag(parent_id);
+
+CREATE TABLE publication_tag (
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    tag_id          INTEGER NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    PRIMARY KEY (publication_id, tag_id)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX publication_tag_tag ON publication_tag(tag_id, publication_id);
+
+CREATE TABLE metadata_provenance (
+    id              INTEGER PRIMARY KEY,
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    field           TEXT NOT NULL,
+    source          TEXT NOT NULL,
+    confidence      REAL,
+    previous_value  TEXT,
+    new_value       TEXT,
+    recorded_at     INTEGER NOT NULL
+) STRICT;
+CREATE INDEX metadata_provenance_publication ON metadata_provenance(publication_id, field, recorded_at);
+
+CREATE TABLE annotation (
+    id              INTEGER PRIMARY KEY,
+    uuid            TEXT NOT NULL UNIQUE,
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    content_hash    TEXT,
+    location_json   TEXT NOT NULL,
+    type            TEXT NOT NULL CHECK (type IN ('highlight', 'underline', 'note')),
+    colour          TEXT,
+    selected_text   TEXT,
+    note            TEXT,
+    needs_review    INTEGER NOT NULL DEFAULT 0 CHECK (needs_review IN (0, 1)),
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+) STRICT;
+CREATE INDEX annotation_publication ON annotation(publication_id);
+
+CREATE TABLE reading_state (
+    publication_id  INTEGER PRIMARY KEY REFERENCES publication(id) ON DELETE CASCADE,
+    location        TEXT,
+    zoom            REAL,
+    last_opened     INTEGER
+) STRICT;
+
+CREATE TABLE job (
+    id          INTEGER PRIMARY KEY,
+    kind        TEXT NOT NULL,
+    payload     TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'running', 'done', 'failed')),
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+) STRICT;
+CREATE INDEX job_status ON job(status, id);
+
+CREATE TABLE setting (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+
+-- Metadata search. Full document text goes in the separate fulltext database (M8).
+CREATE VIRTUAL TABLE publication_fts USING fts5(
+    title, abstract, authors, tags, container, publisher, identifiers,
+    tokenize = "unicode61 remove_diacritics 2"
+);
+
+CREATE TRIGGER publication_fts_insert AFTER INSERT ON publication BEGIN
+    INSERT INTO publication_fts (rowid, title, abstract, authors, tags, container, publisher, identifiers)
+    VALUES (new.id,
+            trim(new.title || ' ' || coalesce(new.subtitle, '')),
+            new.abstract, '', '',
+            coalesce(new.container_title, '') || ' ' || coalesce(new.conference_name, ''),
+            coalesce(new.publisher, '') || ' ' || coalesce(new.institution, '') || ' ' || coalesce(new.standard_body, ''),
+            concat_ws(' ', new.doi, new.isbn10, new.isbn13, new.issn, new.eissn, new.arxiv_id, new.pmid,
+                      new.report_number, new.standard_number));
+END;
+
+CREATE TRIGGER publication_fts_update AFTER UPDATE OF
+    title, subtitle, abstract, container_title, conference_name, publisher, institution, standard_body,
+    doi, isbn10, isbn13, issn, eissn, arxiv_id, pmid, report_number, standard_number
+ON publication BEGIN
+    UPDATE publication_fts SET
+        title = trim(new.title || ' ' || coalesce(new.subtitle, '')),
+        abstract = new.abstract,
+        container = coalesce(new.container_title, '') || ' ' || coalesce(new.conference_name, ''),
+        publisher = coalesce(new.publisher, '') || ' ' || coalesce(new.institution, '') || ' ' || coalesce(new.standard_body, ''),
+        identifiers = concat_ws(' ', new.doi, new.isbn10, new.isbn13, new.issn, new.eissn, new.arxiv_id, new.pmid,
+                                new.report_number, new.standard_number)
+    WHERE rowid = new.id;
+END;
+
+CREATE TRIGGER publication_fts_delete AFTER DELETE ON publication BEGIN
+    DELETE FROM publication_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER publication_person_fts_insert AFTER INSERT ON publication_person BEGIN
+    UPDATE publication_fts SET authors = (
+        SELECT group_concat(pr.given_name || ' ' || pr.family_name, ' ')
+        FROM publication_person pp JOIN person pr ON pr.id = pp.person_id
+        WHERE pp.publication_id = new.publication_id
+    ) WHERE rowid = new.publication_id;
+END;
+
+CREATE TRIGGER publication_person_fts_delete AFTER DELETE ON publication_person BEGIN
+    UPDATE publication_fts SET authors = (
+        SELECT group_concat(pr.given_name || ' ' || pr.family_name, ' ')
+        FROM publication_person pp JOIN person pr ON pr.id = pp.person_id
+        WHERE pp.publication_id = old.publication_id
+    ) WHERE rowid = old.publication_id;
+END;
+
+CREATE TRIGGER publication_tag_fts_insert AFTER INSERT ON publication_tag BEGIN
+    UPDATE publication_fts SET tags = (
+        SELECT group_concat(t.name, ' ')
+        FROM publication_tag pt JOIN tag t ON t.id = pt.tag_id
+        WHERE pt.publication_id = new.publication_id
+    ) WHERE rowid = new.publication_id;
+END;
+
+CREATE TRIGGER publication_tag_fts_delete AFTER DELETE ON publication_tag BEGIN
+    UPDATE publication_fts SET tags = (
+        SELECT group_concat(t.name, ' ')
+        FROM publication_tag pt JOIN tag t ON t.id = pt.tag_id
+        WHERE pt.publication_id = old.publication_id
+    ) WHERE rowid = old.publication_id;
+END;
+
+CREATE TRIGGER tag_rename_fts AFTER UPDATE OF name ON tag BEGIN
+    UPDATE publication_fts SET tags = (
+        SELECT group_concat(t.name, ' ')
+        FROM publication_tag pt JOIN tag t ON t.id = pt.tag_id
+        WHERE pt.publication_id = publication_fts.rowid
+    ) WHERE rowid IN (SELECT publication_id FROM publication_tag WHERE tag_id = new.id);
+END;
+)sql";
+
+} // namespace
+
+const std::vector<Migration> &libraryMigrations()
+{
+    static const std::vector<Migration> migrations = {
+        {1, kMigration1},
+    };
+    return migrations;
+}
+
+void migrate(Database &db, const std::vector<Migration> &migrations)
+{
+    int current = db.userVersion();
+    const int newest = migrations.empty() ? 0 : migrations.back().version;
+    if (current > newest) {
+        throw DbError(0, "this library was created by a newer version of Papertrail (schema "
+                             + std::to_string(current) + ", this version supports "
+                             + std::to_string(newest) + ")");
+    }
+
+    for (const Migration &migration : migrations) {
+        if (migration.version <= current)
+            continue;
+        Transaction transaction(db);
+        db.exec(migration.sql);
+        db.setUserVersion(migration.version);
+        transaction.commit();
+        current = migration.version;
+    }
+}
+
+void migrateLibrary(Database &db)
+{
+    migrate(db, libraryMigrations());
+}
+
+} // namespace papertrail::core

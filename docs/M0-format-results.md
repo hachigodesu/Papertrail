@@ -75,8 +75,27 @@ Built with `packaging/linux/build-appimage.sh` on Ubuntu 24.04. It's 30 MB and b
   - Ubuntu 22.04 is on Qt's supported list and has glibc 2.35. Older distros use the Flatpak.
 - **Linux systems with no FUSE tools can't mount the AppImage.** Those users need their distro's FUSE package (untested) or the extract-and-run fallback. This must be in the install docs.
 
+## CI
+
+GitHub Actions builds and tests the app on Windows, Arch and Ubuntu. It also builds the release AppImage on Ubuntu 22.04 and smoke-tests it on Ubuntu 22.04 and 24.04, Debian 12, Fedora, openSUSE Tumbleweed and Arch.
+
+The smoke test uses Qt's offscreen mode and only shows the app starts and keeps running, not that its window displays correctly on those distros.
+
+## Dependency licences
+
+Papertrail is AGPL-3.0-or-later. These come from Arch's package data and libmobi's repository, and this is an engineering check rather than legal advice.
+
+| Dependency | Licence | With AGPL-3.0-or-later |
+|---|---|---|
+| MuPDF | AGPL-3.0-or-later | Same licence |
+| DjVuLibre | GPL-2.0-or-later | Compatible: use it under GPLv3, which section 13 of both licences allows to combine with AGPLv3 |
+| Qt 6 | LGPL-3.0-only (also offered under GPL-3.0-only and commercially) | Compatible |
+| libmobi | LGPL-3.0 | Compatible |
+| SQLite | Public domain | Compatible |
+
+Release packages must include these licence texts and a link to Papertrail's source.
+
 ## Not done yet
 
-- A release-baseline AppImage build on Ubuntu 22.04.
-- AppImage checks on Debian, Fedora and openSUSE, which belong in CI.
-- The format probe in CI: CI builds and tests the app on Windows, Arch and Ubuntu, and all three pass, but doesn't build the probe yet.
+- The format probe in CI, which only runs by hand so far.
+- A Flatpak build. That's M12's work, but the Flatpak is how distros older than glibc 2.35 get supported.

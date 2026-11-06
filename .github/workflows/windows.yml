@@ -24,4 +24,4 @@ jobs:
       # Plain configure rather than a preset: the action's MSYS2 isn't at C:/msys64.
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
       - run: cmake --build build
-      - run: ctest --test-dir build --output-on-failure
+      - run: ctest --test-dir build --output-on-failure -LE perf
