@@ -1,7 +1,9 @@
 #include "ReaderHost.h"
 
 #include "engine/Document.h"
+#include "import/Extractors.h"
 
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -90,6 +92,35 @@ void applyOpenFaults(const QString &path)
         std::abort();
 }
 
+// Enough to hold a Kindle file's headers.
+constexpr qint64 kKindleHeadBytes = 256 * 1024;
+
+} // namespace
+
+QString readablePath(engine::Engine &engine, const QString &path, const QString &convertedPath)
+{
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix != QLatin1StringView("mobi") && suffix != QLatin1StringView("azw") && suffix != QLatin1StringView("azw3"))
+        return path;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        throw engine::EngineError("could not open the file");
+    const import::KindleHeader header = import::parseKindleHeader(file.read(kKindleHeadBytes));
+    file.close();
+    if (header.isEncrypted)
+        throw engine::KindleProtected("this book is protected by DRM");
+    if (!header.isKf8)
+        return path;
+    if (convertedPath.isEmpty())
+        throw engine::EngineError("this Kindle book needs converting, and there's nowhere to put it");
+    if (!QFileInfo::exists(convertedPath))
+        engine.convertKf8ToEpub(path, convertedPath);
+    return convertedPath;
+}
+
+namespace {
+
 class Host {
 public:
     Host(engine::Engine &engine, FILE *out) : m_engine(engine), m_out(out) {}
@@ -161,7 +192,12 @@ private:
     {
         m_path = request.value(QStringLiteral("path")).toString();
         applyOpenFaults(m_path);
-        m_document = m_engine.open(m_path);
+        try {
+            m_document = m_engine.open(readablePath(m_engine, m_path, request.value(QStringLiteral("convertedPath")).toString()));
+        } catch (const engine::KindleProtected &) {
+            reply.insert(QStringLiteral("protected"), true);
+            throw;
+        }
         if (m_document->needsPassword()) {
             m_document.reset();
             reply.insert(QStringLiteral("needsPassword"), true);

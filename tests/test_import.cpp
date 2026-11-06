@@ -7,6 +7,8 @@
 #include "core/repo/PublicationRepository.h"
 #include "import/ImportService.h"
 
+#include "KindleSamples.h"
+
 #include <QCryptographicHash>
 #include <QDirIterator>
 #include <QFile>
@@ -235,8 +237,9 @@ private slots:
         QCOMPARE(m_files->filesFor(importOne().id).first().hasTextLayer, false);
     }
 
-    void kf8IsRecognisedAndNeverGivenToMuPdf()
+    void aKindleFileThatCantBeConvertedIsStillListed()
     {
+        // This sample only has a real header, with nothing behind it to convert.
         copySample("kf8_header.azw3");
         const Publication p = importOne();
         QCOMPARE(p.title, QStringLiteral("New Kindle Book"));
@@ -247,9 +250,129 @@ private slots:
 
         const FileRecord file = m_files->filesFor(p.id).first();
         QCOMPARE(file.format, QStringLiteral("azw3"));
+        QCOMPARE(file.status, FileStatus::Unreadable);
+        QVERIFY(!file.problem.isEmpty());
+    }
+
+    void aKf8BookIsConvertedAndReadInFull()
+    {
+        copySample("kf8_frankenstein.azw3", "Fr\u00E4nkenstein \u30D6\u30C3\u30AF.azw3");
+        const QByteArray before = hashOf(docs() + QStringLiteral("/Fr\u00E4nkenstein \u30D6\u30C3\u30AF.azw3"));
+        const Publication p = importOne();
+        QVERIFY2(p.title.contains(QStringLiteral("Frankenstein")), qPrintable(p.title));
+
+        const FileRecord file = m_files->filesFor(p.id).first();
+        QCOMPARE(file.format, QStringLiteral("azw3"));
         QCOMPARE(file.status, FileStatus::Ok);
-        QVERIFY(!file.pageCount.has_value()); // Nothing was rendered: M5 will convert it first.
-        QVERIFY(!QFile::exists(m_service->coverPath(file.sha256)));
+        QVERIFY(file.pageCount.value_or(0) > 50);
+        QCOMPARE(file.hasTextLayer, true);
+        const QString cache = m_dir->filePath(QStringLiteral("cache"));
+        QVERIFY(QFile::exists(coverPathFor(cache, file.sha256)));
+        QVERIFY(QFile::exists(convertedPathFor(cache, file.sha256)));
+
+        // The original isn't touched, whatever's made from it.
+        QCOMPARE(hashOf(docs() + QStringLiteral("/Fr\u00E4nkenstein \u30D6\u30C3\u30AF.azw3")), before);
+    }
+
+    void aJointKindleFileReadsItsKf8Part()
+    {
+        const QByteArray joint = kindle_samples::jointFile(kindle_samples::readAll(sample("old_format.mobi")),
+                                                           kindle_samples::readAll(sample("kf8_frankenstein.azw3")));
+        QVERIFY(kindle_samples::writeAll(docPath("joint.mobi"), joint));
+        const Publication p = importOne();
+        const FileRecord file = m_files->filesFor(p.id).first();
+        QCOMPARE(file.status, FileStatus::Ok);
+        QVERIFY2(file.pageCount.value_or(0) > 50, qPrintable(QString::number(file.pageCount.value_or(0))));
+        QVERIFY(QFile::exists(convertedPathFor(m_dir->filePath(QStringLiteral("cache")), file.sha256)));
+    }
+
+    void aBookLockedWithDrmSaysSo()
+    {
+        QVERIFY(kindle_samples::writeAll(docPath("locked.azw3"),
+                                         kindle_samples::lockedFile(kindle_samples::readAll(sample("kf8_frankenstein.azw3")))));
+        const Publication p = importOne();
+        const FileRecord file = m_files->filesFor(p.id).first();
+        QCOMPARE(file.status, FileStatus::Unreadable);
+        QVERIFY2(file.problem.contains(QStringLiteral("DRM")), qPrintable(file.problem));
+        QVERIFY(!QFile::exists(convertedPathFor(m_dir->filePath(QStringLiteral("cache")), file.sha256)));
+    }
+
+    void everyFormatGetsItsFacts_data()
+    {
+        QTest::addColumn<QString>("name");
+        QTest::addColumn<QString>("format");
+        QTest::addColumn<bool>("hasText");
+        QTest::newRow("PDF") << "article.pdf" << "pdf" << true;
+        QTest::newRow("EPUB") << "book.epub" << "epub" << true;
+        QTest::newRow("DjVu with text") << "with_text.djvu" << "djvu" << true;
+        QTest::newRow("DjVu without") << "scanned.djvu" << "djvu" << false;
+        QTest::newRow("MOBI") << "old_format.mobi" << "mobi" << true;
+        QTest::newRow("FB2") << "sample.fb2" << "fb2" << true;
+        QTest::newRow("CBZ") << "sample.cbz" << "cbz" << false;
+        QTest::newRow("XPS") << "sample.xps" << "xps" << false;
+    }
+
+    void everyFormatGetsItsFacts()
+    {
+        QFETCH(QString, name);
+        QFETCH(QString, format);
+        QFETCH(bool, hasText);
+        copySample(name.toUtf8().constData());
+        const Publication p = importOne();
+        const FileRecord file = m_files->filesFor(p.id).first();
+        QCOMPARE(file.format, format);
+        QCOMPARE(file.status, FileStatus::Ok);
+        QVERIFY(file.pageCount.value_or(0) >= 1);
+        QCOMPARE(file.hasTextLayer, hasText);
+        QVERIFY(QFile::exists(coverPathFor(m_dir->filePath(QStringLiteral("cache")), file.sha256)));
+    }
+
+    void otherNamesForFormatsWork_data()
+    {
+        QTest::addColumn<QString>("from");
+        QTest::addColumn<QString>("as");
+        QTest::addColumn<QString>("format");
+        QTest::newRow(".azw") << "old_format.mobi" << "old.azw" << "azw3";
+        QTest::newRow(".oxps") << "sample.xps" << "sample.oxps" << "xps";
+        QTest::newRow(".djv") << "with_text.djvu" << "sample.djv" << "djvu";
+    }
+
+    void otherNamesForFormatsWork()
+    {
+        QFETCH(QString, from);
+        QFETCH(QString, as);
+        QFETCH(QString, format);
+        copySample(from.toUtf8().constData(), as.toUtf8().constData());
+        const FileRecord file = m_files->filesFor(importOne().id).first();
+        QCOMPARE(file.format, format);
+        QCOMPARE(file.status, FileStatus::Ok);
+        QVERIFY(file.pageCount.value_or(0) >= 1);
+    }
+
+    void kindleBooksAlreadyInALibraryGetTheirCovers()
+    {
+        copySample("kf8_frankenstein.azw3");
+        const Publication p = importOne();
+        const FileRecord imported = m_files->filesFor(p.id).first();
+        const QString cover = coverPathFor(m_dir->filePath(QStringLiteral("cache")), imported.sha256);
+
+        // As it would have been before these could be read.
+        QVERIFY(QFile::remove(cover));
+        m_files->setDocumentFacts(imported.id, std::nullopt, std::nullopt);
+        Publication edited = *m_publications->get(p.id);
+        edited.title = QStringLiteral("My Own Title");
+        m_publications->update(edited);
+
+        m_db->setUserVersion(5);
+        migrateLibrary(*m_db);
+        QCOMPARE(m_service->pendingJobs(), 1);
+        const ImportReport report = m_service->processQueue();
+        QCOMPARE(report.publicationsCreated, 0);
+
+        const FileRecord file = m_files->filesFor(p.id).first();
+        QVERIFY(file.pageCount.value_or(0) > 50);
+        QVERIFY(QFile::exists(cover));
+        QCOMPARE(m_publications->get(p.id)->title, QStringLiteral("My Own Title"));
     }
 
     void passwordProtectedFilesAreListedAndFlagged()
@@ -970,6 +1093,16 @@ private slots:
     }
 
 private:
+    static QByteArray hashOf(const QString &path)
+    {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            return {};
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        hash.addData(&file);
+        return hash.result();
+    }
+
     ImportOptions serviceOptions() const
     {
         ImportOptions options;

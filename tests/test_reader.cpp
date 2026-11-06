@@ -1,5 +1,7 @@
 // Tests of the reader, using the real document process and real sample documents, with no screen.
 
+#include "KindleSamples.h"
+
 #include "core/repo/PublicationMerge.h"
 #include "core/repo/ReadingStateRepository.h"
 #include "ui/DetailsPanel.h"
@@ -308,6 +310,240 @@ private slots:
         }
     }
 
+    // ---- Every format ----
+
+    void everyFormatOpensAndShowsSomething_data()
+    {
+        QTest::addColumn<QString>("file");
+        QTest::addColumn<bool>("reflowable");
+        QTest::addColumn<QString>("word"); // Empty if it has no text to find.
+        QTest::newRow("PDF") << "reader_doc.pdf" << false << "findme";
+        QTest::newRow("EPUB") << "reader_nav.epub" << true << "findmefirst";
+        QTest::newRow("DjVu") << "reader_doc.djvu" << false << "findme";
+        QTest::newRow("MOBI") << "old_format.mobi" << true << "made-up";
+        QTest::newRow("FB2") << "sample.fb2" << true << "made-up";
+        QTest::newRow("KF8") << "kf8_frankenstein.azw3" << true << "Walton";
+        QTest::newRow("CBZ") << "sample.cbz" << false << "";
+        QTest::newRow("XPS") << "sample.xps" << false << "";
+    }
+
+    void everyFormatOpensAndShowsSomething()
+    {
+        QFETCH(QString, file);
+        QFETCH(bool, reflowable);
+        QFETCH(QString, word);
+
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy failed(&client, &DocumentClient::failed);
+        QSignalSpy rendered(&client, &DocumentClient::pageRendered);
+        QSignalSpy finished(&client, &DocumentClient::searchFinished);
+        QSignalSpy hits(&client, &DocumentClient::searchHits);
+        client.open(sample(file), {}, m_dir->filePath(QStringLiteral("converted.epub")));
+        QTRY_VERIFY_WITH_TIMEOUT(!opened.isEmpty() || !failed.isEmpty(), kWaitMs);
+        QVERIFY2(failed.isEmpty(), qPrintable(failed.isEmpty() ? QString() : failed.first().at(1).toString()));
+        QCOMPARE(opened.first().at(1).toBool(), reflowable);
+
+        client.setWantedPages({{0, 1.0}});
+        QVERIFY(rendered.wait(kWaitMs));
+        const QImage image = rendered.first().at(2).value<QImage>();
+        bool foundInk = false;
+        for (int y = 0; y < image.height() && !foundInk; y += 2) {
+            for (int x = 0; x < image.width() && !foundInk; x += 2)
+                foundInk = qGray(image.pixel(x, y)) < 200;
+        }
+        QVERIFY2(foundInk, "the first page is blank");
+
+        if (!word.isEmpty()) {
+            client.startSearch(word, 0);
+            QVERIFY(finished.wait(kWaitMs));
+            QVERIFY2(!hits.isEmpty(), "the text couldn't be searched");
+        }
+    }
+
+    void otherNamesForFormatsOpen_data()
+    {
+        QTest::addColumn<QString>("from");
+        QTest::addColumn<QString>("as");
+        QTest::newRow(".azw") << "old_format.mobi" << "book.azw";
+        QTest::newRow(".oxps") << "sample.xps" << "book.oxps";
+        QTest::newRow(".djv") << "reader_doc.djvu" << "book.djv";
+    }
+
+    void otherNamesForFormatsOpen()
+    {
+        QFETCH(QString, from);
+        QFETCH(QString, as);
+        const QString path = copied(from, as);
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        client.open(path, {});
+        QVERIFY(opened.wait(kWaitMs));
+    }
+
+    void djvuHasContentsLinksSearchAndSelection()
+    {
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy outline(&client, &DocumentClient::outlineReady);
+        QSignalSpy links(&client, &DocumentClient::linksReady);
+        QSignalSpy hits(&client, &DocumentClient::searchHits);
+        QSignalSpy finished(&client, &DocumentClient::searchFinished);
+        QSignalSpy selected(&client, &DocumentClient::selectionReady);
+        client.open(sample(QStringLiteral("reader_doc.djvu")), {});
+        QVERIFY(opened.wait(kWaitMs));
+        QCOMPARE(opened.first().at(0).toInt(), 3);
+
+        client.requestOutline();
+        QVERIFY(outline.wait(kWaitMs));
+        const auto items = outline.first().at(0).value<QList<ReaderOutlineItem>>();
+        QCOMPARE(items.size(), 3);
+        QCOMPARE(items.at(0).title, QStringLiteral("First Part"));
+        QCOMPARE(items.at(0).page, 0);
+        QCOMPARE(items.at(1).depth, 1);
+        QCOMPARE(items.at(1).page, 1);
+        QCOMPARE(items.at(2).page, 2);
+
+        client.requestLinks(0);
+        QVERIFY(links.wait(kWaitMs));
+        const auto found = links.first().at(1).value<QList<ReaderLink>>();
+        QCOMPARE(found.size(), 3);
+        bool internal = false;
+        bool web = false;
+        bool unsafe = false;
+        for (const ReaderLink &link : found) {
+            internal = internal || (link.uri.isEmpty() && link.page == 2);
+            web = web || link.uri == QStringLiteral("https://example.org/djvu");
+            unsafe = unsafe || link.uri.startsWith(QStringLiteral("file:"));
+        }
+        QVERIFY(internal && web && unsafe);
+
+        // Any case, on the pages they're on: one on the first, and two on the last.
+        client.startSearch(QStringLiteral("findme"), 0);
+        QVERIFY(finished.wait(kWaitMs));
+        QCOMPARE(hits.size(), 2);
+        QCOMPARE(hits.at(0).at(0).toInt(), 0);
+        QCOMPARE(hits.at(0).at(1).value<QList<QRectF>>().size(), 1);
+        QCOMPARE(hits.at(1).at(0).toInt(), 2);
+        QCOMPARE(hits.at(1).at(1).value<QList<QRectF>>().size(), 2);
+
+        // The first word is at (50, 700) in 800 pixels up from the bottom, at 100 dpi: near the top.
+        const QRectF first = hits.at(0).at(1).value<QList<QRectF>>().first();
+        QVERIFY(first.top() < 60);
+        QVERIFY(first.left() > 100);
+
+        // A phrase, including one running over a line break.
+        hits.clear();
+        finished.clear();
+        client.startSearch(QStringLiteral("words second"), 0);
+        QVERIFY(finished.wait(kWaitMs));
+        QCOMPARE(hits.size(), 1);
+        QCOMPARE(hits.first().at(1).value<QList<QRectF>>().size(), 2);
+
+        // From the first word to the last, keeping the line break.
+        client.requestSelection(0, QPointF(40, 50), QPointF(280, 100));
+        QVERIFY(selected.wait(kWaitMs));
+        QCOMPARE(selected.first().at(2).toString(), QStringLiteral("Plain findme words\nsecond line"));
+        QCOMPARE(selected.first().at(1).value<QList<QRectF>>().size(), 5);
+    }
+
+    void aKf8BookOpensWithItsContentsAndLeavesTheFileAlone()
+    {
+        const QString path = copied(QStringLiteral("kf8_frankenstein.azw3"), QStringLiteral("Fr\u00E4nkenstein.azw3"));
+        const QByteArray before = hashOf(path);
+        const QString converted = m_dir->filePath(QStringLiteral("cache/book.epub"));
+        {
+            DocumentClient client(worker());
+            QSignalSpy opened(&client, &DocumentClient::opened);
+            QSignalSpy outline(&client, &DocumentClient::outlineReady);
+            client.open(path, {}, converted);
+            QVERIFY(opened.wait(kWaitMs));
+            QVERIFY(opened.first().at(0).toInt() > 50);
+            QVERIFY(opened.first().at(1).toBool());
+            client.requestOutline();
+            QVERIFY(outline.wait(kWaitMs));
+            QVERIFY(outline.first().at(0).value<QList<ReaderOutlineItem>>().size() > 5);
+        }
+        QVERIFY(QFile::exists(converted));
+        QCOMPARE(hashOf(path), before);
+
+        // The converted copy is used next time, rather than being made again.
+        const QDateTime made = QFileInfo(converted).lastModified();
+        QTest::qWait(20);
+        DocumentClient again(worker());
+        QSignalSpy opened(&again, &DocumentClient::opened);
+        again.open(path, {}, converted);
+        QVERIFY(opened.wait(kWaitMs));
+        QCOMPARE(QFileInfo(converted).lastModified(), made);
+    }
+
+    void aJointKindleFileOpensAsItsKf8Part()
+    {
+        const QString path = m_dir->filePath(QStringLiteral("joint.mobi"));
+        QVERIFY(kindle_samples::writeAll(path, kindle_samples::jointFile(kindle_samples::readAll(sample(QStringLiteral("old_format.mobi"))),
+                                                                         kindle_samples::readAll(sample(QStringLiteral("kf8_frankenstein.azw3"))))));
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        client.open(path, {}, m_dir->filePath(QStringLiteral("joint.epub")));
+        QVERIFY(opened.wait(kWaitMs));
+        QVERIFY2(opened.first().at(0).toInt() > 50, qPrintable(QString::number(opened.first().at(0).toInt())));
+    }
+
+    void aDrmLockedBookSaysSo()
+    {
+        const QString path = m_dir->filePath(QStringLiteral("locked.azw3"));
+        QVERIFY(kindle_samples::writeAll(path, kindle_samples::lockedFile(kindle_samples::readAll(sample(QStringLiteral("kf8_frankenstein.azw3"))))));
+        DocumentClient client(worker());
+        QSignalSpy failed(&client, &DocumentClient::failed);
+        client.open(path, {}, m_dir->filePath(QStringLiteral("locked.epub")));
+        QVERIFY(failed.wait(kWaitMs));
+        QCOMPARE(failed.first().at(0).value<DocumentClient::Failure>(), DocumentClient::Failure::Protected);
+        QVERIFY(!QFile::exists(m_dir->filePath(QStringLiteral("locked.epub"))));
+    }
+
+    void aKf8BookOpensFromTheLibraryAndResumes()
+    {
+        openLibraryWindow();
+        const qint64 id = addLinkedPublication(QStringLiteral("kf8_frankenstein.azw3"));
+        // Conversion is named by the file's contents, which the import would normally have worked out.
+        const FileRecord file = m_session->files().filesFor(id).first();
+        m_session->files().setHash(file.id, QStringLiteral("abcdef"));
+
+        ReaderTab *reader = waitForReader(id);
+        QVERIFY(reader->isReady());
+        QVERIFY(!reader->isShowingProblem());
+        QTRY_VERIFY_WITH_TIMEOUT(reader->pageView()->isPageLoaded(0), kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->contents()->topLevelItemCount() > 5, kWaitMs);
+        reader->pageView()->goToPage(20);
+        m_window->closeDocumentTab(1);
+
+        reader = waitForReader(id);
+        QTRY_COMPARE_WITH_TIMEOUT(reader->pageView()->topPage(), 20, kWaitMs);
+    }
+
+    void djvuLinksInADocumentAreFollowedSafely()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reader_doc.djvu"));
+        PageView *view = reader->pageView();
+        QStringList opened;
+        reader->setOpenLinkHandler([&](const QUrl &url) { opened << url.toString(); });
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        QTest::qWait(200); // For the page's links to arrive.
+        QTRY_COMPARE_WITH_TIMEOUT(reader->contents()->topLevelItemCount(), 2, kWaitMs);
+
+        // 100 dpi, so a point is 100/72 pixels, and the page is 576 points high.
+        const auto click = [&](double pixelsUp) {
+            const QPoint point = view->viewportPointFor(0, QPointF(100, (800 - pixelsUp) * 72.0 / 100.0));
+            QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+        };
+        click(420);
+        QCOMPARE(opened, QStringList{QStringLiteral("https://example.org/djvu")});
+        click(320); // file: isn't followed.
+        QCOMPARE(opened.size(), 1);
+        click(520);
+        QCOMPARE(view->topPage(), 2);
+    }
+
     // ---- Files that go wrong ----
 
     void aFileThatCrashesOnOpeningIsReported()
@@ -373,7 +609,7 @@ private slots:
         QTest::newRow("empty") << "empty.pdf";
         QTest::newRow("encrypted") << "encrypted.pdf";
         QTest::newRow("not really an EPUB") << "not_really.epub";
-        QTest::newRow("KF8, which needs converting") << "kf8_header.azw3";
+        QTest::newRow("KF8 with nothing behind its header") << "kf8_header.azw3";
     }
 
     void badFilesNeverBringDownTheReader()

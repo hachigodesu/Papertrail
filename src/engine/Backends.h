@@ -11,6 +11,9 @@ namespace papertrail::engine {
 
 std::unique_ptr<Document> openMuPdfDocument(fz_context *ctx, const QString &path);
 
+// Writes an EPUB made from a KF8 Kindle file. Throws KindleProtected or EngineError.
+void convertKf8ToEpub(fz_context *ctx, const QString &path, const QString &epubPath);
+
 class DjvuBackend {
 public:
     DjvuBackend();

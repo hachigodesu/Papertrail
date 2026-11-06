@@ -54,9 +54,10 @@ void DocumentClient::setTimeouts(int openMs, int renderMs)
     m_renderTimeoutMs = renderMs;
 }
 
-void DocumentClient::open(const QString &path, const ReaderLayout &layout)
+void DocumentClient::open(const QString &path, const ReaderLayout &layout, const QString &convertedPath)
 {
     m_path = path;
+    m_convertedPath = convertedPath;
     m_layout = layout;
     if (!QFileInfo(m_workerPath).isExecutable()) {
         m_failed = true;
@@ -100,6 +101,7 @@ void DocumentClient::startProcess()
     open.body = layoutBody();
     open.body.insert(QStringLiteral("op"), QStringLiteral("open"));
     open.body.insert(QStringLiteral("path"), m_path);
+    open.body.insert(QStringLiteral("convertedPath"), m_convertedPath);
     m_inFlight.reset();
     m_urgent.prepend(open);
     pump();
@@ -216,7 +218,9 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
     case Kind::Open:
         if (!ok) {
             m_failed = true;
-            emit failed(reply.value(QStringLiteral("needsPassword")).toBool() ? Failure::NeedsPassword : Failure::Unreadable,
+            emit failed(reply.value(QStringLiteral("needsPassword")).toBool() ? Failure::NeedsPassword
+                            : reply.value(QStringLiteral("protected")).toBool()   ? Failure::Protected
+                                                                                  : Failure::Unreadable,
                         error);
             return;
         }

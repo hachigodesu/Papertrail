@@ -371,6 +371,15 @@ SELECT 'join_formats', '{}', unixepoch() * 1000, unixepoch() * 1000
 WHERE (SELECT count(*) FROM publication) > 1;
 )sql";
 
+// KF8 Kindle books can now be read, so ones already in the library can have their covers and page
+// counts. Publications are left as they are: only the file is looked at again.
+const char *const kMigration6 = R"sql(
+INSERT OR IGNORE INTO job (kind, payload, created_at, updated_at)
+SELECT 'inspect', json_object('file', id), unixepoch() * 1000, unixepoch() * 1000
+FROM file
+WHERE format IN ('azw3', 'mobi') AND sha256 IS NOT NULL AND page_count IS NULL AND status = 'ok';
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -381,6 +390,7 @@ const std::vector<Migration> &libraryMigrations()
         {3, kMigration3},
         {4, kMigration4},
         {5, kMigration5},
+        {6, kMigration6},
     };
     return migrations;
 }

@@ -75,6 +75,9 @@ bool isPathInside(const QString &path, const QString &folder);
 // Where the cover for a file with these contents is cached, whether or not it exists yet.
 QString coverPathFor(const QString &cacheDirectory, const QString &sha256);
 
+// Where a Kindle book that had to be converted keeps its readable copy.
+QString convertedPathFor(const QString &cacheDirectory, const QString &sha256);
+
 // Finds files and brings them into the library. All the work goes through a job queue stored in
 // the database, so a large import carries on after the app is closed.
 class ImportService {

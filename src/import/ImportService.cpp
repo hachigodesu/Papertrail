@@ -116,6 +116,11 @@ QString coverPathFor(const QString &cacheDirectory, const QString &sha256)
     return QDir(cacheDirectory).filePath(QStringLiteral("covers/%1/%2.jpg").arg(sha256.left(2), sha256));
 }
 
+QString convertedPathFor(const QString &cacheDirectory, const QString &sha256)
+{
+    return QDir(cacheDirectory).filePath(QStringLiteral("converted/%1/%2.epub").arg(sha256.left(2), sha256));
+}
+
 struct ImportService::Job {
     qint64 id = 0;
     QString kind;
@@ -477,7 +482,8 @@ void ImportService::processInspect(const Job &job, ImportReport &report)
     }
 
     const QString path = m_files.absolutePath(file->id);
-    const WorkerClient::Inspection inspection = m_worker.inspect(path, coverPath(file->sha256), m_options.inspectTimeoutMs);
+    const WorkerClient::Inspection inspection = m_worker.inspect(
+        path, coverPath(file->sha256), convertedPathFor(m_options.cacheDirectory, file->sha256), m_options.inspectTimeoutMs);
 
     if (inspection.failure == WorkerFailure::Cancelled) {
         requeueJob(job);
@@ -502,7 +508,9 @@ void ImportService::processInspect(const Job &job, ImportReport &report)
     } else {
         const InspectResult &result = inspection.result;
         m_files.setDocumentFacts(file->id, result.pageCount, result.hasTextLayer);
-        if (result.encrypted) {
+        if (!result.problem.isEmpty()) {
+            markUnreadable(*file, result.problem, report);
+        } else if (result.encrypted) {
             markUnreadable(*file, QStringLiteral("needs a password"), report);
         } else if (result.blank) {
             markUnreadable(*file, QStringLiteral("opened, but has no visible content"), report);
@@ -532,7 +540,8 @@ void ImportService::processReclassify(const Job &job, ImportReport &report)
     bool gaveUp = false;
     const QString path = m_files.absolutePath(file->id);
     if (QFile::exists(path)) {
-        const WorkerClient::Inspection inspection = m_worker.inspect(path, QString(), m_options.inspectTimeoutMs);
+        const WorkerClient::Inspection inspection = m_worker.inspect(
+            path, QString(), convertedPathFor(m_options.cacheDirectory, file->sha256), m_options.inspectTimeoutMs);
         if (inspection.failure == WorkerFailure::Cancelled) {
             requeueJob(job);
             return;

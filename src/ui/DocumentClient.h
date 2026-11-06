@@ -54,6 +54,7 @@ public:
         Crashed,     // Opening this file crashes the parser.
         TimedOut,    // Opening this file took too long.
         NeedsPassword,
+        Protected,   // A Kindle book locked with DRM.
         Unreadable,  // Not a document that can be read.
     };
     Q_ENUM(Failure)
@@ -61,7 +62,8 @@ public:
     explicit DocumentClient(const QString &workerPath, QObject *parent = nullptr);
     ~DocumentClient() override;
 
-    void open(const QString &path, const ReaderLayout &layout);
+    // `convertedPath` is where a Kindle book that has to be converted keeps its readable copy.
+    void open(const QString &path, const ReaderLayout &layout, const QString &convertedPath = QString());
 
     // Lays a reflowable document out again, keeping `page`'s content in view. See layoutChanged.
     void setLayout(const ReaderLayout &layout, int page);
@@ -135,6 +137,7 @@ private:
 
     QString m_workerPath;
     QString m_path;
+    QString m_convertedPath;
     ReaderLayout m_layout;
     QProcess *m_process = nullptr;
     QByteArray m_buffer;

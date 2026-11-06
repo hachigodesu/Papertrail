@@ -11,6 +11,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import zipfile
 import zlib
 from pathlib import Path
@@ -204,6 +205,47 @@ def reader_epub(path, navigation):
             add("OEBPS/toc.ncx",
                 '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
                 f'<head/><docTitle><text>A Made-up Book</text></docTitle><navMap>{points}</navMap></ncx>')
+
+
+def reader_djvu(path, work):
+    """Three pages, with hidden text, a table of contents and links. Needs DjVuLibre's tools."""
+    if not shutil.which("c44"):
+        print("c44 not found: skipping the reader's DjVu sample")
+        return
+    pages = []
+    for number in range(3):
+        ppm = work / f"page{number}.ppm"
+        # A plain page with a dark bar, so that it doesn't look blank.
+        rows = bytearray(b"\xff" * (600 * 800 * 3))
+        for y in range(100 + number * 40, 130 + number * 40):
+            rows[y * 600 * 3 + 300:y * 600 * 3 + 1500] = b"\x20" * 1200
+        ppm.write_bytes(b"P6\n600 800\n255\n" + bytes(rows))
+        page = work / f"page{number}.djvu"
+        subprocess.run(["c44", "-dpi", "100", str(ppm), str(page)], check=True)
+        pages.append(page)
+    subprocess.run(["djvm", "-c", str(path)] + [str(p) for p in pages], check=True)
+
+    texts = [
+        '(page 0 0 600 800 (line 50 700 400 730 (word 50 700 150 730 "Plain") (word 160 700 300 730 "findme") '
+        '(word 310 700 400 730 "words")) (line 50 660 400 690 (word 50 660 200 690 "second") (word 210 660 400 690 "line")))',
+        '(page 0 0 600 800 (line 50 700 400 730 (word 50 700 200 730 "exact") (word 210 700 400 730 "phrase")))',
+        '(page 0 0 600 800 (line 50 700 400 730 (word 50 700 150 730 "more") (word 160 700 300 730 "findme")) '
+        '(line 50 660 400 690 (word 50 660 300 690 "FINDME")))',
+    ]
+    outline = '(bookmarks ("First Part" "#1" ("A Section" "#2")) ("Second Part" "#3"))'
+    # Links are in pixels up from the bottom left: within the page, out to the web, and somewhere unsafe.
+    annotations = ('(maparea "#3" "" (rect 50 500 300 40)) (maparea "https://example.org/djvu" "" (rect 50 400 300 40)) '
+                   '(maparea "file:///etc/passwd" "" (rect 50 300 300 40))')
+    script = [f'set-outline {work / "outline.txt"}']
+    (work / "outline.txt").write_text(outline)
+    for number, text in enumerate(texts, 1):
+        name = work / f"text{number}.txt"
+        name.write_text(text)
+        script += [f"select {number}", f"set-txt {name}"]
+    (work / "ant.txt").write_text(annotations)
+    script += ["select 1", f'set-ant {work / "ant.txt"}', "save"]
+    (work / "script.txt").write_text("\n".join(s.replace("\\", "/") for s in script) + "\n")
+    subprocess.run(["djvused", str(path), "-f", str(work / "script.txt")], check=True)
 
 
 def rc4(key, data):
@@ -484,6 +526,8 @@ def main():
               (10, "doi:10.1000/example.2020.1"), (10, "This made-up paper has no arXiv number.")],
              info={"Title": "Measuring Example Flows"})
 
+    with tempfile.TemporaryDirectory() as work:
+        reader_djvu(out / "reader_doc.djvu", Path(work))
     reader_pdf(out / "reader_doc.pdf")
     reader_epub(out / "reader_nav.epub", "nav")
     reader_epub(out / "reader_ncx.epub", "ncx")

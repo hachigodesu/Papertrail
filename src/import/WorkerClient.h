@@ -15,12 +15,13 @@ namespace papertrail::import {
 // What the worker found in a file.
 struct InspectResult {
     QString format;
-    bool isKf8 = false;      // Needs converting to read. Not rendered yet.
+    bool isKf8 = false;      // Was read through a converted copy.
     bool encrypted = false;  // Needs a password.
     bool blank = false;      // Opened, but gave no visible content or text.
     bool coverWritten = false;
     std::optional<int> pageCount;
     std::optional<bool> hasTextLayer;
+    QString problem; // Why it couldn't be read, when there's something to say beyond failing.
     QString largestText;
     QString text; // Text from the first pages, each ending in a form feed.
     EmbeddedMetadata metadata;
@@ -54,7 +55,7 @@ public:
         QString error;
         InspectResult result;
     };
-    Inspection inspect(const QString &path, const QString &coverPath, int timeoutMs);
+    Inspection inspect(const QString &path, const QString &coverPath, const QString &convertedPath, int timeoutMs);
 
     // How many times the worker has been started, for tests and reports.
     int startCount() const { return m_startCount; }

@@ -34,7 +34,7 @@ class ReaderTab : public QWidget {
 
 public:
     ReaderTab(LibrarySession &session, qint64 publicationId, qint64 fileId, const QString &format, const QString &path,
-              QWidget *parent = nullptr);
+              const QString &convertedPath, QWidget *parent = nullptr);
     ~ReaderTab() override;
 
     qint64 publicationId() const { return m_publicationId; }

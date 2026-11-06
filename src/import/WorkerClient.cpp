@@ -92,12 +92,14 @@ WorkerClient::HashResult WorkerClient::hash(const QString &path, int timeoutMs)
     return {reply.failure, reply.error, reply.body.value(QStringLiteral("sha256")).toString()};
 }
 
-WorkerClient::Inspection WorkerClient::inspect(const QString &path, const QString &coverPath, int timeoutMs)
+WorkerClient::Inspection WorkerClient::inspect(const QString &path, const QString &coverPath, const QString &convertedPath,
+                                               int timeoutMs)
 {
     QJsonObject request;
     request.insert(QStringLiteral("op"), QStringLiteral("inspect"));
     request.insert(QStringLiteral("path"), path);
     request.insert(QStringLiteral("coverPath"), coverPath);
+    request.insert(QStringLiteral("convertedPath"), convertedPath);
     const Reply reply = call(request, timeoutMs);
 
     Inspection inspection;
@@ -111,6 +113,7 @@ WorkerClient::Inspection WorkerClient::inspect(const QString &path, const QStrin
     r.format = b.value(QStringLiteral("format")).toString();
     r.isKf8 = b.value(QStringLiteral("kf8")).toBool();
     r.encrypted = b.value(QStringLiteral("encrypted")).toBool();
+    r.problem = b.value(QStringLiteral("problem")).toString();
     r.blank = b.value(QStringLiteral("blank")).toBool();
     r.coverWritten = b.value(QStringLiteral("coverWritten")).toBool();
     if (b.contains(QStringLiteral("pages")))

@@ -38,10 +38,29 @@ public:
         : m_ctx(ctx), m_path(path.toUtf8())
     {
         const char *pathText = m_path.constData();
+
+        // MuPDF doesn't know these names for formats it reads perfectly well.
+        const QString suffix = path.section(u'.', -1).toLower();
+        const char *magic = nullptr;
+        if (suffix == QLatin1StringView("azw"))
+            magic = "application/x-mobipocket-ebook";
+        else if (suffix == QLatin1StringView("oxps"))
+            magic = "application/oxps";
+
         bool failed = false;
         QByteArray message;
+        fz_stream *stream = nullptr;
+        fz_var(stream);
         fz_try(m_ctx) {
-            m_doc = fz_open_document(m_ctx, pathText);
+            if (magic) {
+                stream = fz_open_file(m_ctx, pathText);
+                m_doc = fz_open_document_with_stream(m_ctx, magic, stream);
+            } else {
+                m_doc = fz_open_document(m_ctx, pathText);
+            }
+        }
+        fz_always(m_ctx) {
+            fz_drop_stream(m_ctx, stream);
         }
         fz_catch(m_ctx) {
             failed = true;

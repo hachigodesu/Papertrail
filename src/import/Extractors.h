@@ -41,6 +41,7 @@ EmbeddedMetadata parsePdfInfo(const QString &title, const QString &author, const
 // What a Kindle file's header says. KF8 files need converting before they can be read: MuPDF
 // opens them without complaint, but gives a blank page.
 struct KindleHeader {
+    bool isEncrypted = false; // Locked with DRM.
     bool isKindleFile = false;
     bool isKf8 = false;
     EmbeddedMetadata metadata;

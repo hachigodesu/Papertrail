@@ -104,6 +104,11 @@ std::unique_ptr<Document> Engine::open(const QString &path)
     return openMuPdfDocument(d->ctx, path);
 }
 
+void Engine::convertKf8ToEpub(const QString &path, const QString &epubPath)
+{
+    engine::convertKf8ToEpub(d->ctx, path, epubPath);
+}
+
 void Engine::saveJpeg(const RenderedPage &page, const QString &path, int quality)
 {
     QFileInfo target(path);

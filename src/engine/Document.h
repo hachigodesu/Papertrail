@@ -17,6 +17,12 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+// A Kindle book locked with DRM. Papertrail can't read these, and doesn't try to.
+class KindleProtected : public EngineError {
+public:
+    using EngineError::EngineError;
+};
+
 // A rendered page as tightly packed 8-bit RGB.
 struct RenderedPage {
     int width = 0;
@@ -114,6 +120,10 @@ public:
 
     // Throws EngineError if the file can't be opened as a document.
     std::unique_ptr<Document> open(const QString &path);
+
+    // Writes an EPUB made from a KF8 Kindle file, which MuPDF can't read itself. Throws
+    // KindleProtected if it's locked with DRM, or EngineError if it can't be converted.
+    void convertKf8ToEpub(const QString &path, const QString &epubPath);
 
     // Writes the file only if encoding succeeds, replacing any earlier version.
     void saveJpeg(const RenderedPage &page, const QString &path, int quality = 80);

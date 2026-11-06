@@ -245,6 +245,8 @@ KindleHeader parseKindleHeader(const QByteArray &head)
     const char *mobi = head.constData() + record0 + mobiOffset;
     if (std::memcmp(mobi, "MOBI", 4) != 0)
         return header;
+    // The PalmDOC header's encryption type.
+    header.isEncrypted = (quint8(head.at(record0 + 12)) << 8 | quint8(head.at(record0 + 13))) != 0;
 
     const qsizetype mobiLength = readBe32(mobi + 4);
     const quint32 version = readBe32(mobi + 20);

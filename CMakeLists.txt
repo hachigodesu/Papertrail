@@ -32,6 +32,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 option(PAPERTRAIL_BUILD_FORMAT_PROBE "Build the document format probe tool" OFF)
 
 include(SQLite)
+include(Mobi)
 
 add_subdirectory(src)
 add_subdirectory(tools/gen_library)

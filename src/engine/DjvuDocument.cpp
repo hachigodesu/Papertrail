@@ -3,7 +3,10 @@
 #include <libdjvu/ddjvuapi.h>
 #include <libdjvu/miniexp.h>
 
+#include <QStringList>
+
 #include <algorithm>
+#include <utility>
 
 namespace papertrail::engine {
 
@@ -30,6 +33,53 @@ void collectText(miniexp_t node, QString &out)
     }
 }
 
+// One word of a page's hidden text, with its position in points from the top left.
+struct Word {
+    QRectF rect;
+    QString text;
+    bool endsLine = false;
+};
+
+// A page's text is a tree of (kind x0 y0 x1 y1 child...) lists, in pixels up from the bottom left.
+void collectWords(miniexp_t node, double pointsPerPixel, double pageHeight, QList<Word> &words)
+{
+    if (!miniexp_consp(node) || !miniexp_symbolp(miniexp_car(node)))
+        return;
+    const char *kind = miniexp_to_name(miniexp_car(node));
+    miniexp_t rest = miniexp_cdr(node);
+    int box[4] = {};
+    for (int &value : box) {
+        if (!miniexp_consp(rest) || !miniexp_numberp(miniexp_car(rest)))
+            return;
+        value = miniexp_to_int(miniexp_car(rest));
+        rest = miniexp_cdr(rest);
+    }
+
+    if (miniexp_consp(rest) && miniexp_stringp(miniexp_car(rest))) {
+        Word word;
+        word.rect = QRectF(box[0] * pointsPerPixel, (pageHeight - box[3]) * pointsPerPixel,
+                           (box[2] - box[0]) * pointsPerPixel, (box[3] - box[1]) * pointsPerPixel);
+        word.text = QString::fromUtf8(miniexp_to_str(miniexp_car(rest)));
+        words << word;
+    } else {
+        for (; miniexp_consp(rest); rest = miniexp_cdr(rest))
+            collectWords(miniexp_car(rest), pointsPerPixel, pageHeight, words);
+    }
+
+    const QLatin1StringView level(kind);
+    if (!words.isEmpty() && (level == QLatin1StringView("line") || level == QLatin1StringView("para")
+                             || level == QLatin1StringView("column") || level == QLatin1StringView("region"))) {
+        words.last().endsLine = true;
+    }
+}
+
+double distanceTo(const QRectF &rect, const QPointF &point)
+{
+    const double dx = qMax(qMax(rect.left() - point.x(), point.x() - rect.right()), 0.0);
+    const double dy = qMax(qMax(rect.top() - point.y(), point.y() - rect.bottom()), 0.0);
+    return dx * dx + dy * dy;
+}
+
 class DjvuDocument : public Document {
 public:
     DjvuDocument(ddjvu_context_t *ctx, ddjvu_document_t *doc)
@@ -38,6 +88,128 @@ public:
     }
 
     ~DjvuDocument() override { ddjvu_document_release(m_doc); }
+
+    QList<OutlineItem> outline() override
+    {
+        miniexp_t tree;
+        while ((tree = ddjvu_document_get_outline(m_doc)) == miniexp_dummy)
+            waitForMessages(m_ctx);
+        QList<OutlineItem> items;
+        if (miniexp_consp(tree) && miniexp_symbolp(miniexp_car(tree)))
+            collectOutline(miniexp_cdr(tree), 0, items);
+        ddjvu_miniexp_release(m_doc, tree);
+        return items;
+    }
+
+    QList<PageLink> links(int page) override
+    {
+        miniexp_t annotations;
+        while ((annotations = ddjvu_document_get_pageanno(m_doc, page)) == miniexp_dummy)
+            waitForMessages(m_ctx);
+
+        QList<PageLink> links;
+        ddjvu_pageinfo_t info{};
+        if (annotations != miniexp_nil && pageInfo(page, info)) {
+            const double pointsPerPixel = 72.0 / info.dpi;
+            for (miniexp_t rest = annotations; miniexp_consp(rest); rest = miniexp_cdr(rest)) {
+                // (maparea url comment (rect x y w h) ...)
+                const miniexp_t area = miniexp_car(rest);
+                if (!miniexp_consp(area) || miniexp_car(area) != miniexp_symbol("maparea"))
+                    continue;
+                const miniexp_t target = miniexp_nth(1, area);
+                const char *url = miniexp_stringp(target) ? miniexp_to_str(target)
+                    : miniexp_consp(target) && miniexp_stringp(miniexp_nth(1, target)) ? miniexp_to_str(miniexp_nth(1, target))
+                                                                                       : nullptr;
+                const miniexp_t shape = miniexp_nth(3, area);
+                if (!url || !miniexp_consp(shape) || miniexp_length(shape) < 5
+                    || !(miniexp_car(shape) == miniexp_symbol("rect") || miniexp_car(shape) == miniexp_symbol("oval")
+                         || miniexp_car(shape) == miniexp_symbol("text"))) {
+                    continue;
+                }
+                const int x = miniexp_to_int(miniexp_nth(1, shape));
+                const int y = miniexp_to_int(miniexp_nth(2, shape));
+                const int w = miniexp_to_int(miniexp_nth(3, shape));
+                const int h = miniexp_to_int(miniexp_nth(4, shape));
+
+                PageLink link;
+                link.rect = QRectF(x * pointsPerPixel, (info.height - y - h) * pointsPerPixel, w * pointsPerPixel, h * pointsPerPixel);
+                const QString address = QString::fromUtf8(url);
+                if (address.startsWith(u'#')) {
+                    link.page = pageForDestination(address, page);
+                    if (link.page < 0)
+                        continue;
+                } else {
+                    link.uri = address;
+                }
+                links << link;
+            }
+        }
+        ddjvu_miniexp_release(m_doc, annotations);
+        return links;
+    }
+
+    QList<QRectF> search(int page, const QString &query) override
+    {
+        const QStringList wanted = query.simplified().split(u' ', Qt::SkipEmptyParts);
+        if (wanted.isEmpty())
+            return {};
+        const QList<Word> &words = wordsOn(page);
+        constexpr int kMaxHits = 512;
+
+        // Words are matched in sequence, so that a phrase can run across a line break.
+        QList<QRectF> rects;
+        for (qsizetype start = 0; start + wanted.size() <= words.size() && rects.size() < kMaxHits; ++start) {
+            bool matched = true;
+            for (qsizetype i = 0; i < wanted.size() && matched; ++i) {
+                const QString &word = words.at(start + i).text;
+                const bool last = i == wanted.size() - 1;
+                const bool first = i == 0;
+                matched = (first && last) ? word.contains(wanted.at(i), Qt::CaseInsensitive)
+                    : first               ? word.endsWith(wanted.at(i), Qt::CaseInsensitive)
+                    : last                ? word.startsWith(wanted.at(i), Qt::CaseInsensitive)
+                                          : word.compare(wanted.at(i), Qt::CaseInsensitive) == 0;
+            }
+            if (matched) {
+                for (qsizetype i = 0; i < wanted.size(); ++i)
+                    rects << words.at(start + i).rect;
+            }
+        }
+        return rects;
+    }
+
+    TextSelection selectText(int page, const QPointF &a, const QPointF &b) override
+    {
+        const QList<Word> &words = wordsOn(page);
+        if (words.isEmpty())
+            return {};
+
+        const auto nearest = [&](const QPointF &point) {
+            qsizetype best = 0;
+            double bestDistance = distanceTo(words.first().rect, point);
+            for (qsizetype i = 1; i < words.size() && bestDistance > 0; ++i) {
+                const double distance = distanceTo(words.at(i).rect, point);
+                if (distance < bestDistance) {
+                    best = i;
+                    bestDistance = distance;
+                }
+            }
+            return best;
+        };
+        qsizetype first = nearest(a);
+        qsizetype last = nearest(b);
+        if (first > last)
+            std::swap(first, last);
+
+        TextSelection selection;
+        for (qsizetype i = first; i <= last; ++i) {
+            const Word &word = words.at(i);
+            selection.rects << word.rect;
+            selection.text += word.text;
+            if (i < last)
+                selection.text += word.endsLine ? u'\n' : u' ';
+        }
+        return selection;
+    }
 
     bool needsPassword() override { return false; }
     bool isReflowable() override { return false; }
@@ -92,10 +264,7 @@ public:
     QSizeF pageSize(int page) override
     {
         ddjvu_pageinfo_t info{};
-        ddjvu_status_t status;
-        while ((status = ddjvu_document_get_pageinfo(m_doc, page, &info)) < DDJVU_JOB_OK)
-            waitForMessages(m_ctx);
-        if (status >= DDJVU_JOB_FAILED || info.dpi <= 0)
+        if (!pageInfo(page, info))
             throw EngineError("could not read page size");
         return {info.width * 72.0 / info.dpi, info.height * 72.0 / info.dpi};
     }
@@ -106,8 +275,80 @@ public:
     QByteArray epubPackageDocument() override { return {}; }
 
 private:
+    bool pageInfo(int page, ddjvu_pageinfo_t &info)
+    {
+        ddjvu_status_t status;
+        while ((status = ddjvu_document_get_pageinfo(m_doc, page, &info)) < DDJVU_JOB_OK)
+            waitForMessages(m_ctx);
+        return status < DDJVU_JOB_FAILED && info.dpi > 0;
+    }
+
+    // The words of the page last asked about, which a drag to select asks about over and over.
+    const QList<Word> &wordsOn(int page)
+    {
+        if (page == m_wordsPage)
+            return m_words;
+        m_words.clear();
+        m_wordsPage = page;
+        ddjvu_pageinfo_t info{};
+        if (!pageInfo(page, info))
+            return m_words;
+        miniexp_t text;
+        while ((text = ddjvu_document_get_pagetext(m_doc, page, "word")) == miniexp_dummy)
+            waitForMessages(m_ctx);
+        if (text != miniexp_nil)
+            collectWords(text, 72.0 / info.dpi, info.height, m_words);
+        ddjvu_miniexp_release(m_doc, text);
+        return m_words;
+    }
+
+    // A destination such as "#12", "#+1" or "#chapter1.djvu". Returns -1 if it's nowhere in this file.
+    int pageForDestination(const QString &destination, int fromPage)
+    {
+        const QString name = destination.mid(1);
+        bool isNumber = false;
+        const int number = name.toInt(&isNumber);
+        const int pages = pageCount();
+        int page = -1;
+        if (isNumber)
+            page = name.startsWith(u'+') || name.startsWith(u'-') ? fromPage + number : number - 1;
+        if (page >= 0 && page < pages)
+            return page;
+
+        const int files = ddjvu_document_get_filenum(m_doc);
+        for (int i = 0; i < files; ++i) {
+            ddjvu_fileinfo_t info{};
+            if (ddjvu_document_get_fileinfo(m_doc, i, &info) < DDJVU_JOB_FAILED && info.pageno >= 0) {
+                const QByteArray utf8 = name.toUtf8();
+                if ((info.id && utf8 == info.id) || (info.name && utf8 == info.name) || (info.title && utf8 == info.title))
+                    return info.pageno;
+            }
+        }
+        return -1;
+    }
+
+    // (bookmarks ("Title" "#1" ("Child" "#2") ...) ...)
+    void collectOutline(miniexp_t items, int depth, QList<OutlineItem> &out)
+    {
+        for (; miniexp_consp(items); items = miniexp_cdr(items)) {
+            const miniexp_t item = miniexp_car(items);
+            if (!miniexp_consp(item) || !miniexp_stringp(miniexp_car(item)))
+                continue;
+            OutlineItem entry;
+            entry.title = QString::fromUtf8(miniexp_to_str(miniexp_car(item))).simplified();
+            entry.depth = depth;
+            const miniexp_t destination = miniexp_nth(1, item);
+            if (miniexp_stringp(destination))
+                entry.page = pageForDestination(QString::fromUtf8(miniexp_to_str(destination)), 0);
+            out << entry;
+            collectOutline(miniexp_cddr(item), depth + 1, out);
+        }
+    }
+
     ddjvu_context_t *m_ctx;
     ddjvu_document_t *m_doc;
+    QList<Word> m_words;
+    int m_wordsPage = -1;
 };
 
 } // namespace

@@ -1000,7 +1000,10 @@ ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId)
             statusBar()->showMessage(tr("This publication's file can't be found right now."), 8000);
             return;
         }
-        reader = new ReaderTab(m_session, id, fileId, file->format, path, m_documentTabs);
+        const QString converted = file->sha256.isEmpty()
+            ? QString()
+            : import::convertedPathFor(m_session.paths().cacheDirectory, file->sha256);
+        reader = new ReaderTab(m_session, id, fileId, file->format, path, converted, m_documentTabs);
         connect(reader, &ReaderTab::openElsewhereRequested, this,
                 [](const QString &file) { QDesktopServices::openUrl(QUrl::fromLocalFile(file)); });
         connect(reader, &ReaderTab::statusMessage, this,

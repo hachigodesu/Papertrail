@@ -93,8 +93,10 @@ bool isKindleSuffix(const QString &suffix)
     return suffix == QStringLiteral("mobi") || suffix == QStringLiteral("azw") || suffix == QStringLiteral("azw3");
 }
 
-QJsonObject inspectFile(engine::Engine &engine, const QString &path, const QString &coverPath)
+QJsonObject inspectFile(engine::Engine &engine, const QString &originalPath, const QString &coverPath,
+                        const QString &convertedPath)
 {
+    QString path = originalPath;
     QJsonObject reply;
     reply.insert(QStringLiteral("ok"), true);
     reply.insert(QStringLiteral("format"), formatFromSuffix(path));
@@ -111,10 +113,20 @@ QJsonObject inspectFile(engine::Engine &engine, const QString &path, const QStri
             return failure(QStringLiteral("not a valid Kindle file"));
         metadata = kindle.metadata;
         metadata.decodeEntities();
-        if (kindle.isKf8) {
-            reply.insert(QStringLiteral("kf8"), true);
+        if (kindle.isKf8 || kindle.isEncrypted) {
+            // Whatever goes wrong from here, what the header said still gets listed.
+            reply.insert(QStringLiteral("kf8"), kindle.isKf8);
             reply.insert(QStringLiteral("meta"), metadataToJson(metadata));
-            return reply;
+            if (kindle.isEncrypted) {
+                reply.insert(QStringLiteral("problem"), QStringLiteral("protected by DRM"));
+                return reply;
+            }
+            try {
+                path = worker::readablePath(engine, path, convertedPath);
+            } catch (const engine::EngineError &error) {
+                reply.insert(QStringLiteral("problem"), QString::fromUtf8(error.what()));
+                return reply;
+            }
         }
     }
 
@@ -255,7 +267,8 @@ int main(int argc, char *argv[])
         if (op == QStringLiteral("hash")) {
             reply = hashFile(path);
         } else if (op == QStringLiteral("inspect")) {
-            reply = inspectFile(engine, path, object.value(QStringLiteral("coverPath")).toString());
+            reply = inspectFile(engine, path, object.value(QStringLiteral("coverPath")).toString(),
+                                object.value(QStringLiteral("convertedPath")).toString());
         } else {
             reply = failure(QStringLiteral("unknown request"));
         }

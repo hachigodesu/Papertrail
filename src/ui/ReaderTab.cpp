@@ -162,7 +162,7 @@ private:
 };
 
 ReaderTab::ReaderTab(LibrarySession &session, qint64 publicationId, qint64 fileId, const QString &format,
-                     const QString &path, QWidget *parent)
+                     const QString &path, const QString &convertedPath, QWidget *parent)
     : QWidget(parent), m_session(session), m_publicationId(publicationId), m_fileId(fileId), m_format(format), m_path(path)
 {
     m_openLink = [](const QUrl &url) { QDesktopServices::openUrl(url); };
@@ -224,7 +224,7 @@ ReaderTab::ReaderTab(LibrarySession &session, qint64 publicationId, qint64 fileI
 
     connectClient();
     m_toolbar->setEnabled(false);
-    m_client->open(path, m_layout);
+    m_client->open(path, m_layout, convertedPath);
 }
 
 ReaderTab::~ReaderTab()
@@ -540,6 +540,9 @@ void ReaderTab::showProblem(DocumentClient::Failure failure, const QString &mess
     switch (failure) {
     case DocumentClient::Failure::NeedsPassword:
         text = tr("This file is protected by a password, and Papertrail can't open those yet.");
+        break;
+    case DocumentClient::Failure::Protected:
+        text = tr("This book is locked with DRM, so it can only be read in the app it was bought for.");
         break;
     case DocumentClient::Failure::Crashed:
         text = m_ready ? tr("This file keeps making the reader stop, so it's been closed. Your library isn't affected.")

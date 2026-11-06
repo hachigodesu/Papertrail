@@ -95,7 +95,7 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 - `gen-library` builds synthetic libraries.
 - `ui-preview --db X --cache Y --out DIR` saves pictures of the window, for checking how it looks. Use `QT_QPA_PLATFORM=offscreen`, which gives a poor fallback font but no window on the user's screen.
 - `-DPAPERTRAIL_BUILD_FORMAT_PROBE=ON` adds `format-probe`, which tests document formats against the engines.
-- `tests/make_import_samples.py OUTPUT_DIR` generates the documents in `tests/samples/`. They're committed as binary because tests depend on their exact bytes.
+- `tests/make_import_samples.py OUTPUT_DIR` generates the documents in `tests/samples/`. They're committed as binary because tests depend on their exact bytes, so don't regenerate them all: write only a new one. The exception is `kf8_frankenstein.azw3`, a real Project Gutenberg book, because nothing here can make a KF8 file. `tests/KindleSamples.h` builds joint and DRM-marked Kindle files from it at test time.
 - `packaging/linux/build-appimage.sh` builds the AppImage, and `smoke-test-appimage.sh` tests it.
 
 ## Architecture
@@ -156,6 +156,8 @@ Tests that show a window should fail on a `QMessageBox`, which would otherwise w
 ### One publication, several formats
 
 `publication_file` links a publication to any number of files, and `is_primary` says which supplies the cover. `ImportService::findOtherFormat` decides whether a new file is another format of something already there, and never joins two files of one format. It's deliberately cautious, and anything less than certain gets marked for review: an earlier attempt at automatic sorting into Preprints put published papers there unflagged, and the user had it removed. `mergePublications` and `separateFormat` in `core/repo/PublicationMerge` do the joining and undoing.
+
+KF8 Kindle files (`.azw3`, and joint `.mobi` files) look like valid documents to MuPDF, which then shows a blank page. So `readablePath` in `ReaderHost.cpp` sends them through `convertKf8ToEpub`, which uses libmobi (`cmake/Mobi.cmake`) in the worker and keeps the EPUB in the cache folder, named by the file's content hash. Everything after that treats it as an EPUB.
 
 A reading place belongs to a format, not to a publication. Use `ReadingStateRepository::placeFor` and `setPlaceFor`.
 
