@@ -1,0 +1,17 @@
+# Build output
+/build/
+/out/
+
+# Local CMake overrides
+CMakeUserPresets.json
+CMakeLists.txt.user
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Packaging output
+*.AppImage
+*.flatpak
+/packaging/output/

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Placeholder icon: a stack of pages. -->
+  <rect width="256" height="256" rx="44" fill="#1f4e5f"/>
+  <rect x="84" y="44" width="116" height="152" rx="8" fill="#9fc3cc"/>
+  <rect x="68" y="60" width="116" height="152" rx="8" fill="#f7f4ec"/>
+  <rect x="88" y="92" width="76" height="9" rx="4" fill="#1f4e5f"/>
+  <rect x="88" y="116" width="76" height="9" rx="4" fill="#7a97a0"/>
+  <rect x="88" y="140" width="76" height="9" rx="4" fill="#7a97a0"/>
+  <rect x="88" y="164" width="48" height="9" rx="4" fill="#7a97a0"/>
+</svg>

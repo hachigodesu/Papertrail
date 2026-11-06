@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Papertrail
+GenericName=Publication Library
+Comment=Organise and read your journal articles, textbooks, theses and standards
+Exec=papertrail
+Icon=papertrail
+Terminal=false
+Categories=Office;Education;Science;Viewer;
+Keywords=library;pdf;epub;journal;paper;thesis;textbook;citation;

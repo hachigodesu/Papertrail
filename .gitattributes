@@ -1,0 +1,17 @@
+# Normalise text files so Windows and Linux checkouts match
+* text=auto
+
+*.cpp text eol=lf
+*.h text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.cmake text eol=lf
+*.desktop text eol=lf
+*.svg text eol=lf
+
+# Test documents must never be altered: hashes depend on their exact bytes
+tests/samples/** binary
