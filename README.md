@@ -1,6 +1,9 @@
 # Papertrail
 
-[![CI](https://github.com/hachigodesu/Papertrail/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hachigodesu/Papertrail/actions/workflows/ci.yml)
+[![Windows](https://github.com/hachigodesu/Papertrail/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/hachigodesu/Papertrail/actions/workflows/windows.yml)
+[![Arch](https://github.com/hachigodesu/Papertrail/actions/workflows/arch.yml/badge.svg?branch=main)](https://github.com/hachigodesu/Papertrail/actions/workflows/arch.yml)
+[![Ubuntu](https://github.com/hachigodesu/Papertrail/actions/workflows/ubuntu.yml/badge.svg?branch=main)](https://github.com/hachigodesu/Papertrail/actions/workflows/ubuntu.yml)
+[![AppImage](https://github.com/hachigodesu/Papertrail/actions/workflows/appimage.yml/badge.svg?branch=main)](https://github.com/hachigodesu/Papertrail/actions/workflows/appimage.yml)
 
 A desktop library manager and reader for university students and researchers, for Windows and Linux. Papertrail indexes your journal articles, textbooks, theses, reports and standards where they already are, and never modifies your files.
 

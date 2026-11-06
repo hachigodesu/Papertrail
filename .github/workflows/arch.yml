@@ -1,0 +1,16 @@
+name: Arch
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - run: pacman -Syu --noconfirm base-devel cmake git ninja qt6-base
+      - uses: actions/checkout@v4
+      - run: cmake --preset linux-debug
+      - run: cmake --build --preset linux-debug
+      - run: ctest --preset linux-debug
