@@ -25,12 +25,35 @@ All three platforms gave identical results. The test files are tiny ones from `t
 | CBZ | Yes | Yes | Has no text | MuPDF |
 | XPS | Yes | Yes | Sample has no text | MuPDF |
 | DjVu | Yes | Yes | Not probed (sample has no text layer) | DjVuLibre |
-| AZW3 (KF8) | **Untested** | **Untested** | **Untested** | Needs a real file |
+| AZW3 (KF8), in MuPDF directly | Yes | **Blank page** | **None** | **MuPDF can't read it** |
+| AZW3 (KF8), converted to EPUB | Yes | Yes | Yes | libmobi v0.12, then MuPDF |
 
 ### Format findings
 
 - **MuPDF handles MOBI and FB2**, even though its website doesn't list them. libmobi isn't needed for those.
-- **AZW3 is still open.** The library contains `azw` but no `azw3` or `kf8` strings, and a valid KF8 file can't be written by hand. libmobi remains the fallback.
+- **MuPDF can't read AZW3, and it fails silently.**
+  - Tested with a real book: Project Gutenberg's *Frankenstein* in KF8 format (pure KF8, MOBI version 8), which isn't committed to this repo.
+  - It opens with no error, but gives one blank page and no text, plus `cannot find entry kindle:flow:…` warnings.
+  - The engine layer therefore has to spot KF8 itself and never pass it to MuPDF, and "it opened" can't count as success on import.
+- **libmobi fixes this, so AZW3 stays in V1.**
+  - libmobi v0.12's `mobitool -e` converted the book to EPUB on all three platforms, with the same 421,394-byte size each time.
+  - MuPDF then read 99 pages with the text intact.
+  - That's one book, made by calibre, so other AZW3 files may behave differently. Joint MOBI and KF8 files are still untested.
+- **format-probe reports "ok" for that blank result**, so its output needs reading alongside `ink` and `text`.
+
+### How AZW3 will work (M5)
+
+1. Detect KF8 from the file's contents: `BOOKMOBI` with MOBI version 8, or EXTH record 121 for joint files.
+2. Convert it to EPUB in the worker process, because this parses untrusted files, and keep the EPUB in the cache folder, named by the file's content hash. The original file is never touched.
+3. Open the cached EPUB with MuPDF. Annotations are stored against the original file's hash.
+
+libmobi details:
+
+- **Licence:** LGPL-3.0, compatible with Papertrail's AGPL.
+- **Version:** pinned to v0.12, built from source on every platform because MSYS2 doesn't package it. Its last repository push was in October 2024, so we may need to maintain fixes ourselves.
+- **Build options:** `USE_LIBXML2=OFF`, `USE_ENCRYPTION=OFF` (Papertrail doesn't handle DRM) and `BUILD_SHARED_LIBS=OFF`. With encryption off, the `mobidrm` tool doesn't link, so build only what's needed.
+- **Dependency:** zlib.
+- **Not yet done:** this used the `mobitool` command. M5 still has to call the library directly.
 - **EPUB 3:** MuPDF prints `unknown epub version: 3.0` but still renders the file. M4 must check EPUB 3 tables of contents and real books.
 - **XPS text is untested**, because text in XPS needs an embedded font. Test with a real file in M5.
 
@@ -56,5 +79,4 @@ Built with `packaging/linux/build-appimage.sh` on Ubuntu 24.04. It's 30 MB and b
 
 - A release-baseline AppImage build on Ubuntu 22.04.
 - AppImage checks on Debian, Fedora and openSUSE, which belong in CI.
-- CI itself has never run.
-- AZW3.
+- The format probe in CI: CI builds and tests the app on Windows, Arch and Ubuntu, and all three pass, but doesn't build the probe yet.

@@ -32,7 +32,8 @@ export PATH="$tools:$qt/bin:$PATH"
 export QMAKE="$qt/bin/qmake"
 export LD_LIBRARY_PATH="$qt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export APPIMAGE_EXTRACT_AND_RUN=1          # The tools themselves shouldn't need FUSE.
-export EXTRA_PLATFORM_PLUGINS="libqwayland.so"
+# Offscreen is bundled so that smoke tests can run without a display.
+export EXTRA_PLATFORM_PLUGINS="libqwayland.so;libqoffscreen.so"
 export EXTRA_QT_MODULES="waylandclient"
 export LDAI_OUTPUT="$out/Papertrail-x86_64.AppImage"
 export OUTPUT="$LDAI_OUTPUT"

@@ -43,7 +43,8 @@ The project folder is empty, so this is a new build.
 | UI | Qt 6.12 Widgets | Native desktop feel, and its model/view classes handle very large lists |
 | PDF, EPUB, XPS, CBZ | MuPDF (AGPL) | One fast engine with rendering, text extraction and search built in |
 | DjVu | DjVuLibre | The standard DjVu library |
-| MOBI/AZW3 | MuPDF if it passes the M0 test, otherwise libmobi (LGPL-3+) | See "Findings" below |
+| MOBI, FB2 | MuPDF | Confirmed in M0, though MuPDF's site doesn't list them |
+| AZW3 (KF8) | libmobi v0.12 (LGPL-3+) converts to EPUB, then MuPDF | MuPDF alone gives a blank page. See `docs/M0-format-results.md` |
 | Database and search | SQLite with FTS5, used directly rather than through Qt SQL | Controls the FTS5 build and needs no server |
 | Networking | Qt Network | Metadata lookups |
 | Tests | Qt Test, with `-platform offscreen` for UI smoke tests | Already part of Qt |
@@ -81,7 +82,7 @@ Code rules that keep it distro-neutral:
 ### Findings from checking these dependencies
 
 - **Qt 6.12 is the last version to support Windows 10**, according to Qt's platform page. MSYS2 is a rolling distribution, so we hold the Qt packages at 6.12 (`IgnorePkg`) and in CI. Moving past it would drop Windows 10 users, including this PC.
-- **MOBI, AZW3 and FB2 support is unconfirmed.** MuPDF's site lists PDF, ePUB, CBZ and XPS but not these three. M0 tests real sample files before anything is built on them. libmobi is the fallback for MOBI/AZW3 and does handle KF8/AZW3, but it isn't in MSYS2, so we'd fetch and build it from a pinned source version.
+- **MOBI, AZW3 and FB2 were tested in M0.** MuPDF handles MOBI and FB2, but silently gives a blank page for AZW3. libmobi converts AZW3 to EPUB successfully. It isn't in MSYS2, so it's built from a pinned source version on every platform.
 - **MSYS2 and Arch currently match closely:** both have MuPDF 1.28.5 and Qt 6.12.0, and DjVuLibre is 3.5.30 on MSYS2 and 3.5.30.1 on Arch. I couldn't confirm that the `libmupdf` packages include development headers. If they don't, we build MuPDF from source at a pinned version.
 - **Arch on WSL2 is unconfirmed.** The Arch wiki page wouldn't load for me, so M0 confirms the install route. It also checks whether GUI apps from Arch and Ubuntu display on this Windows 10 PC. If they don't, we use VMs.
 
@@ -290,7 +291,8 @@ These are goals to test against, not measurements yet.
 
 | Risk | Plan |
 |---|---|
-| MOBI, AZW3 or FB2 not supported by MuPDF | Tested in M0. libmobi is the fallback for MOBI and AZW3. For FB2, M0 decides whether we need another approach or should defer it, and I'll bring you the result |
+| AZW3 files open but show nothing | MuPDF never receives KF8 files: Papertrail detects them from their contents and converts them first. Import also treats a blank result as a failure, not a success |
+| libmobi is quiet (last push October 2024) | Pinned version, only ever run in the worker process, with all use confined to the engine adapter. We may need to maintain fixes ourselves |
 | Annotation anchors break on EPUB when the layout changes | Store chapter and text offset rather than screen position. Addressed directly in M9 |
 | Scanned files can't be identified automatically | They're flagged and filterable, with manual entry. OCR follows V1 |
 | Wrong metadata matches | Provenance keeps earlier values, and any change can be undone |

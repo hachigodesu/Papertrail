@@ -56,7 +56,7 @@ Downloads can stall on these mirrors, so use `--disable-download-timeout` and `P
 - **Ubuntu:**
   - **Qt 6.12:** install with aqtinstall into `/opt/Qt`, using `aqt install-qt linux desktop 6.12.0 linux_gcc_64 --outputdir /opt/Qt`.
   - **MuPDF 1.28.5:** build from source with `make build=release shared=yes prefix=/usr/local HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_LEPTONICA=no HAVE_TESSERACT=no libs install-libs`.
-  - **Everything else:** from apt, including `libdjvulibre-dev`, `djvulibre-bin` and Qt's runtime libraries (`libegl1`, `libxkbcommon0`, `libxcb-cursor0` and the other `libxcb-*` packages).
+  - **Everything else:** from apt, including `libdjvulibre-dev`, `djvulibre-bin`, `zlib1g-dev` (for libmobi) and Qt's runtime libraries (`libegl1`, `libxkbcommon0`, `libxcb-cursor0` and the other `libxcb-*` packages).
 
 ## Building
 
