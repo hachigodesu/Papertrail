@@ -1,5 +1,7 @@
 # Papertrail
 
+[![CI](https://github.com/hachigodesu/Papertrail/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hachigodesu/Papertrail/actions/workflows/ci.yml)
+
 A desktop library manager and reader for university students and researchers, for Windows and Linux. Papertrail indexes your journal articles, textbooks, theses, reports and standards where they already are, and never modifies your files.
 
 **Status:** early development (milestone M0). Nothing is usable yet. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
