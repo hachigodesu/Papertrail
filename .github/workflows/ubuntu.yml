@@ -9,10 +9,16 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev libdjvulibre-dev
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.12.0'
+      - uses: actions/cache@v4
+        with:
+          path: ~/mupdf-cache
+          key: mupdf-ubuntu-24.04-1.28.5
+      - run: sudo bash packaging/linux/install-mupdf.sh "$HOME/mupdf-cache"
+      - run: sudo chown -R "$USER" "$HOME/mupdf-cache"
       - run: cmake --preset linux-debug
       - run: cmake --build --preset linux-debug
       - run: ctest --preset linux-debug
@@ -23,10 +29,16 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev libdjvulibre-dev
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.12.0'
+      - uses: actions/cache@v4
+        with:
+          path: ~/mupdf-cache
+          key: mupdf-ubuntu-24.04-1.28.5
+      - run: sudo bash packaging/linux/install-mupdf.sh "$HOME/mupdf-cache"
+      - run: sudo chown -R "$USER" "$HOME/mupdf-cache"
       - run: cmake --preset linux-release
       - run: cmake --build --preset linux-release
       - run: ctest --preset linux-perf

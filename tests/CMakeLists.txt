@@ -17,6 +17,13 @@ papertrail_core_test(test_settings)
 papertrail_core_test(test_search_parser)
 papertrail_core_test(test_library_query)
 
+papertrail_core_test(test_extractors papertrail_import)
+papertrail_core_test(test_import papertrail_import)
+target_compile_definitions(test_import PRIVATE
+    PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
+    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples")
+add_dependencies(test_import papertrail-worker)
+
 # Times real queries on a 100,000-publication library. Takes minutes rather than seconds, so it's
 # labelled: `ctest -LE perf` skips it, and `ctest -L perf` runs only this.
 papertrail_core_test(test_query_perf papertrail_synthetic)

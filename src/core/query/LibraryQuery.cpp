@@ -189,6 +189,10 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
         c.add(kOwnerOfFile + " IN (SELECT pf.publication_id FROM publication_file pf "
               "JOIN file f ON f.id = pf.file_id WHERE f.status IN ('missing', 'offline'))");
     }
+    if (filter.unreadable) {
+        c.add(kOwnerOfFile + " IN (SELECT pf.publication_id FROM publication_file pf "
+              "JOIN file f ON f.id = pf.file_id WHERE f.status = 'unreadable')");
+    }
 
     return c;
 }
@@ -467,6 +471,10 @@ FlagCounts LibraryQuery::flagCounts(const PublicationFilter &filter)
     PublicationFilter missing = filter;
     missing.missingOrOffline = true;
     counts.missingOrOffline = countWith(missing);
+
+    PublicationFilter unreadable = filter;
+    unreadable.unreadable = true;
+    counts.unreadable = countWith(unreadable);
     return counts;
 }
 

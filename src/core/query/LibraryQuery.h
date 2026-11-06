@@ -43,6 +43,7 @@ struct FlagCounts {
     qint64 noText = 0;
     qint64 noFile = 0;
     qint64 missingOrOffline = 0;
+    qint64 unreadable = 0;
 };
 
 // Read-only queries behind the library view.

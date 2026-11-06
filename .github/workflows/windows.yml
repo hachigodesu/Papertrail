@@ -21,6 +21,8 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-libmupdf
+            mingw-w64-ucrt-x86_64-djvulibre
       # Plain configure rather than a preset: the action's MSYS2 isn't at C:/msys64.
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
       - run: cmake --build build

@@ -33,6 +33,7 @@ struct PublicationFilter {
     bool noText = false;
     bool noFile = false;
     bool missingOrOffline = false;
+    bool unreadable = false;
 };
 
 enum class SortField { Relevance, Title, FirstAuthor, Year, Added };

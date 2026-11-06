@@ -308,12 +308,19 @@ CREATE TRIGGER tag_rename_fts AFTER UPDATE OF name ON tag BEGIN
 END;
 )sql";
 
+// M2: why a file couldn't be read, and one queued job at most per file and step.
+const char *const kMigration2 = R"sql(
+ALTER TABLE file ADD COLUMN problem TEXT;
+CREATE UNIQUE INDEX job_one_active ON job(kind, payload) WHERE status IN ('pending', 'running');
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
 {
     static const std::vector<Migration> migrations = {
         {1, kMigration1},
+        {2, kMigration2},
     };
     return migrations;
 }

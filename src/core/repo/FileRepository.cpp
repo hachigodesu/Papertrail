@@ -37,7 +37,7 @@ FileStatus fileStatusFromDb(const QString &value)
 
 const char *const kFileColumns =
     "f.id, f.root_id, f.relative_path, f.size, f.modified_at, f.sha256, f.format, "
-    "f.page_count, f.has_text_layer, f.status";
+    "f.page_count, f.has_text_layer, f.status, f.problem";
 
 FileRecord readFile(const Statement &select)
 {
@@ -53,6 +53,7 @@ FileRecord readFile(const Statement &select)
     if (!select.isNull(8))
         file.hasTextLayer = select.intAt(8) != 0;
     file.status = fileStatusFromDb(select.textAt(9));
+    file.problem = select.textAt(10);
     return file;
 }
 
@@ -113,11 +114,11 @@ qint64 FileRepository::upsert(FileRecord &file)
     file.relativePath = QDir::fromNativeSeparators(file.relativePath);
     Statement &upsert = m_db.cached(
         "INSERT INTO file (root_id, relative_path, file_name, size, modified_at, sha256, format, "
-        "page_count, has_text_layer, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "page_count, has_text_layer, status, problem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT (root_id, relative_path) DO UPDATE SET "
         "size = excluded.size, modified_at = excluded.modified_at, sha256 = excluded.sha256, "
         "format = excluded.format, page_count = excluded.page_count, "
-        "has_text_layer = excluded.has_text_layer, status = excluded.status "
+        "has_text_layer = excluded.has_text_layer, status = excluded.status, problem = excluded.problem "
         "RETURNING id");
     upsert.bind(1, file.rootId);
     upsert.bind(2, file.relativePath);
@@ -132,6 +133,7 @@ qint64 FileRepository::upsert(FileRecord &file)
     else
         upsert.bindNull(9);
     upsert.bind(10, toDbString(file.status));
+    upsert.bind(11, file.problem);
     upsert.step();
     file.id = upsert.int64At(0);
     upsert.reset();
@@ -165,12 +167,70 @@ void FileRepository::setHash(qint64 fileId, const QString &sha256)
     update->step();
 }
 
-void FileRepository::setStatus(qint64 fileId, FileStatus status)
+void FileRepository::setStatus(qint64 fileId, FileStatus status, const QString &problem)
 {
-    auto update = m_db.prepare("UPDATE file SET status = ? WHERE id = ?");
+    auto update = m_db.prepare("UPDATE file SET status = ?, problem = ? WHERE id = ?");
     update->bind(1, toDbString(status));
-    update->bind(2, fileId);
+    update->bind(2, problem);
+    update->bind(3, fileId);
     update->step();
+}
+
+void FileRepository::setDocumentFacts(qint64 fileId, std::optional<int> pageCount, std::optional<bool> hasTextLayer)
+{
+    auto update = m_db.prepare("UPDATE file SET page_count = ?, has_text_layer = ? WHERE id = ?");
+    update->bind(1, pageCount);
+    if (hasTextLayer)
+        update->bind(2, *hasTextLayer ? 1 : 0);
+    else
+        update->bindNull(2);
+    update->bind(3, fileId);
+    update->step();
+}
+
+QList<FileRecord> FileRepository::filesInRoot(qint64 rootId)
+{
+    QList<FileRecord> files;
+    auto select = m_db.prepare(fileSelect("WHERE f.root_id = ?"));
+    select->bind(1, rootId);
+    while (select->step())
+        files << readFile(*select);
+    return files;
+}
+
+std::optional<LibraryRoot> FileRepository::root(qint64 rootId)
+{
+    auto select = m_db.prepare("SELECT id, uuid, name, path FROM library_root WHERE id = ?");
+    select->bind(1, rootId);
+    if (!select->step())
+        return std::nullopt;
+    return LibraryRoot{select->int64At(0), select->textAt(1), select->textAt(2), select->textAt(3)};
+}
+
+void FileRepository::replaceFile(qint64 oldFileId, qint64 newFileId)
+{
+    Transaction transaction(m_db);
+    auto move = m_db.prepare(
+        "INSERT OR IGNORE INTO publication_file (publication_id, file_id, is_primary) "
+        "SELECT publication_id, ?2, is_primary FROM publication_file WHERE file_id = ?1");
+    move->bind(1, oldFileId);
+    move->bind(2, newFileId);
+    move->step();
+
+    auto remove = m_db.prepare("DELETE FROM file WHERE id = ?");
+    remove->bind(1, oldFileId);
+    remove->step();
+    transaction.commit();
+}
+
+QList<qint64> FileRepository::publicationsFor(qint64 fileId)
+{
+    QList<qint64> ids;
+    auto select = m_db.prepare("SELECT publication_id FROM publication_file WHERE file_id = ?");
+    select->bind(1, fileId);
+    while (select->step())
+        ids << select->int64At(0);
+    return ids;
 }
 
 void FileRepository::link(qint64 publicationId, qint64 fileId, bool primary)

@@ -6,6 +6,9 @@
 CMakeUserPresets.json
 CMakeLists.txt.user
 
+# Python
+__pycache__/
+
 # Editors
 .vscode/
 .idea/

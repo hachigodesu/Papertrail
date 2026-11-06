@@ -29,6 +29,7 @@ struct FileRecord {
     std::optional<int> pageCount;
     std::optional<bool> hasTextLayer; // Unset until the file has been read.
     FileStatus status = FileStatus::Ok;
+    QString problem; // Why a file couldn't be read, for showing to the user.
 };
 
 class FileRepository {
@@ -54,7 +55,17 @@ public:
     std::optional<FileRecord> get(qint64 id);
     QList<FileRecord> withHash(const QString &sha256);
     void setHash(qint64 fileId, const QString &sha256);
-    void setStatus(qint64 fileId, FileStatus status);
+    void setStatus(qint64 fileId, FileStatus status, const QString &problem = QString());
+    void setDocumentFacts(qint64 fileId, std::optional<int> pageCount, std::optional<bool> hasTextLayer);
+
+    QList<FileRecord> filesInRoot(qint64 rootId);
+    std::optional<LibraryRoot> root(qint64 rootId);
+
+    // Gives another file this one's publication links, then removes this one's record. For a file
+    // that's been moved or renamed.
+    void replaceFile(qint64 oldFileId, qint64 newFileId);
+
+    QList<qint64> publicationsFor(qint64 fileId);
 
     // Links a file to a publication. Making it primary replaces any earlier primary file.
     void link(qint64 publicationId, qint64 fileId, bool primary = false);
