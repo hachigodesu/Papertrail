@@ -50,7 +50,11 @@ public:
             throw EngineError("could not open document");
     }
 
-    ~MuPdfDocument() override { fz_drop_document(m_ctx, m_doc); }
+    ~MuPdfDocument() override
+    {
+        forgetSelectionText();
+        fz_drop_document(m_ctx, m_doc);
+    }
 
     bool needsPassword() override
     {
@@ -146,6 +150,271 @@ public:
         fz_drop_pixmap(m_ctx, pixmap);
         fz_drop_page(m_ctx, loaded);
         return result;
+    }
+
+    QSizeF pageSize(int page) override
+    {
+        layoutIfNeeded();
+        fz_page *loaded = nullptr;
+        fz_rect bounds = fz_empty_rect;
+        bool failed = false;
+        fz_var(loaded);
+        fz_try(m_ctx) {
+            loaded = fz_load_page(m_ctx, m_doc, page);
+            bounds = fz_bound_page(m_ctx, loaded);
+        }
+        fz_always(m_ctx) {
+            fz_drop_page(m_ctx, loaded);
+        }
+        fz_catch(m_ctx) {
+            failed = true;
+        }
+        if (failed)
+            throwCaught(QStringLiteral("could not read page size"));
+        return {double(bounds.x1 - bounds.x0), double(bounds.y1 - bounds.y0)};
+    }
+
+    DisplayImage renderForDisplay(int page, double scale) override
+    {
+        layoutIfNeeded();
+        const fz_matrix matrix = fz_scale(float(scale), float(scale));
+        fz_page *loaded = nullptr;
+        fz_pixmap *pixmap = nullptr;
+        fz_device *device = nullptr;
+        bool failed = false;
+        fz_var(loaded);
+        fz_var(pixmap);
+        fz_var(device);
+        fz_try(m_ctx) {
+            loaded = fz_load_page(m_ctx, m_doc, page);
+            const fz_irect box = fz_round_rect(fz_transform_rect(fz_bound_page(m_ctx, loaded), matrix));
+            pixmap = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), box, nullptr, 1);
+            fz_clear_pixmap_with_value(m_ctx, pixmap, 0xFF);
+            device = fz_new_draw_device(m_ctx, matrix, pixmap);
+            fz_run_page(m_ctx, loaded, device, fz_identity, nullptr);
+            fz_close_device(m_ctx, device);
+        }
+        fz_always(m_ctx) {
+            fz_drop_device(m_ctx, device);
+            fz_drop_page(m_ctx, loaded);
+        }
+        fz_catch(m_ctx) {
+            failed = true;
+        }
+        if (failed) {
+            fz_drop_pixmap(m_ctx, pixmap);
+            throwCaught(QStringLiteral("could not render page"));
+        }
+
+        DisplayImage image;
+        image.width = fz_pixmap_width(m_ctx, pixmap);
+        image.height = fz_pixmap_height(m_ctx, pixmap);
+        image.stride = fz_pixmap_stride(m_ctx, pixmap);
+        image.pixels = QByteArray(reinterpret_cast<const char *>(fz_pixmap_samples(m_ctx, pixmap)),
+                                  qsizetype(image.stride) * image.height);
+        fz_drop_pixmap(m_ctx, pixmap);
+        return image;
+    }
+
+    void setLayout(double width, double height, double fontSize) override
+    {
+        forgetSelectionText();
+        m_layoutWidth = float(width);
+        m_layoutHeight = float(height);
+        m_layoutFontSize = float(fontSize);
+        m_laidOut = false;
+        layoutIfNeeded();
+    }
+
+    qint64 bookmarkForPage(int page) override
+    {
+        layoutIfNeeded();
+        fz_bookmark mark = page;
+        fz_try(m_ctx) {
+            mark = fz_make_bookmark(m_ctx, m_doc, fz_location_from_page_number(m_ctx, m_doc, page));
+        }
+        fz_catch(m_ctx) {
+            mark = page;
+        }
+        return qint64(mark);
+    }
+
+    int pageForBookmark(qint64 bookmark) override
+    {
+        layoutIfNeeded();
+        int page = 0;
+        const fz_bookmark mark = fz_bookmark(bookmark);
+        fz_try(m_ctx) {
+            page = fz_page_number_from_location(m_ctx, m_doc, fz_lookup_bookmark(m_ctx, m_doc, mark));
+        }
+        fz_catch(m_ctx) {
+            page = 0;
+        }
+        return page;
+    }
+
+    QString placeForPage(int page) override
+    {
+        if (!isReflowable())
+            return Document::placeForPage(page);
+        layoutIfNeeded();
+        fz_location location = fz_make_location(0, 0);
+        int chapterPages = 1;
+        fz_try(m_ctx) {
+            location = fz_location_from_page_number(m_ctx, m_doc, page);
+            chapterPages = fz_count_chapter_pages(m_ctx, m_doc, location.chapter);
+        }
+        fz_catch(m_ctx) {
+            chapterPages = 1;
+        }
+        return QStringLiteral("%1:%2").arg(location.chapter).arg(double(location.page) / qMax(1, chapterPages), 0, 'f', 5);
+    }
+
+    int pageForPlace(const QString &place) override
+    {
+        if (!isReflowable())
+            return Document::pageForPlace(place);
+        layoutIfNeeded();
+        const int chapter = place.section(u':', 0, 0).toInt();
+        const double progress = place.section(u':', 1, 1).toDouble();
+        int page = 0;
+        fz_try(m_ctx) {
+            const int chapters = fz_count_chapters(m_ctx, m_doc);
+            const int target = std::clamp(chapter, 0, qMax(0, chapters - 1));
+            const int chapterPages = fz_count_chapter_pages(m_ctx, m_doc, target);
+            const int inChapter = std::clamp(int(progress * chapterPages), 0, qMax(0, chapterPages - 1));
+            page = fz_page_number_from_location(m_ctx, m_doc, fz_make_location(target, inChapter));
+        }
+        fz_catch(m_ctx) {
+            page = 0;
+        }
+        return qMax(0, page);
+    }
+
+    QList<OutlineItem> outline() override
+    {
+        layoutIfNeeded();
+        fz_outline *root = nullptr;
+        fz_var(root);
+        fz_try(m_ctx) {
+            root = fz_load_outline(m_ctx, m_doc);
+        }
+        fz_catch(m_ctx) {
+            root = nullptr;
+        }
+        QList<OutlineItem> items;
+        collectOutline(root, 0, items);
+        fz_drop_outline(m_ctx, root);
+        return items;
+    }
+
+    QList<PageLink> links(int page) override
+    {
+        layoutIfNeeded();
+        fz_page *loaded = nullptr;
+        fz_link *first = nullptr;
+        fz_var(loaded);
+        fz_var(first);
+        fz_try(m_ctx) {
+            loaded = fz_load_page(m_ctx, m_doc, page);
+            first = fz_load_links(m_ctx, loaded);
+        }
+        fz_catch(m_ctx) {
+            fz_drop_page(m_ctx, loaded);
+            return {};
+        }
+
+        QList<PageLink> links;
+        for (fz_link *link = first; link; link = link->next) {
+            if (!link->uri)
+                continue;
+            PageLink item;
+            item.rect = QRectF(link->rect.x0, link->rect.y0, link->rect.x1 - link->rect.x0, link->rect.y1 - link->rect.y0);
+            bool external = false;
+            float y = 0;
+            int target = -1;
+            const char *uri = link->uri;
+            fz_try(m_ctx) {
+                external = fz_is_external_link(m_ctx, uri) != 0;
+                if (!external) {
+                    float x = 0;
+                    target = fz_page_number_from_location(m_ctx, m_doc, fz_resolve_link(m_ctx, m_doc, uri, &x, &y));
+                }
+            }
+            fz_catch(m_ctx) {
+                target = -1;
+            }
+            if (external)
+                item.uri = QString::fromUtf8(link->uri);
+            item.page = target;
+            item.y = y;
+            if (external || target >= 0)
+                links << item;
+        }
+        fz_drop_link(m_ctx, first);
+        fz_drop_page(m_ctx, loaded);
+        return links;
+    }
+
+    QList<QRectF> search(int page, const QString &query) override
+    {
+        layoutIfNeeded();
+        const QByteArray needle = query.toUtf8();
+        const char *needleText = needle.constData();
+        constexpr int kMaxHits = 512;
+        static fz_quad quads[kMaxHits];
+        int count = 0;
+        fz_try(m_ctx) {
+            count = fz_search_page_number(m_ctx, m_doc, page, needleText, nullptr, quads, kMaxHits);
+        }
+        fz_catch(m_ctx) {
+            count = 0;
+        }
+        QList<QRectF> rects;
+        for (int i = 0; i < count; ++i)
+            rects << rectFrom(quads[i]);
+        return rects;
+    }
+
+    TextSelection selectText(int page, const QPointF &a, const QPointF &b) override
+    {
+        layoutIfNeeded();
+        if (page != m_selectionPage) {
+            forgetSelectionText();
+            fz_try(m_ctx) {
+                m_selectionText = fz_new_stext_page_from_page_number(m_ctx, m_doc, page, nullptr);
+                m_selectionPage = page;
+            }
+            fz_catch(m_ctx) {
+                m_selectionText = nullptr;
+            }
+        }
+        if (!m_selectionText)
+            return {};
+
+        constexpr int kMaxQuads = 4096;
+        static fz_quad quads[kMaxQuads];
+        const fz_point from{float(a.x()), float(a.y())};
+        const fz_point to{float(b.x()), float(b.y())};
+        int count = 0;
+        char *copied = nullptr;
+        fz_var(copied);
+        fz_try(m_ctx) {
+            count = fz_highlight_selection(m_ctx, m_selectionText, from, to, quads, kMaxQuads);
+            copied = fz_copy_selection(m_ctx, m_selectionText, from, to, 0);
+        }
+        fz_catch(m_ctx) {
+            count = 0;
+        }
+
+        TextSelection selection;
+        for (int i = 0; i < count; ++i)
+            selection.rects << rectFrom(quads[i]);
+        if (copied) {
+            selection.text = QString::fromUtf8(copied);
+            fz_free(m_ctx, copied);
+        }
+        return selection;
     }
 
     QString largestTextOnFirstPage() override
@@ -293,6 +562,48 @@ public:
     }
 
 private:
+    static QRectF rectFrom(const fz_quad &quad)
+    {
+        const fz_rect rect = fz_rect_from_quad(quad);
+        return QRectF(rect.x0, rect.y0, rect.x1 - rect.x0, rect.y1 - rect.y0);
+    }
+
+    void forgetSelectionText()
+    {
+        fz_drop_stext_page(m_ctx, m_selectionText);
+        m_selectionText = nullptr;
+        m_selectionPage = -1;
+    }
+
+    void collectOutline(fz_outline *item, int depth, QList<OutlineItem> &items)
+    {
+        for (; item; item = item->next) {
+            OutlineItem entry;
+            entry.title = QString::fromUtf8(item->title).simplified();
+            entry.depth = depth;
+            int page = -1;
+            float y = item->y;
+            const fz_location location = item->page;
+            const char *uri = item->uri;
+            // EPUBs leave the location out, and only give a link to resolve.
+            fz_try(m_ctx) {
+                if (location.chapter >= 0) {
+                    page = fz_page_number_from_location(m_ctx, m_doc, location);
+                } else if (uri && !fz_is_external_link(m_ctx, uri)) {
+                    float x = 0;
+                    page = fz_page_number_from_location(m_ctx, m_doc, fz_resolve_link(m_ctx, m_doc, uri, &x, &y));
+                }
+            }
+            fz_catch(m_ctx) {
+                page = -1;
+            }
+            entry.page = page;
+            entry.y = std::isnan(y) ? 0 : y;
+            items << entry;
+            collectOutline(item->down, depth + 1, items);
+        }
+    }
+
     // Reflowable formats have no pages until they're laid out at some size.
     void layoutIfNeeded()
     {
@@ -302,7 +613,7 @@ private:
         if (!isReflowable())
             return;
         fz_try(m_ctx) {
-            fz_layout_document(m_ctx, m_doc, 595, 842, 11);
+            fz_layout_document(m_ctx, m_doc, m_layoutWidth, m_layoutHeight, m_layoutFontSize);
         }
         fz_catch(m_ctx) {
             // Page counts and rendering will report the problem if it matters.
@@ -313,6 +624,11 @@ private:
     QByteArray m_path;
     fz_document *m_doc = nullptr;
     bool m_laidOut = false;
+    float m_layoutWidth = 595;
+    float m_layoutHeight = 842;
+    float m_layoutFontSize = 11;
+    fz_stext_page *m_selectionText = nullptr;
+    int m_selectionPage = -1;
 };
 
 } // namespace

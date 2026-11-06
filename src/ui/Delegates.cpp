@@ -169,9 +169,16 @@ void GridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
     painter->setFont(titleFont);
     painter->setPen(muted(option.palette, selected));
     rest.setTop(rest.top() + drawLines(painter, rest, index.data(PublicationListModel::AuthorsRole).toString(), 1));
+    // The formats only earn their space on the card when there's a choice of them.
+    QStringList lastLine;
     const QVariant year = index.data(PublicationListModel::YearRole);
     if (year.isValid())
-        drawLines(painter, rest, year.toString(), 1);
+        lastLine << year.toString();
+    const QString formats = index.data(PublicationListModel::FormatsRole).toString();
+    if (formats.contains(u','))
+        lastLine << formats;
+    if (!lastLine.isEmpty())
+        drawLines(painter, rest, lastLine.join(QStringLiteral(" \u00B7 ")), 1);
 
     if (option.state & QStyle::State_HasFocus) {
         painter->setPen(QPen(option.palette.color(selected ? QPalette::HighlightedText : QPalette::Highlight), 1,

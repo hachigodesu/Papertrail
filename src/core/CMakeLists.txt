@@ -14,8 +14,12 @@ add_library(papertrail_core STATIC
     query/SearchParser.h
     repo/FileRepository.cpp
     repo/FileRepository.h
+    repo/PublicationMerge.cpp
+    repo/PublicationMerge.h
     repo/PublicationRepository.cpp
     repo/PublicationRepository.h
+    repo/ReadingStateRepository.cpp
+    repo/ReadingStateRepository.h
     repo/TagRepository.cpp
     repo/TagRepository.h
     settings/SettingsStore.cpp

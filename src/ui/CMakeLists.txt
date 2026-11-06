@@ -7,6 +7,8 @@ add_library(papertrail_ui STATIC
     Delegates.h
     DetailsPanel.cpp
     DetailsPanel.h
+    DocumentClient.cpp
+    DocumentClient.h
     FilterSidebar.cpp
     FilterSidebar.h
     FolderWatcher.cpp
@@ -23,10 +25,14 @@ add_library(papertrail_ui STATIC
     MainWindow.h
     MetadataEditor.cpp
     MetadataEditor.h
+    PageView.cpp
+    PageView.h
     PublicationListModel.cpp
     PublicationListModel.h
     QueryThreads.cpp
-    QueryThreads.h)
+    QueryThreads.h
+    ReaderTab.cpp
+    ReaderTab.h)
 
 target_include_directories(papertrail_ui PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(papertrail_ui PUBLIC papertrail_core papertrail_import Qt6::Widgets)

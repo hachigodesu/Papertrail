@@ -1,0 +1,195 @@
+#pragma once
+
+#include "ui/DocumentClient.h"
+
+#include <QAbstractScrollArea>
+#include <QHash>
+#include <QImage>
+#include <QList>
+#include <QPointF>
+#include <QRectF>
+#include <QSet>
+#include <QSizeF>
+#include <QTimer>
+#include <QVector>
+
+#include <optional>
+
+namespace papertrail::ui {
+
+// Shows a document's pages, and only ever holds the pages near the view in memory. This does no
+// parsing of its own: images, links and text all come from the document's own process.
+class PageView : public QAbstractScrollArea {
+    Q_OBJECT
+
+public:
+    enum class LayoutMode { Continuous, SinglePage, TwoPages };
+    enum class ZoomMode { Fixed, FitWidth, FitPage };
+    enum class Colours { Light, Dark, Sepia };
+
+    explicit PageView(QWidget *parent = nullptr);
+
+    void setPageCount(int count, const QSizeF &assumedSize);
+    void setPageSizes(int start, const QList<QSizeF> &sizes);
+    void forgetAllPages(); // After laying the document out again.
+
+    void setPageImage(int page, double scale, const QImage &image);
+    void setPageFailed(int page);
+    void setLinks(int page, const QList<ReaderLink> &links);
+
+    void setLayoutMode(LayoutMode mode);
+    LayoutMode layoutMode() const { return m_layoutMode; }
+
+    void setColours(Colours colours);
+    Colours colours() const { return m_colours; }
+
+    void setZoomMode(ZoomMode mode);
+    ZoomMode zoomMode() const { return m_zoomMode; }
+
+    // In points to pixels. 96/72 is actual size.
+    void setScale(double scale);
+    double scale() const { return m_scale; }
+    void zoomBy(double factor);
+
+    int pageCount() const { return int(m_sizes.size()); }
+
+    // The page taking up the middle of the view.
+    int currentPage() const;
+
+    // The page at the top of the view, and how far down it the view starts, from 0 to 1.
+    int topPage() const;
+    double topOffset() const;
+
+    void goToPage(int page, double offset = 0);
+
+    // Goes to a point on a page, given in points from the top.
+    void goToPoint(int page, double y);
+
+    void nextPage();
+    void previousPage();
+
+    // Goes back to where the last followed link was clicked.
+    void goBack();
+    bool canGoBack() const { return !m_history.isEmpty(); }
+
+    void setSearchHits(int page, const QList<QRectF> &rects);
+    void clearSearch();
+    void setCurrentHit(int page, const QRectF &rect);
+
+    void setSelection(int page, const QList<QRectF> &rects, const QString &text);
+    void clearSelection();
+    QString selectedText() const;
+    bool hasSelection() const { return !m_selectionText.isEmpty(); }
+
+    // For tests.
+    QRectF pageRect(int page) const;
+    QPoint viewportPointFor(int page, const QPointF &point) const;
+    bool isPageLoaded(int page) const { return m_images.contains(page) && m_images.value(page).scale == wantedScale(); }
+    double wantedScale() const;
+
+signals:
+    // Replaces any earlier list.
+    void pagesWanted(const QList<papertrail::ui::RenderRequest> &pages);
+    void linksWanted(int page);
+    void selectionWanted(int page, const QPointF &a, const QPointF &b);
+    void currentPageChanged(int page);
+    void zoomChanged();
+    void placeChanged();
+    void selectionChanged();
+    void historyChanged();
+
+    // A link out of the document has been clicked. It comes from the file, so it can't be trusted.
+    void externalLinkActivated(const QString &uri);
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void scrollContentsBy(int dx, int dy) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+
+private:
+    struct CachedImage {
+        QImage image;
+        double scale = 0;
+        quint64 lastUsed = 0;
+    };
+
+    struct Selected {
+        QList<QRectF> rects;
+        QString text;
+    };
+
+    struct Place {
+        int page = 0;
+        double offset = 0;
+    };
+
+    void relayout();
+    void relayoutKeepingPlace();
+    void updateScrollBars();
+    void updateHorizontalRange();
+    void updateTypicalPageSize();
+    void scheduleWanted();
+    void sendWanted();
+    void noteCurrentPage();
+    void trimCache();
+    int rowForY(double y) const;
+    int rowOfPage(int page) const;
+    int pagesPerRow() const;
+    double contentX() const;
+    double contentY() const;
+    void updateFitScale();
+    void drawPage(QPainter &painter, int page, const QRectF &target);
+
+    // The page and the point on it, in points, at a place in the view. Nearest page if between pages.
+    std::optional<std::pair<int, QPointF>> pageAt(const QPoint &viewportPoint, bool nearest = false) const;
+    const ReaderLink *linkAt(const QPoint &viewportPoint) const;
+    void updateSelectionTo(int page, const QPointF &point);
+    void showRow(int row, bool atEnd = false);
+
+    QVector<QSizeF> m_sizes;
+    QSizeF m_typicalPageSize;
+    QVector<QRectF> m_pageRects; // In content pixels. Empty where a page isn't on show.
+    QVector<double> m_rowTops;
+    QVector<double> m_rowHeights;
+    double m_contentWidth = 0;
+    double m_contentHeight = 0;
+    int m_shownRow = 0; // For the modes that show one row at a time.
+
+    LayoutMode m_layoutMode = LayoutMode::Continuous;
+    ZoomMode m_zoomMode = ZoomMode::FitWidth;
+    Colours m_colours = Colours::Light;
+    double m_scale = 96.0 / 72.0;
+
+    QHash<int, CachedImage> m_images;
+    QSet<int> m_failedPages;
+    quint64 m_useClock = 0;
+    qint64 m_imageBytes = 0;
+
+    QHash<int, QList<ReaderLink>> m_links;
+    QSet<int> m_linksAsked;
+
+    QHash<int, QList<QRectF>> m_searchHits;
+    int m_currentHitPage = -1;
+    QRectF m_currentHitRect;
+
+    QHash<int, Selected> m_selected;
+    QString m_selectionText;
+    bool m_dragging = false;
+    bool m_pressedOnLink = false;
+    int m_dragStartPage = 0;
+    QPointF m_dragStartPoint;
+    QPoint m_pressPosition;
+
+    QList<Place> m_history;
+    QTimer m_wantedTimer;
+    int m_lastCurrentPage = -1;
+    bool m_settingScroll = false;
+};
+
+} // namespace papertrail::ui

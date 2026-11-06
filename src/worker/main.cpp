@@ -1,7 +1,10 @@
 // Parses untrusted files in its own process, so a crash here can't take down the app.
 //
 // Reads one JSON request per line on stdin, and writes one JSON reply per line on stdout. It never
-// writes to the documents themselves, only to the cover paths it's given.
+// writes to the documents themselves, only to the cover paths it's given. With --reader, it instead
+// serves one open document to the reader: see ReaderHost.h.
+
+#include "ReaderHost.h"
 
 #include "engine/Document.h"
 #include "import/Extractors.h"
@@ -235,6 +238,9 @@ int main(int argc, char *argv[])
     }
 
     engine::Engine engine;
+
+    if (arguments.contains(QStringLiteral("--reader")))
+        return worker::runReaderHost(engine);
 
     std::string line;
     while (std::getline(std::cin, line)) {

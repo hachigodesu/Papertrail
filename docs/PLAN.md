@@ -108,7 +108,7 @@ Code rules that keep it distro-neutral:
 ```
 
 - **Bulk file parsing runs in a separate worker process.** Importing thousands of unknown files will eventually hit one that crashes a parser. The worker restarts, the file is marked unreadable, and the app stays up.
-- **The reader opens files inside the app** on background threads. If the reader itself meets a bad file, it shows an error for that file.
+- **Each document the reader has open runs in its own process,** as M4 settled. A page that crashes or hangs a parser costs that page and a moment's restart, and the window stays up.
 - **All engines sit behind one `DocumentEngine` interface:** page count, render, text, outline, search and metadata. The UI never calls MuPDF directly.
 
 ### Storage

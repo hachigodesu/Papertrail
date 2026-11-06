@@ -1,0 +1,132 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Outlines 20 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R 14 0 R] /Count 6 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> /Annots [30 0 R 31 0 R 32 0 R] >>
+endobj
+5 0 obj
+<< /Length 254 >>
+stream
+BT /F1 20 Tf 50 780 Td (Chapter One) Tj ET
+BT /F1 11 Tf 50 752 Td (The opening page has links on it.) Tj ET
+BT /F1 11 Tf 50 733 Td (Go to page five) Tj ET
+BT /F1 11 Tf 50 714 Td (An example web address) Tj ET
+BT /F1 11 Tf 50 695 Td (An unsafe link) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+7 0 obj
+<< /Length 109 >>
+stream
+BT /F1 16 Tf 50 780 Td (A Section) Tj ET
+BT /F1 11 Tf 50 756 Td (The word findme appears on this page.) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 9 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+9 0 obj
+<< /Length 59 >>
+stream
+BT /F1 11 Tf 50 780 Td (Nothing to see on this page.) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Contents 11 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+11 0 obj
+<< /Length 109 >>
+stream
+BT /F1 20 Tf 50 780 Td (Chapter Two) Tj ET
+BT /F1 11 Tf 50 752 Td (This page is wider than it is tall.) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 13 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+13 0 obj
+<< /Length 116 >>
+stream
+BT /F1 11 Tf 50 780 Td (Here is findme once.) Tj ET
+BT /F1 11 Tf 50 761 Td (And here is findme a second time.) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 15 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+15 0 obj
+<< /Length 45 >>
+stream
+BT /F1 11 Tf 50 780 Td (The last page.) Tj ET
+endstream
+endobj
+20 0 obj
+<< /Type /Outlines /First 21 0 R /Last 23 0 R /Count 3 >>
+endobj
+21 0 obj
+<< /Title (Chapter One) /Parent 20 0 R /Next 23 0 R /First 22 0 R /Last 22 0 R /Count 1 /Dest [4 0 R /XYZ 0 842 0] >>
+endobj
+22 0 obj
+<< /Title (A Section) /Parent 21 0 R /Dest [6 0 R /XYZ 0 842 0] >>
+endobj
+23 0 obj
+<< /Title (Chapter Two) /Parent 20 0 R /Prev 21 0 R /Dest [10 0 R /XYZ 0 595 0] >>
+endobj
+30 0 obj
+<< /Type /Annot /Subtype /Link /Rect [50 720 300 735] /Border [0 0 0] /Dest [12 0 R /XYZ 0 842 0] >>
+endobj
+31 0 obj
+<< /Type /Annot /Subtype /Link /Rect [50 700 300 715] /Border [0 0 0] /A << /S /URI /URI (https://example.org/paper) >> >>
+endobj
+32 0 obj
+<< /Type /Annot /Subtype /Link /Rect [50 680 300 695] /Border [0 0 0] /A << /S /URI /URI (file:///etc/passwd) >> >>
+endobj
+xref
+0 33
+0000000000 65535 f 
+0000000009 00000 n 
+0000000075 00000 n 
+0000000165 00000 n 
+0000000235 00000 n 
+0000000392 00000 n 
+0000000697 00000 n 
+0000000823 00000 n 
+0000000983 00000 n 
+0000001109 00000 n 
+0000001218 00000 n 
+0000001346 00000 n 
+0000001507 00000 n 
+0000001635 00000 n 
+0000001803 00000 n 
+0000001931 00000 n 
+0000000000 00000 f 
+0000000000 00000 f 
+0000000000 00000 f 
+0000000000 00000 f 
+0000002027 00000 n 
+0000002101 00000 n 
+0000002235 00000 n 
+0000002318 00000 n 
+0000000000 00000 f 
+0000000000 00000 f 
+0000000000 00000 f 
+0000000000 00000 f 
+0000000000 00000 f 
+0000000000 00000 f 
+0000002417 00000 n 
+0000002534 00000 n 
+0000002673 00000 n 
+trailer
+<< /Size 33 /Root 1 0 R >>
+startxref
+2805
+%%EOF

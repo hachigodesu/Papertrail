@@ -166,6 +166,7 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
         case YearColumn: return row->year ? QVariant(*row->year) : QVariant();
         case ContainerColumn: return row->containerTitle;
         case TypeColumn: return typeLabel(row->type);
+        case FormatColumn: return row->formats.join(QStringLiteral(", ")).toUpper();
         case ReadColumn: return readStatusLabel(row->readStatus);
         }
         return {};
@@ -178,6 +179,8 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
         const QString problem = fileStatusLabel(row->fileStatus);
         if (!problem.isEmpty())
             text += u'\n' + problem;
+        if (row->formats.size() > 1)
+            text += u'\n' + tr("Available as %1").arg(row->formats.join(QStringLiteral(", ")).toUpper());
         return text;
     }
     case Qt::AccessibleTextRole: {
@@ -194,6 +197,7 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
     case YearRole: return row->year ? QVariant(*row->year) : QVariant();
     case CoverShaRole: return row->coverSha;
     case FormatRole: return row->format;
+    case FormatsRole: return row->formats.join(QStringLiteral(", ")).toUpper();
     case FileStatusRole: return row->fileStatus;
     case NeedsReviewRole: return row->needsReview;
     default: return {};
@@ -210,6 +214,7 @@ QVariant PublicationListModel::headerData(int section, Qt::Orientation orientati
     case YearColumn: return tr("Year");
     case ContainerColumn: return tr("Journal or source");
     case TypeColumn: return tr("Type");
+    case FormatColumn: return tr("Format");
     case ReadColumn: return tr("Status");
     }
     return {};

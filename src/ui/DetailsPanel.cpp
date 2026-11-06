@@ -1,5 +1,6 @@
 #include "ui/DetailsPanel.h"
 
+#include "core/repo/PublicationMerge.h"
 #include "ui/CoverCache.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
@@ -11,6 +12,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFormLayout>
+#include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -147,6 +149,10 @@ void DetailsPanel::buildSinglePage()
     });
     reviewLayout->addWidget(checked);
     column->addWidget(m_review);
+
+    // One button if there's one format, and one for each format if there's a choice.
+    m_openButtons = new QHBoxLayout;
+    column->addLayout(m_openButtons);
 
     auto *actions = new QHBoxLayout;
     m_open = new QPushButton(tr("Open"));
@@ -425,7 +431,34 @@ void DetailsPanel::reload()
     clearLayout(m_fileRows);
     const qint64 fileOwner = p.parentId.value_or(p.id);
     const QList<FileRecord> files = m_session.files().filesFor(fileOwner);
+
+    QStringList formats;
+    for (const FileRecord &file : files) {
+        if (!formats.contains(file.format))
+            formats << file.format;
+    }
+    const bool choiceOfFormats = formats.size() > 1;
+
+    clearLayout(m_openButtons);
+    m_open->setVisible(!choiceOfFormats);
+    if (choiceOfFormats) {
+        QStringList offered;
+        for (const FileRecord &file : files) {
+            if (offered.contains(file.format) || !QFileInfo::exists(m_session.files().absolutePath(file.id)))
+                continue;
+            offered << file.format;
+            auto *button = new QPushButton(tr("Open %1").arg(file.format.toUpper()));
+            const qint64 publicationId = p.id;
+            const qint64 fileId = file.id;
+            connect(button, &QPushButton::clicked, this, [this, publicationId, fileId] {
+                emit openFileRequested(publicationId, fileId);
+            });
+            m_openButtons->addWidget(button);
+        }
+    }
+
     m_coverSha.clear();
+    QStringList separated;
     for (const FileRecord &file : files) {
         if (m_coverSha.isEmpty())
             m_coverSha = file.sha256;
@@ -454,6 +487,28 @@ void DetailsPanel::reload()
         pathField->setCursorPosition(int(path.size()));
         m_fileRows->addWidget(pathField);
         m_fileRows->addWidget(plainLabel(facts.join(QStringLiteral(", "))));
+
+        if (choiceOfFormats && !separated.contains(file.format)) {
+            separated << file.format;
+            auto *separate = new QPushButton(tr("Not the same publication: separate the %1").arg(file.format.toUpper()));
+            separate->setToolTip(tr("Makes this format a publication of its own, with its own details."));
+            const QString format = file.format;
+            connect(separate, &QPushButton::clicked, this, [this, format] {
+                // Removing this row's button from inside its own click would delete it too early.
+                QTimer::singleShot(0, this, [this, format] {
+                    if (!m_id)
+                        return;
+                    try {
+                        separateFormat(m_session.database(), *m_id, format);
+                        reload();
+                        emit libraryEdited();
+                    } catch (const std::exception &error) {
+                        QMessageBox::warning(this, tr("Saving"), tr("That couldn't be separated: %1").arg(QString::fromUtf8(error.what())));
+                    }
+                });
+            });
+            m_fileRows->addWidget(separate);
+        }
     }
     if (files.isEmpty())
         m_fileRows->addWidget(plainLabel(tr("No file linked.")));

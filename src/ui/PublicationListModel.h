@@ -17,7 +17,7 @@ class PublicationListModel : public QAbstractTableModel {
     Q_OBJECT
 
 public:
-    enum Column { TitleColumn, AuthorsColumn, YearColumn, ContainerColumn, TypeColumn, ReadColumn, ColumnCount };
+    enum Column { TitleColumn, AuthorsColumn, YearColumn, ContainerColumn, TypeColumn, FormatColumn, ReadColumn, ColumnCount };
 
     enum Role {
         IsLoadedRole = Qt::UserRole + 1,
@@ -27,6 +27,7 @@ public:
         YearRole,
         CoverShaRole,
         FormatRole,
+        FormatsRole, // "PDF, EPUB"
         FileStatusRole,
         NeedsReviewRole,
     };

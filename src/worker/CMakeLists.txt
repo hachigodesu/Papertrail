@@ -1,4 +1,4 @@
-qt_add_executable(papertrail-worker main.cpp)
+qt_add_executable(papertrail-worker main.cpp ReaderHost.cpp ReaderHost.h)
 
 target_link_libraries(papertrail-worker PRIVATE papertrail_engine papertrail_import Qt6::Core)
 target_compile_definitions(papertrail-worker PRIVATE

@@ -89,6 +89,17 @@ public:
         return result;
     }
 
+    QSizeF pageSize(int page) override
+    {
+        ddjvu_pageinfo_t info{};
+        ddjvu_status_t status;
+        while ((status = ddjvu_document_get_pageinfo(m_doc, page, &info)) < DDJVU_JOB_OK)
+            waitForMessages(m_ctx);
+        if (status >= DDJVU_JOB_FAILED || info.dpi <= 0)
+            throw EngineError("could not read page size");
+        return {info.width * 72.0 / info.dpi, info.height * 72.0 / info.dpi};
+    }
+
     QString largestTextOnFirstPage() override { return {}; } // DjVu text has no font sizes.
     QMap<QString, QString> metadata() override { return {}; }
     QByteArray xmpPacket() override { return {}; }

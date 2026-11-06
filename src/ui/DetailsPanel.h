@@ -10,6 +10,7 @@
 class QCheckBox;
 class QComboBox;
 class QFormLayout;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -58,6 +59,7 @@ signals:
     void libraryEdited();
     void editRequested(qint64 id);
     void openRequested(qint64 id);
+    void openFileRequested(qint64 id, qint64 fileId);
     void showInFolderRequested(qint64 id);
 
     // Changes for everything selected, from the several-selected page.
@@ -97,6 +99,7 @@ private:
     QPlainTextEdit *m_notes = nullptr;
     QTimer *m_notesTimer = nullptr;
     QVBoxLayout *m_fileRows = nullptr;
+    QHBoxLayout *m_openButtons = nullptr;
     QPushButton *m_open = nullptr;
     QPushButton *m_showInFolder = nullptr;
     QPushButton *m_edit = nullptr;

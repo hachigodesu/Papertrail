@@ -86,6 +86,126 @@ def text_pdf(path, lines, info=None, xmp=None, extra_pages=None):
     path.write_bytes(build_pdf(pages, info=info, xmp=xmp))
 
 
+def reader_pdf(path):
+    """Six pages with a table of contents and links, for testing the reader. Page 4 is landscape."""
+    texts = [
+        [(20, "Chapter One"), (11, "The opening page has links on it."), (11, "Go to page five"),
+         (11, "An example web address"), (11, "An unsafe link")],
+        [(16, "A Section"), (11, "The word findme appears on this page.")],
+        [(11, "Nothing to see on this page.")],
+        [(20, "Chapter Two"), (11, "This page is wider than it is tall.")],
+        [(11, "Here is findme once."), (11, "And here is findme a second time.")],
+        [(11, "The last page.")],
+    ]
+    objects = {
+        1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 20 0 R >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    }
+    kids = []
+    for index, lines in enumerate(texts):
+        number = 4 + index * 2
+        kids.append(number)
+        box = b"[0 0 842 595]" if index == 3 else b"[0 0 595 842]"
+        stream = page_stream(lines)
+        annots = b" /Annots [30 0 R 31 0 R 32 0 R]" if index == 0 else b""
+        objects[number] = (b"<< /Type /Page /Parent 2 0 R /MediaBox %s /Contents %d 0 R "
+                           b"/Resources << /Font << /F1 3 0 R >> >>%s >>" % (box, number + 1, annots))
+        objects[number + 1] = b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream)
+    objects[2] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
+        b" ".join(b"%d 0 R" % kid for kid in kids), len(kids))
+
+    # The contents: Chapter One, holding A Section, then Chapter Two.
+    objects[20] = b"<< /Type /Outlines /First 21 0 R /Last 23 0 R /Count 3 >>"
+    objects[21] = (b"<< /Title (Chapter One) /Parent 20 0 R /Next 23 0 R /First 22 0 R /Last 22 0 R /Count 1 "
+                   b"/Dest [%d 0 R /XYZ 0 842 0] >>" % kids[0])
+    objects[22] = b"<< /Title (A Section) /Parent 21 0 R /Dest [%d 0 R /XYZ 0 842 0] >>" % kids[1]
+    objects[23] = b"<< /Title (Chapter Two) /Parent 20 0 R /Prev 21 0 R /Dest [%d 0 R /XYZ 0 595 0] >>" % kids[3]
+
+    # Links on the first page, laid over the lines they describe.
+    objects[30] = (b"<< /Type /Annot /Subtype /Link /Rect [50 720 300 735] /Border [0 0 0] "
+                   b"/Dest [%d 0 R /XYZ 0 842 0] >>" % kids[4])
+    objects[31] = (b"<< /Type /Annot /Subtype /Link /Rect [50 700 300 715] /Border [0 0 0] "
+                   b"/A << /S /URI /URI (https://example.org/paper) >> >>")
+    objects[32] = (b"<< /Type /Annot /Subtype /Link /Rect [50 680 300 695] /Border [0 0 0] "
+                   b"/A << /S /URI /URI (file:///etc/passwd) >> >>")
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for number in sorted(objects):
+        offsets[number] = len(out)
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, objects[number])
+    xref = len(out)
+    size = max(objects) + 1
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % size
+    for number in range(1, size):
+        if number in offsets:
+            out += b"%010d 00000 n \n" % offsets[number]
+        else:
+            out += b"0000000000 00000 f \n"
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (size, xref)
+    path.write_bytes(bytes(out))
+
+
+def reader_epub(path, navigation):
+    """A book long enough to fill several pages. `navigation` is "nav" for EPUB 3's table of contents
+    only, or "ncx" for the older kind only."""
+    paragraph = "This made-up chapter goes on for long enough to fill a number of pages when laid out. " * 12
+    chapters = {
+        "chapter1.xhtml": ("The First Chapter", "first"),
+        "chapter2.xhtml": ("The Second Chapter", "second"),
+        "chapter3.xhtml": ("The Third Chapter", "third"),
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(zipfile.ZipInfo("mimetype", (2020, 1, 1, 0, 0, 0)), "application/epub+zip", zipfile.ZIP_STORED)
+
+        def add(name, text):
+            z.writestr(zipfile.ZipInfo(name, (2020, 1, 1, 0, 0, 0)), text)
+
+        add("META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+            '</rootfiles></container>')
+        items = "".join(f'<item id="{n[:-6]}" href="{n}" media-type="application/xhtml+xml"/>' for n in chapters)
+        spine = "".join(f'<itemref idref="{n[:-6]}"/>' for n in chapters)
+        if navigation == "nav":
+            items += '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+            toc_attribute = ""
+        else:
+            items += '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+            toc_attribute = ' toc="ncx"'
+        add("OEBPS/content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">'
+            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">made-up</dc:identifier>'
+            '<dc:title>A Made-up Book</dc:title><dc:language>en</dc:language></metadata>'
+            f'<manifest>{items}</manifest><spine{toc_attribute}>{spine}</spine></package>')
+        for name, (title, word) in chapters.items():
+            body = f'<h1 id="top">{title}</h1>' + f"<p>{paragraph}</p>" * 8
+            body += f'<h2 id="{word}-part">A part of the {word} chapter</h2>' + f"<p>{paragraph}</p>" * 4
+            body += f"<p>The word findme{word} is only in this chapter.</p>"
+            add(f"OEBPS/{name}",
+                '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>'
+                f'{title}</title></head><body>{body}</body></html>')
+        if navigation == "nav":
+            add("OEBPS/nav.xhtml",
+                '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" '
+                'xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body>'
+                '<nav epub:type="toc"><h1>Contents</h1><ol>'
+                '<li><a href="chapter1.xhtml">The First Chapter</a></li>'
+                '<li><a href="chapter2.xhtml">The Second Chapter</a>'
+                '<ol><li><a href="chapter2.xhtml#second-part">A Part of It</a></li></ol></li>'
+                '<li><a href="chapter3.xhtml">The Third Chapter</a></li>'
+                '</ol></nav><nav epub:type="landmarks"><ol><li><a href="chapter3.xhtml">Not contents</a></li></ol></nav>'
+                '</body></html>')
+        else:
+            points = "".join(
+                f'<navPoint id="p{i}" playOrder="{i}"><navLabel><text>{title}</text></navLabel>'
+                f'<content src="{name}"/></navPoint>'
+                for i, (name, (title, _)) in enumerate(chapters.items(), 1))
+            add("OEBPS/toc.ncx",
+                '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
+                f'<head/><docTitle><text>A Made-up Book</text></docTitle><navMap>{points}</navMap></ncx>')
+
+
 def rc4(key, data):
     state = list(range(256))
     j = 0
@@ -363,6 +483,10 @@ def main():
              [(20, "Measuring Example Flows"), (10, "Preprint submitted to the Journal of Made-up Results"),
               (10, "doi:10.1000/example.2020.1"), (10, "This made-up paper has no arXiv number.")],
              info={"Title": "Measuring Example Flows"})
+
+    reader_pdf(out / "reader_doc.pdf")
+    reader_epub(out / "reader_nav.epub", "nav")
+    reader_epub(out / "reader_ncx.epub", "ncx")
 
     drawing_only_pdf(out / "scanned_no_text.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))

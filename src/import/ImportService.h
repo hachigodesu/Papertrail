@@ -62,6 +62,7 @@ struct ImportReport {
     int moved = 0;              // Files found at a new location.
     int updated = 0;            // Files whose contents changed, keeping their publication.
     int reclassified = 0;       // Publications taken back out of Preprints.
+    int formatsJoined = 0;      // Files recognised as another format of an existing publication.
     int unreadable = 0;         // Couldn't be read, or need a password.
     int workerRestarts = 0;     // Crashes or hangs recovered from.
     int needsReview = 0;
@@ -107,6 +108,15 @@ private:
     void processFingerprint(const Job &job, ImportReport &report);
     void processInspect(const Job &job, ImportReport &report);
     void processReclassify(const Job &job, ImportReport &report);
+    void processJoinFormats(const Job &job, ImportReport &report);
+
+    struct OtherFormat {
+        qint64 publicationId = 0;
+        bool certain = true; // If not, the result gets marked for checking.
+    };
+    std::optional<OtherFormat> findOtherFormat(const core::Publication &publication, qint64 selfId,
+                                               const QStringList &formats, const QList<core::FileRecord> &files);
+    bool holdsAnyFormat(qint64 publicationId, const QStringList &formats);
     void createPublication(const core::FileRecord &file, const InspectResult *inspection, ImportReport &report);
     void markUnreadable(const core::FileRecord &file, const QString &problem, ImportReport &report);
 

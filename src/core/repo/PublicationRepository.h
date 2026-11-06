@@ -30,6 +30,9 @@ public:
     // Replaces the stored record, including its people, and refreshes updatedAt.
     void update(Publication &publication);
 
+    // Copies across whatever `from` has that `into` doesn't. Nothing already there is replaced.
+    static void fillGaps(Publication &into, const Publication &from);
+
     // As update(), and also keeps each changed field's earlier value under `source`.
     void updateWithProvenance(Publication &publication, const QString &source);
 

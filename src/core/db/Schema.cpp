@@ -361,6 +361,16 @@ WHERE u.earlier IS NULL;
 DROP TABLE undo_sorting;
 )sql";
 
+// One publication can have several formats. Looks through the library once, for any already imported
+// as separate publications. Only worth doing if there's more than one publication to compare.
+const char *const kMigration5 = R"sql(
+CREATE INDEX IF NOT EXISTS publication_isbn10 ON publication(isbn10);
+
+INSERT OR IGNORE INTO job (kind, payload, created_at, updated_at)
+SELECT 'join_formats', '{}', unixepoch() * 1000, unixepoch() * 1000
+WHERE (SELECT count(*) FROM publication) > 1;
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -370,6 +380,7 @@ const std::vector<Migration> &libraryMigrations()
         {2, kMigration2},
         {3, kMigration3},
         {4, kMigration4},
+        {5, kMigration5},
     };
     return migrations;
 }

@@ -6,6 +6,8 @@
 // since opening a library can change its settings.
 
 #include "ui/DetailsPanel.h"
+#include "ui/PageView.h"
+#include "ui/ReaderTab.h"
 #include "ui/FilterSidebar.h"
 #include "ui/LibrarySession.h"
 #include "ui/MainWindow.h"
@@ -20,6 +22,7 @@
 #include <QListView>
 #include <QStyleFactory>
 #include <QStyleHints>
+#include <QTabWidget>
 #include <QTimer>
 
 using namespace papertrail;
@@ -47,6 +50,8 @@ int main(int argc, char *argv[])
     parser.addOption({QStringLiteral("dark"), QStringLiteral("Use the dark colour scheme.")});
     parser.addOption({QStringLiteral("search"), QStringLiteral("Search text for the search picture."), QStringLiteral("text"),
                       QStringLiteral("year:>2000")});
+    parser.addOption({QStringLiteral("worker"), QStringLiteral("Path to papertrail-worker."), QStringLiteral("file")});
+    parser.addOption({QStringLiteral("read"), QStringLiteral("Also picture the reader on this title."), QStringLiteral("title")});
     parser.process(app);
 
     if (parser.isSet(QStringLiteral("dark"))) {
@@ -57,6 +62,8 @@ int main(int argc, char *argv[])
     ui::LibraryPaths paths;
     paths.database = parser.value(QStringLiteral("db"));
     paths.cacheDirectory = parser.value(QStringLiteral("cache"));
+    paths.workerPath = parser.isSet(QStringLiteral("worker")) ? parser.value(QStringLiteral("worker"))
+                                                              : ui::LibraryPaths::standard().workerPath;
     ui::LibrarySession session(paths);
     session.settings().setValue(QStringLiteral("library.rescan_on_startup"), false);
 
@@ -92,6 +99,33 @@ int main(int argc, char *argv[])
         editor.show();
         wait(300);
         editor.grab().save(out.filePath(QStringLiteral("editor.png")));
+    }
+
+    // The reader, for anything whose title is given.
+    const QStringList readerTitles = parser.values(QStringLiteral("read"));
+    for (const qint64 id : session.query().ids({}, {})) {
+        const auto publication = session.publications().get(id);
+        if (!publication || !readerTitles.contains(publication->title))
+            continue;
+        ui::ReaderTab *reader = window.openPublication(id);
+        if (!reader)
+            continue;
+        const QString name = publication->title.left(12).replace(u' ', u'-');
+        save(QStringLiteral("reader-") + name);
+        reader->searchBox()->setText(QStringLiteral("page"));
+        reader->applySearch();
+        save(QStringLiteral("reader-search-") + name);
+        reader->searchBox()->clear();
+        reader->applySearch();
+        reader->pageView()->setLayoutMode(ui::PageView::LayoutMode::TwoPages);
+        reader->pageView()->setZoomMode(ui::PageView::ZoomMode::FitPage);
+        reader->pageView()->setColours(ui::PageView::Colours::Sepia);
+        save(QStringLiteral("reader-sepia-") + name);
+        reader->pageView()->setLayoutMode(ui::PageView::LayoutMode::Continuous);
+        reader->pageView()->setColours(ui::PageView::Colours::Dark);
+        reader->findChild<QTabWidget *>()->setCurrentIndex(1);
+        reader->setSidePanelVisible(true);
+        save(QStringLiteral("reader-dark-") + name);
     }
     return 0;
 }

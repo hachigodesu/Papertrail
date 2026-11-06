@@ -87,7 +87,7 @@ cmake --build --preset windows-release
 ctest --preset windows-perf
 ```
 
-Use `linux-release` and `linux-perf` on Linux. `test_query_perf` and `test_ui_perf` read `PAPERTRAIL_PERF_COUNT`, `PAPERTRAIL_PERF_DB` (reuse a library between runs) and `PAPERTRAIL_PERF_REPORT_ONLY` (never fail, for CI).
+Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a generated 3,000-page book. `test_query_perf` and `test_ui_perf` read `PAPERTRAIL_PERF_COUNT`, `PAPERTRAIL_PERF_DB` (reuse a library between runs) and `PAPERTRAIL_PERF_REPORT_ONLY` (never fail, for CI).
 
 ### Tools
 
@@ -109,17 +109,23 @@ Use `linux-release` and `linux-perf` on Linux. `test_query_perf` and `test_ui_pe
 | `papertrail_import` | core | Scanning, the job queue, metadata extraction and classification, the worker client |
 | `papertrail_ui` | core, import, Qt Widgets | The library window |
 | `papertrail` | ui | The app |
-| `papertrail-worker` | engine, import | The only part of the app that opens documents so far |
+| `papertrail-worker` | engine, import | The only part of the app that opens documents |
 
-`papertrail_import` doesn't link the engine. It reaches documents only through the worker.
+`papertrail_import` and `papertrail_ui` don't link the engine. They reach documents only through the worker.
 
 ### Worker process
 
 Parsing unknown files will eventually crash a parser, so it happens in a separate process. `WorkerClient` drives `papertrail-worker` with `QProcess`, using line-delimited JSON over stdin and stdout (ops: `hash`, `inspect`), and restarts it after a crash or timeout. A file that keeps failing is listed as unreadable under its file name, so it isn't lost.
 
-This is a real risk: Arch's MuPDF hits a double free on `tests/samples/truncated.pdf`, while Ubuntu's and MSYS2's builds don't. The reader in M4 must account for this (see `docs/M2-results.md`). Don't assume a clean Windows run means a file is safe.
+This is a real risk: Arch's MuPDF hits a double free on `tests/samples/truncated.pdf`, while Ubuntu's and MSYS2's builds don't. Don't assume a clean Windows run means a file is safe.
 
-`__crash__` and `__hang__` in a file name trigger faults in the worker, only when `PAPERTRAIL_WORKER_TEST_FAULTS` is set.
+`__crash__` and `__hang__` in a file name trigger faults in the worker, only when `PAPERTRAIL_WORKER_TEST_FAULTS` is set. For the reader, so do `__crashpageN__` and `__hangpageN__`, on page N.
+
+### Reader
+
+`DocumentClient` runs one `papertrail-worker --reader` process (`src/worker/ReaderHost.cpp`) per open document, so nothing in the window ever parses a document. Replies are a JSON line, optionally followed by raw bytes, so stdout has to stay binary-clean: the host takes a private copy of it and points the original at stderr. Nothing in the client waits. It sends one request at a time, in order of importance: urgent requests, selections, the wanted pages (replaced wholesale as the view scrolls, so skipped pages are never rendered), thumbnails, then background work such as measuring pages and searching. If the process dies mid-request, that request's page is marked bad for the session and the process restarts.
+
+`PageView` paints, and holds only pages near the view. Page colours are applied at paint time. `ReaderTab` holds the toolbar and side panel, and saves the place in `reading_state`. Store a place with `placeForPage`, not `bookmarkForPage`: MuPDF's EPUB bookmarks are only valid inside one process.
 
 ### Import pipeline
 
@@ -139,11 +145,19 @@ The window's thread never waits on slow work, and each background thread opens i
 | `BulkChanges` | Changes to many publications, in batches so other writers only wait briefly |
 | `CoverCache` pool | Decodes covers, newest request first |
 
+Tests that show a window should fail on a `QMessageBox`, which would otherwise wait forever for a click: see `m_boxWatcher` in `test_reader.cpp`.
+
 `PublicationListModel` backs both views and holds only a few pages. `data()` returns nothing for rows it hasn't fetched and requests the page, so anything needing a row's id must handle `idAt()` returning null. A selection is by row, and rows can move when the library changes: `MainWindow::onResultsChanged` clears a selection it can no longer vouch for. Count selections with `selectedRowRanges`, not `selectedRows()`, which is slow at 100,000.
 
 **Text from documents is untrusted.** Show it with `Qt::PlainText` or through the delegates' `drawLines`, and only follow links that pass `safeWebLink`.
 
 `FolderWatcher` differs by platform on purpose: Linux uses inotify, but on Windows `QFileSystemWatcher` stops people renaming their own folders, so it scans periodically and when the window is activated instead.
+
+### One publication, several formats
+
+`publication_file` links a publication to any number of files, and `is_primary` says which supplies the cover. `ImportService::findOtherFormat` decides whether a new file is another format of something already there, and never joins two files of one format. It's deliberately cautious, and anything less than certain gets marked for review: an earlier attempt at automatic sorting into Preprints put published papers there unflagged, and the user had it removed. `mergePublications` and `separateFormat` in `core/repo/PublicationMerge` do the joining and undoing.
+
+A reading place belongs to a format, not to a publication. Use `ReadingStateRepository::placeFor` and `setPlaceFor`.
 
 ### Database and queries
 

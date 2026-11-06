@@ -2,7 +2,10 @@
 #include "core/db/Schema.h"
 #include "core/model/Identifiers.h"
 #include "core/repo/FileRepository.h"
+#include "core/repo/FileRepository.h"
+#include "core/repo/PublicationMerge.h"
 #include "core/repo/PublicationRepository.h"
+#include "core/repo/ReadingStateRepository.h"
 #include "core/repo/TagRepository.h"
 
 #include <QTemporaryDir>
@@ -523,6 +526,104 @@ private slots:
         QCOMPARE(m_publications->provenance(id, QStringLiteral("authors")).first().previousValue, QStringLiteral("Hooke, R"));
         QVERIFY(m_publications->provenance(id, QStringLiteral("doi")).isEmpty());
         QVERIFY(m_publications->provenance(id, QStringLiteral("notes")).isEmpty());
+    }
+
+    void mergingKeepsEverythingFromBoth()
+    {
+        Publication a;
+        a.title = QStringLiteral("Keep This Title");
+        a.notes = QStringLiteral("From the first.");
+        a.readStatus = ReadStatus::Reading;
+        const qint64 keep = m_publications->create(a);
+
+        Publication b;
+        b.title = QStringLiteral("Not This Title");
+        b.doi = QStringLiteral("10.1000/example");
+        b.year = 2001;
+        b.notes = QStringLiteral("From the second.");
+        b.readStatus = ReadStatus::Read;
+        b.authors = {{QStringLiteral("Hooke"), QString()}};
+        const qint64 other = m_publications->create(b);
+        const QString otherUuid = m_publications->get(other)->uuid;
+
+        const qint64 tagA = m_tags->ensurePath(QStringLiteral("A"));
+        const qint64 tagB = m_tags->ensurePath(QStringLiteral("B"));
+        m_tags->assign(keep, tagA);
+        m_tags->assign(other, tagA);
+        m_tags->assign(other, tagB);
+
+        FileRepository files(*m_db);
+        const qint64 root = files.addRoot(QStringLiteral("R"), QStringLiteral("/made/up"));
+        const auto addFile = [&](const QString &name, const QString &format, qint64 owner) {
+            FileRecord file;
+            file.rootId = root;
+            file.relativePath = name;
+            file.format = format;
+            files.upsert(file);
+            files.link(owner, file.id, true);
+            return file.id;
+        };
+        const qint64 pdf = addFile(QStringLiteral("a.pdf"), QStringLiteral("pdf"), keep);
+        const qint64 epub = addFile(QStringLiteral("a.epub"), QStringLiteral("epub"), other);
+
+        ReadingStateRepository reading(*m_db);
+        reading.setPlaceFor(keep, QStringLiteral("pdf"), QJsonObject{{QStringLiteral("page"), 12}}, 5);
+        reading.setPlaceFor(other, QStringLiteral("epub"), QJsonObject{{QStringLiteral("page"), 30}}, 9);
+
+        mergePublications(*m_db, keep, other, QStringLiteral("manual"));
+
+        QVERIFY(!m_publications->get(other).has_value());
+        const Publication merged = *m_publications->get(keep);
+        QCOMPARE(merged.title, QStringLiteral("Keep This Title"));
+        QCOMPARE(merged.doi, QStringLiteral("10.1000/example"));
+        QCOMPARE(merged.year.value_or(0), 2001);
+        QCOMPARE(merged.authors.size(), 1);
+        QCOMPARE(merged.readStatus, ReadStatus::Read);
+        QVERIFY(merged.notes.contains(QStringLiteral("From the first.")));
+        QVERIFY(merged.notes.contains(QStringLiteral("From the second.")));
+        QVERIFY(merged.extraJson.contains(otherUuid));
+        QCOMPARE(m_tags->tagsFor(keep).size(), 2);
+        QCOMPARE(files.filesFor(keep).size(), 2);
+        QCOMPARE(files.filesFor(keep).first().id, pdf);
+        QCOMPARE(reading.placeFor(keep, QStringLiteral("pdf")).value(QStringLiteral("page")).toInt(), 12);
+        QCOMPARE(reading.placeFor(keep, QStringLiteral("epub")).value(QStringLiteral("page")).toInt(), 30);
+
+        // Separating gives the format a publication of its own again, with its own place.
+        const qint64 separated = separateFormat(*m_db, keep, QStringLiteral("epub"));
+        QCOMPARE(files.filesFor(keep).size(), 1);
+        QCOMPARE(files.filesFor(keep).first().id, pdf);
+        QCOMPARE(files.filesFor(separated).first().id, epub);
+        QCOMPARE(m_publications->get(separated)->title, QStringLiteral("Keep This Title"));
+        QVERIFY(m_publications->get(separated)->needsReview);
+        QVERIFY(m_publications->get(separated)->uuid != merged.uuid);
+        QCOMPARE(m_tags->tagsFor(separated).size(), 2);
+        QCOMPARE(reading.placeFor(separated, QStringLiteral("epub")).value(QStringLiteral("page")).toInt(), 30);
+        QVERIFY(reading.placeFor(keep, QStringLiteral("epub")).isEmpty());
+
+        // It can't be separated from its last format.
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, separateFormat(*m_db, keep, QStringLiteral("pdf")));
+    }
+
+    void placesFromBeforeFormatsWereKeptApartStillWork()
+    {
+        Publication p;
+        p.title = QStringLiteral("Old");
+        const qint64 id = m_publications->create(p);
+        m_db->exec(QByteArray("INSERT INTO reading_state (publication_id, location, zoom, last_opened) VALUES (")
+                       .append(QByteArray::number(id))
+                       .append(", '{\"page\":7,\"offset\":0.5}', 1.5, 3)")
+                       .constData());
+
+        ReadingStateRepository reading(*m_db);
+        const QJsonObject place = reading.placeFor(id, QStringLiteral("pdf"));
+        QCOMPARE(place.value(QStringLiteral("page")).toInt(), 7);
+        QCOMPARE(place.value(QStringLiteral("zoom")).toDouble(), 1.5);
+
+        // Saving another format doesn't lose it, and it's now known which format it belonged to.
+        reading.assignToFormat(id, QStringLiteral("pdf"));
+        reading.setPlaceFor(id, QStringLiteral("epub"), QJsonObject{{QStringLiteral("page"), 1}}, 4);
+        QCOMPARE(reading.placeFor(id, QStringLiteral("pdf")).value(QStringLiteral("page")).toInt(), 7);
+        QCOMPARE(reading.placeFor(id, QStringLiteral("epub")).value(QStringLiteral("page")).toInt(), 1);
     }
 
     void changesCanBeMadeToManyAtOnce()

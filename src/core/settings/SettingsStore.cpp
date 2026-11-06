@@ -73,6 +73,7 @@ const QList<SettingDefinition> &settingDefinitions()
          {QStringLiteral("single"), QStringLiteral("two_page"), QStringLiteral("continuous")}},
         {QStringLiteral("reader.page_colours"), QStringLiteral("light"), K::Value,
          {QStringLiteral("light"), QStringLiteral("dark"), QStringLiteral("sepia")}},
+        {QStringLiteral("reader.font_size"), 12.0, K::Value, {}},
         {QStringLiteral("citation.style"), QStringLiteral("harvard"), K::Value,
          {QStringLiteral("harvard"), QStringLiteral("apa"), QStringLiteral("ieee"), QStringLiteral("chicago")}},
     };

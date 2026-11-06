@@ -2,6 +2,7 @@
 
 #include "core/model/Publication.h"
 #include "core/query/PublicationFilter.h"
+#include "core/repo/FileRepository.h"
 #include "import/ImportService.h"
 #include "ui/QueryThreads.h"
 
@@ -23,6 +24,7 @@ class QPushButton;
 class QSplitter;
 class QStackedWidget;
 class QTabBar;
+class QTabWidget;
 class QTableView;
 class QTimer;
 class QToolButton;
@@ -38,6 +40,7 @@ class ImportThread;
 class LibraryFoldersDialog;
 class LibrarySession;
 class PublicationListModel;
+class ReaderTab;
 
 // The library: tabs, search, filters, the grid or list of publications, and their details.
 class MainWindow : public QMainWindow {
@@ -68,6 +71,22 @@ public:
     void tagSelected(const QString &path);
     void setSelectedReadStatus(core::ReadStatus status);
     void markSelectedChecked();
+
+    // Opens a publication's main file in a tab of its own, or goes to its tab if it already has one.
+    ReaderTab *openPublication(qint64 id);
+
+    // The same, for one particular file. Each format of a publication can have a tab of its own.
+    ReaderTab *openPublicationFile(qint64 id, qint64 fileId);
+
+    // One file per format that's available now, starting with the main file. More than one is a choice.
+    QList<core::FileRecord> formatChoices(qint64 id);
+
+    // Makes everything selected into one publication.
+    void combineSelected();
+
+    // Shows the library again, or a document's tab.
+    QTabWidget *documentTabs() const { return m_documentTabs; }
+    void closeDocumentTab(int index);
 
     // Applies a finished edit: the same as pressing Save in the editor.
     void saveEdit(core::Publication publication);
@@ -128,7 +147,8 @@ private:
     void removeRoot(qint64 rootId);
     void askForBulkTag();
     void editPublication(qint64 id);
-    void openPublication(qint64 id);
+    void openOrChooseFormat(qint64 id);
+    void openPublicationElsewhere(qint64 id);
     void showPublicationInFolder(qint64 id);
     std::optional<QString> firstFilePath(qint64 publicationId);
     void showAbout();
@@ -149,6 +169,7 @@ private:
     SidebarQueryThread *m_sidebarThread = nullptr;
     quint64 m_sidebarGeneration = 0;
 
+    QTabWidget *m_documentTabs = nullptr;
     QLineEdit *m_search = nullptr;
     QTabBar *m_tabs = nullptr;
     QComboBox *m_sortBox = nullptr;

@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QByteArray>
+#include <QList>
 #include <QMap>
+#include <QRectF>
+#include <QSizeF>
 #include <QString>
 
 #include <memory>
@@ -24,6 +27,33 @@ struct RenderedPage {
     double inkFraction() const;
 };
 
+// A rendered page for the screen: 32 bits a pixel, blue first, on a white background.
+struct DisplayImage {
+    int width = 0;
+    int height = 0;
+    int stride = 0;
+    QByteArray pixels;
+};
+
+struct OutlineItem {
+    QString title;
+    int depth = 0;
+    int page = -1; // -1 if it doesn't lead anywhere in this document.
+    double y = 0;  // In points from the top of the page.
+};
+
+struct PageLink {
+    QRectF rect;   // In points.
+    QString uri;   // Set for a link out of the document. Comes from the file, so it can't be trusted.
+    int page = -1; // Set for a link within the document.
+    double y = 0;
+};
+
+struct TextSelection {
+    QList<QRectF> rects;
+    QString text;
+};
+
 // One open document. Nothing here ever writes to the document's file.
 class Document {
 public:
@@ -36,6 +66,32 @@ public:
     // Throws EngineError if the page can't be read.
     virtual QString pageText(int page) = 0;
     virtual RenderedPage renderPage(int page, int maxDimension) = 0;
+
+    // The page's size in points. Throws EngineError if it can't be read.
+    virtual QSizeF pageSize(int page) = 0;
+
+    // `scale` is pixels per point. Throws EngineError if the page can't be rendered.
+    virtual DisplayImage renderForDisplay(int page, double scale);
+
+    // Lays a reflowable document out again, in points. Does nothing for fixed layouts.
+    virtual void setLayout(double width, double height, double fontSize);
+
+    // A position that stays meaningful after laying out again, but only while this is open.
+    virtual qint64 bookmarkForPage(int page);
+    virtual int pageForBookmark(qint64 bookmark);
+
+    // A position to keep for next time, which survives a change of layout. It's approximate in a
+    // reflowable document: the same part of the same chapter. Just the page number otherwise.
+    virtual QString placeForPage(int page);
+    virtual int pageForPlace(const QString &place);
+
+    // These are empty where a format doesn't support them.
+    virtual QList<OutlineItem> outline() { return {}; }
+    virtual QList<PageLink> links(int) { return {}; }
+    virtual QList<QRectF> search(int, const QString &) { return {}; }
+
+    // The text between two points on a page, as a reader would select it by dragging.
+    virtual TextSelection selectText(int, const QPointF &, const QPointF &) { return {}; }
 
     // The text on the first page set in the largest type, which is often the title.
     virtual QString largestTextOnFirstPage() = 0;

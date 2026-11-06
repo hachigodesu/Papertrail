@@ -23,6 +23,50 @@ double RenderedPage::inkFraction() const
     return double(dark) / double(pixels);
 }
 
+DisplayImage Document::renderForDisplay(int page, double scale)
+{
+    const QSizeF size = pageSize(page);
+    const RenderedPage rendered = renderPage(page, qMax(1, int(qMax(size.width(), size.height()) * scale)));
+
+    DisplayImage image;
+    image.width = rendered.width;
+    image.height = rendered.height;
+    image.stride = rendered.width * 4;
+    image.pixels.resize(qsizetype(image.stride) * image.height);
+    const auto *from = reinterpret_cast<const unsigned char *>(rendered.rgb.constData());
+    auto *to = reinterpret_cast<unsigned char *>(image.pixels.data());
+    const qsizetype pixels = qsizetype(image.width) * image.height;
+    for (qsizetype i = 0; i < pixels; ++i) {
+        to[i * 4] = from[i * 3 + 2];
+        to[i * 4 + 1] = from[i * 3 + 1];
+        to[i * 4 + 2] = from[i * 3];
+        to[i * 4 + 3] = 255;
+    }
+    return image;
+}
+
+void Document::setLayout(double, double, double) {}
+
+qint64 Document::bookmarkForPage(int page)
+{
+    return page;
+}
+
+int Document::pageForBookmark(qint64 bookmark)
+{
+    return int(bookmark);
+}
+
+QString Document::placeForPage(int page)
+{
+    return QString::number(page);
+}
+
+int Document::pageForPlace(const QString &place)
+{
+    return place.toInt();
+}
+
 namespace {
 
 void ignoreMessage(void *, const char *) {}

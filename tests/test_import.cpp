@@ -665,7 +665,7 @@ private slots:
 
         // The one with a recorded earlier type goes back at once.
         QCOMPARE(m_publications->get(moved)->type, PublicationType::JournalArticle);
-        QCOMPARE(m_service->pendingJobs(), 1);
+        QCOMPARE(m_service->pendingJobs(), 2); // Going through it, and looking for other formats.
 
         const ImportReport report = m_service->processQueue();
         QCOMPARE(report.reclassified, 1);
@@ -676,6 +676,185 @@ private slots:
         QCOMPARE(m_publications->get(untouched)->type, untouchedType);
         QCOMPARE(m_query->count([] { PublicationFilter f; f.tabTypes = typesForTab(LibraryTab::Preprints); return f; }()), 1);
         QCOMPARE(fingerprintFolder(), before);
+    }
+
+    void theSameNameInTwoFormatsIsOnePublication_data()
+    {
+        QTest::addColumn<bool>("pdfFirst");
+        QTest::newRow("PDF, then EPUB") << true;
+        QTest::newRow("EPUB, then PDF") << false;
+    }
+
+    void theSameNameInTwoFormatsIsOnePublication()
+    {
+        QFETCH(bool, pdfFirst);
+        const auto importFile = [&](const char *sampleName, const char *as) {
+            copySample(sampleName, as);
+            m_service->scan(m_root);
+            return m_service->processQueue();
+        };
+        ImportReport second;
+        if (pdfFirst) {
+            importFile("article.pdf", "Same Book.pdf");
+            second = importFile("book.epub", "Same Book.epub");
+        } else {
+            importFile("book.epub", "Same Book.epub");
+            second = importFile("article.pdf", "Same Book.pdf");
+        }
+        QCOMPARE(second.formatsJoined, 1);
+        QCOMPARE(second.publicationsCreated, 0);
+        QCOMPARE(m_query->count({}), 1);
+
+        const qint64 id = m_query->ids({}, {}).first();
+        QCOMPARE(m_files->filesFor(id).size(), 2);
+        const QList<PublicationSummary> rows = m_query->page({}, {}, 0, 10);
+        QCOMPARE(rows.first().formats.size(), 2);
+        QVERIFY(rows.first().formats.contains(QStringLiteral("pdf")));
+        QVERIFY(rows.first().formats.contains(QStringLiteral("epub")));
+
+        // It can be filtered by either format, and it's counted once.
+        PublicationFilter filter;
+        filter.formats = {QStringLiteral("epub")};
+        QCOMPARE(m_query->count(filter), 1);
+        filter.formats = {QStringLiteral("pdf")};
+        QCOMPARE(m_query->count(filter), 1);
+    }
+
+    void aSecondFormatFillsInWhatTheFirstLacked()
+    {
+        copySample("no_metadata.pdf", "A Book.pdf"); // Its title is only a guess.
+        m_service->scan(m_root);
+        m_service->processQueue();
+        const qint64 id = m_query->ids({}, {}).first();
+        const Publication before = *m_publications->get(id);
+        QVERIFY(before.needsReview);
+
+        copySample("book.epub", "A Book.epub"); // This one states its title and more.
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_query->count({}), 1);
+        const Publication after = *m_publications->get(id);
+        QVERIFY(after.title != before.title);
+        QVERIFY(!after.authors.isEmpty());
+    }
+
+    void aTitleChosenByHandIsNotReplacedByASecondFormat()
+    {
+        copySample("no_metadata.pdf", "A Book.pdf");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        const qint64 id = m_query->ids({}, {}).first();
+        Publication p = *m_publications->get(id);
+        p.title = QStringLiteral("My Own Title");
+        m_publications->updateWithProvenance(p, QStringLiteral("manual"));
+
+        copySample("book.epub", "A Book.epub");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_publications->get(id)->title, QStringLiteral("My Own Title"));
+    }
+
+    void theSameFormatTwiceStaysApart()
+    {
+        // Two PDFs with one name can't be in one folder, and with different contents in two folders
+        // they may be different editions. They're only ever joined if they're byte-for-byte the same.
+        QDir(docs()).mkpath(QStringLiteral("a"));
+        QDir(docs()).mkpath(QStringLiteral("b"));
+        copySample("article.pdf", "a/Same.pdf");
+        copySample("thesis.pdf", "b/Same.pdf");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_query->count({}), 2);
+    }
+
+    void theSameNameInDifferentFoldersStaysApart()
+    {
+        QDir(docs()).mkpath(QStringLiteral("a"));
+        QDir(docs()).mkpath(QStringLiteral("b"));
+        copySample("article.pdf", "a/notes.pdf");
+        copySample("book.epub", "b/notes.epub");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_query->count({}), 2);
+    }
+
+    void existingLibrariesAreLookedThroughOnce_data()
+    {
+        QTest::addColumn<QString>("titleA");
+        QTest::addColumn<QString>("titleB");
+        QTest::addColumn<QString>("authorB");
+        QTest::addColumn<int>("yearB");
+        QTest::addColumn<QString>("isbnB");
+        QTest::addColumn<QString>("formatB");
+        QTest::addColumn<int>("publications");
+        QTest::addColumn<bool>("marked");
+
+        const QString title = QStringLiteral("Structural Analysis of Beams");
+        const QString isbn = QStringLiteral("9780306406157");
+        const QString epub = QStringLiteral("epub");
+        const QString hooke = QStringLiteral("Hooke");
+        QTest::newRow("same ISBN and title") << title << title << hooke << 2001 << isbn << epub << 1 << false;
+        QTest::newRow("same ISBN, and a subtitle on one")
+            << title << title + QStringLiteral(": A Primer") << hooke << 2001 << isbn << epub << 1 << false;
+        QTest::newRow("same ISBN but another title: a chapter of the book")
+            << title << QStringLiteral("Chapter Nine of a Book") << hooke << 2001 << isbn << epub << 2 << false;
+        QTest::newRow("same ISBN and title, but also the same format")
+            << title << title << hooke << 2001 << isbn << QStringLiteral("pdf") << 2 << false;
+        QTest::newRow("no ISBN, same title, author and year")
+            << title << title << hooke << 2001 << QString() << epub << 1 << true;
+        QTest::newRow("no ISBN, and another author")
+            << title << title << QStringLiteral("Euler") << 2001 << QString() << epub << 2 << false;
+        QTest::newRow("no ISBN, and another year: perhaps another edition")
+            << title << title << hooke << 2015 << QString() << epub << 2 << false;
+        QTest::newRow("no ISBN, and a short common title")
+            << QStringLiteral("Notes") << QStringLiteral("Notes") << hooke << 2001 << QString() << epub << 2 << false;
+    }
+
+    void existingLibrariesAreLookedThroughOnce()
+    {
+        QFETCH(QString, titleA);
+        QFETCH(QString, titleB);
+        QFETCH(QString, authorB);
+        QFETCH(int, yearB);
+        QFETCH(QString, isbnB);
+        QFETCH(QString, formatB);
+        QFETCH(int, publications);
+        QFETCH(bool, marked);
+
+        const auto add = [&](const QString &name, const QString &title, const QString &author, int year,
+                             const QString &isbn, const QString &format) {
+            Publication p;
+            p.title = title;
+            p.year = year;
+            p.isbn13 = isbn;
+            p.authors = {{author, QString()}};
+            const qint64 id = m_publications->create(p);
+            FileRecord file;
+            file.rootId = m_root;
+            file.relativePath = name;
+            file.size = 100;
+            file.modifiedAt = 1;
+            file.sha256 = QString(name).leftJustified(64, u'0');
+            file.format = format;
+            m_files->upsert(file);
+            m_files->link(id, file.id, true);
+            return id;
+        };
+        add(QStringLiteral("first.pdf"), titleA, QStringLiteral("Hooke"), 2001, isbnB, QStringLiteral("pdf"));
+        add(QStringLiteral("second.") + formatB, titleB, authorB, yearB, isbnB, formatB);
+
+        m_db->setUserVersion(4);
+        migrateLibrary(*m_db);
+        QCOMPARE(m_service->pendingJobs(), 1);
+        const ImportReport report = m_service->processQueue();
+        QCOMPARE(m_query->count({}), publications);
+        QCOMPARE(report.formatsJoined, publications == 1 ? 1 : 0);
+        if (publications == 1) {
+            const qint64 id = m_query->ids({}, {}).first();
+            QCOMPARE(m_files->filesFor(id).size(), 2);
+            QCOMPARE(m_publications->get(id)->needsReview, marked);
+        }
+        QCOMPARE(m_service->pendingJobs(), 0);
     }
 
     void fileStillChangingIsLeftForLater()

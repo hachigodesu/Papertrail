@@ -303,6 +303,32 @@ QString numberText(const std::optional<int> &value)
 
 } // namespace
 
+void PublicationRepository::fillGaps(Publication &into, const Publication &from)
+{
+    for (const TextColumn &column : kTextColumns) {
+        // Notes are the reader's own, and merging decides what to do with them.
+        if (qstrcmp(column.name, "notes") != 0 && qstrcmp(column.name, "extra_json") != 0
+            && (into.*column.member).isEmpty()) {
+            into.*column.member = from.*column.member;
+        }
+    }
+    for (const IntColumn &column : kIntColumns) {
+        // A page range belongs to one particular file's place in a volume.
+        if (qstrcmp(column.name, "page_start") != 0 && qstrcmp(column.name, "page_end") != 0
+            && !(into.*column.member)) {
+            into.*column.member = from.*column.member;
+        }
+    }
+    if (into.authors.isEmpty())
+        into.authors = from.authors;
+    if (into.editors.isEmpty())
+        into.editors = from.editors;
+    if (into.translators.isEmpty())
+        into.translators = from.translators;
+    if (into.advisors.isEmpty())
+        into.advisors = from.advisors;
+}
+
 void PublicationRepository::updateWithProvenance(Publication &publication, const QString &source)
 {
     Transaction transaction(m_db);

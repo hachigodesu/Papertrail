@@ -1,0 +1,293 @@
+#include "ReaderHost.h"
+
+#include "engine/Document.h"
+
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QPointF>
+#include <QRectF>
+#include <QRegularExpression>
+#include <QThread>
+
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <string>
+
+#ifdef Q_OS_WIN
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
+namespace papertrail::worker {
+
+namespace {
+
+// Far larger than any screen needs. The reader asks for less, but a file could claim pages of any size.
+constexpr double kMaxPixelsAcross = 16000;
+constexpr double kMaxPixels = 100e6;
+
+// Replies carry binary data, so nothing else may reach them. Libraries sometimes print to stdout, so
+// this takes a private copy of it, and points the original somewhere harmless.
+FILE *claimStandardOutput()
+{
+#ifdef Q_OS_WIN
+    const int privateCopy = _dup(_fileno(stdout));
+    _dup2(_fileno(stderr), _fileno(stdout));
+    _setmode(privateCopy, _O_BINARY);
+    return _fdopen(privateCopy, "wb");
+#else
+    const int privateCopy = dup(STDOUT_FILENO);
+    dup2(STDERR_FILENO, STDOUT_FILENO);
+    return fdopen(privateCopy, "wb");
+#endif
+}
+
+QJsonArray rectToJson(const QRectF &rect)
+{
+    return QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()};
+}
+
+QJsonArray rectsToJson(const QList<QRectF> &rects)
+{
+    QJsonArray array;
+    for (const QRectF &rect : rects)
+        array.append(rectToJson(rect));
+    return array;
+}
+
+// For testing how the reader copes with a page that crashes or hangs. Only with this variable set,
+// which the app itself never does: a file named __crashpage3__.pdf crashes on page 3.
+void applyPageFaults(const QString &path, int page)
+{
+    static const bool enabled = qEnvironmentVariableIsSet("PAPERTRAIL_WORKER_TEST_FAULTS");
+    if (!enabled)
+        return;
+    const QString name = QFileInfo(path).fileName();
+    static const QRegularExpression crash(QStringLiteral("__crashpage(\\d+)__"));
+    static const QRegularExpression hang(QStringLiteral("__hangpage(\\d+)__"));
+    const auto crashMatch = crash.match(name);
+    if (crashMatch.hasMatch() && crashMatch.captured(1).toInt() == page)
+        std::abort();
+    const auto hangMatch = hang.match(name);
+    if (hangMatch.hasMatch() && hangMatch.captured(1).toInt() == page) {
+        while (true)
+            QThread::sleep(60);
+    }
+}
+
+void applyOpenFaults(const QString &path)
+{
+    static const bool enabled = qEnvironmentVariableIsSet("PAPERTRAIL_WORKER_TEST_FAULTS");
+    if (enabled && QFileInfo(path).fileName().contains(QStringLiteral("__crash__")))
+        std::abort();
+}
+
+class Host {
+public:
+    Host(engine::Engine &engine, FILE *out) : m_engine(engine), m_out(out) {}
+
+    void handle(const QJsonObject &request)
+    {
+        QJsonObject reply;
+        QByteArray data;
+        reply.insert(QStringLiteral("id"), request.value(QStringLiteral("id")));
+        try {
+            const QString op = request.value(QStringLiteral("op")).toString();
+            if (op == QStringLiteral("open"))
+                open(request, reply);
+            else if (!m_document)
+                throw engine::EngineError("no document is open");
+            else if (op == QStringLiteral("layout"))
+                layout(request, reply);
+            else if (op == QStringLiteral("sizes"))
+                sizes(request, reply);
+            else if (op == QStringLiteral("render"))
+                data = render(request, reply);
+            else if (op == QStringLiteral("outline"))
+                outline(reply);
+            else if (op == QStringLiteral("links"))
+                links(request, reply);
+            else if (op == QStringLiteral("search"))
+                search(request, reply);
+            else if (op == QStringLiteral("select"))
+                select(request, reply);
+            else if (op == QStringLiteral("bookmark"))
+                reply.insert(QStringLiteral("bookmark"), m_document->placeForPage(page(request)));
+            else if (op == QStringLiteral("find"))
+                reply.insert(QStringLiteral("page"), m_document->pageForPlace(request.value(QStringLiteral("bookmark")).toString()));
+            else
+                throw engine::EngineError("unknown request");
+            reply.insert(QStringLiteral("ok"), true);
+        } catch (const std::exception &error) {
+            reply.insert(QStringLiteral("ok"), false);
+            reply.insert(QStringLiteral("error"), QString::fromUtf8(error.what()));
+            data.clear();
+        }
+        if (!data.isEmpty())
+            reply.insert(QStringLiteral("bytes"), double(data.size()));
+
+        const QByteArray line = QJsonDocument(reply).toJson(QJsonDocument::Compact) + '\n';
+        std::fwrite(line.constData(), 1, size_t(line.size()), m_out);
+        if (!data.isEmpty())
+            std::fwrite(data.constData(), 1, size_t(data.size()), m_out);
+        std::fflush(m_out);
+    }
+
+private:
+    static int page(const QJsonObject &request) { return request.value(QStringLiteral("page")).toInt(); }
+
+    void applyLayout(const QJsonObject &request)
+    {
+        m_document->setLayout(request.value(QStringLiteral("width")).toDouble(595),
+                              request.value(QStringLiteral("height")).toDouble(842),
+                              request.value(QStringLiteral("em")).toDouble(12));
+    }
+
+    void describe(QJsonObject &reply)
+    {
+        reply.insert(QStringLiteral("pages"), m_document->pageCount());
+        reply.insert(QStringLiteral("reflowable"), m_document->isReflowable());
+    }
+
+    void open(const QJsonObject &request, QJsonObject &reply)
+    {
+        m_path = request.value(QStringLiteral("path")).toString();
+        applyOpenFaults(m_path);
+        m_document = m_engine.open(m_path);
+        if (m_document->needsPassword()) {
+            m_document.reset();
+            reply.insert(QStringLiteral("needsPassword"), true);
+            throw engine::EngineError("this file needs a password");
+        }
+        applyLayout(request);
+        describe(reply);
+        if (m_document->pageCount() < 1)
+            throw engine::EngineError("this file has no pages");
+    }
+
+    // Keeps the reader's place through the change.
+    void layout(const QJsonObject &request, QJsonObject &reply)
+    {
+        const qint64 mark = m_document->bookmarkForPage(page(request));
+        applyLayout(request);
+        describe(reply);
+        reply.insert(QStringLiteral("page"), m_document->pageForBookmark(mark));
+    }
+
+    void sizes(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int start = request.value(QStringLiteral("start")).toInt();
+        const int count = request.value(QStringLiteral("count")).toInt();
+        QJsonArray values;
+        for (int i = start; i < start + count; ++i) {
+            QSizeF size(0, 0);
+            try {
+                size = m_document->pageSize(i);
+            } catch (const engine::EngineError &) {
+                // A page that can't be read keeps a placeholder of the usual size.
+            }
+            values.append(size.width());
+            values.append(size.height());
+        }
+        reply.insert(QStringLiteral("start"), start);
+        reply.insert(QStringLiteral("sizes"), values);
+    }
+
+    QByteArray render(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        applyPageFaults(m_path, number);
+        double scale = request.value(QStringLiteral("scale")).toDouble(1);
+        const QSizeF size = m_document->pageSize(number);
+        const double largest = qMax(size.width(), size.height());
+        if (largest <= 0)
+            throw engine::EngineError("this page has no size");
+        scale = qMin(scale, kMaxPixelsAcross / largest);
+        const double area = size.width() * size.height() * scale * scale;
+        if (area > kMaxPixels)
+            scale *= std::sqrt(kMaxPixels / area);
+
+        const engine::DisplayImage image = m_document->renderForDisplay(number, scale);
+        reply.insert(QStringLiteral("page"), number);
+        reply.insert(QStringLiteral("width"), image.width);
+        reply.insert(QStringLiteral("height"), image.height);
+        reply.insert(QStringLiteral("stride"), image.stride);
+        return image.pixels;
+    }
+
+    void outline(QJsonObject &reply)
+    {
+        QJsonArray items;
+        for (const engine::OutlineItem &item : m_document->outline()) {
+            items.append(QJsonObject{{QStringLiteral("title"), item.title},
+                                     {QStringLiteral("depth"), item.depth},
+                                     {QStringLiteral("page"), item.page},
+                                     {QStringLiteral("y"), item.y}});
+        }
+        reply.insert(QStringLiteral("items"), items);
+    }
+
+    void links(const QJsonObject &request, QJsonObject &reply)
+    {
+        QJsonArray items;
+        for (const engine::PageLink &link : m_document->links(page(request))) {
+            items.append(QJsonObject{{QStringLiteral("rect"), rectToJson(link.rect)},
+                                     {QStringLiteral("uri"), link.uri},
+                                     {QStringLiteral("page"), link.page},
+                                     {QStringLiteral("y"), link.y}});
+        }
+        reply.insert(QStringLiteral("page"), page(request));
+        reply.insert(QStringLiteral("links"), items);
+    }
+
+    void search(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        reply.insert(QStringLiteral("page"), number);
+        reply.insert(QStringLiteral("rects"),
+                     rectsToJson(m_document->search(number, request.value(QStringLiteral("text")).toString())));
+    }
+
+    void select(const QJsonObject &request, QJsonObject &reply)
+    {
+        const engine::TextSelection selection = m_document->selectText(
+            page(request),
+            QPointF(request.value(QStringLiteral("ax")).toDouble(), request.value(QStringLiteral("ay")).toDouble()),
+            QPointF(request.value(QStringLiteral("bx")).toDouble(), request.value(QStringLiteral("by")).toDouble()));
+        reply.insert(QStringLiteral("page"), page(request));
+        reply.insert(QStringLiteral("rects"), rectsToJson(selection.rects));
+        reply.insert(QStringLiteral("text"), selection.text);
+    }
+
+    engine::Engine &m_engine;
+    FILE *m_out;
+    QString m_path;
+    std::unique_ptr<engine::Document> m_document;
+};
+
+} // namespace
+
+int runReaderHost(engine::Engine &engine)
+{
+    FILE *out = claimStandardOutput();
+    if (!out)
+        return 1;
+    Host host(engine, out);
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        const QJsonDocument request = QJsonDocument::fromJson(QByteArray::fromStdString(line));
+        if (request.isObject())
+            host.handle(request.object());
+    }
+    return 0;
+}
+
+} // namespace papertrail::worker

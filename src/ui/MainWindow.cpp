@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include "core/repo/FileRepository.h"
+#include "core/repo/PublicationMerge.h"
 #include "ui/BulkChanges.h"
 #include "ui/CoverCache.h"
 #include "ui/Delegates.h"
@@ -13,10 +14,12 @@
 #include "ui/LibrarySession.h"
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
+#include "ui/ReaderTab.h"
 
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
+#include <QCursor>
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDir>
@@ -42,6 +45,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabBar>
+#include <QTabWidget>
 #include <QTableView>
 #include <QTimer>
 #include <QToolBar>
@@ -59,6 +63,7 @@ using namespace core;
 namespace {
 
 constexpr int kMaxRechecks = 20; // A file locked for this long isn't simply still being copied.
+constexpr qint64 kMaxToCombine = 20; // More than this at once is much more likely to be a slip.
 
 const QList<LibraryTab> kTabs = {
     LibraryTab::All,       LibraryTab::JournalVolumes,         LibraryTab::JournalArticles,
@@ -223,6 +228,10 @@ MainWindow::~MainWindow()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     m_details->saveNotes();
+    for (int i = 1; i < m_documentTabs->count(); ++i) {
+        if (auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i)))
+            reader->saveState();
+    }
     saveWindowState();
     event->accept();
 }
@@ -366,6 +375,7 @@ void MainWindow::buildCentre()
     header->resizeSection(PublicationListModel::YearColumn, 56);
     header->resizeSection(PublicationListModel::ContainerColumn, 140);
     header->resizeSection(PublicationListModel::TypeColumn, 110);
+    header->resizeSection(PublicationListModel::FormatColumn, 70);
     header->resizeSection(PublicationListModel::ReadColumn, 64);
     connect(header, &QHeaderView::sectionClicked, this, &MainWindow::onHeaderClicked);
     m_stack->addWidget(m_list);
@@ -380,7 +390,7 @@ void MainWindow::buildCentre()
     for (QAbstractItemView *view : {static_cast<QAbstractItemView *>(m_grid), static_cast<QAbstractItemView *>(m_list)}) {
         connect(view, &QAbstractItemView::activated, this, [this](const QModelIndex &index) {
             if (const auto id = m_model->idAt(index.row()))
-                openPublication(*id);
+                openOrChooseFormat(*id);
         });
         connect(view, &QWidget::customContextMenuRequested, this, &MainWindow::showContextMenu);
     }
@@ -413,6 +423,7 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::libraryEdited, this, &MainWindow::scheduleRefresh);
     connect(m_details, &DetailsPanel::editRequested, this, &MainWindow::editPublication);
     connect(m_details, &DetailsPanel::openRequested, this, &MainWindow::openPublication);
+    connect(m_details, &DetailsPanel::openFileRequested, this, &MainWindow::openPublicationFile);
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
     connect(m_details, &DetailsPanel::bulkTagRequested, this, &MainWindow::tagSelected);
     connect(m_details, &DetailsPanel::bulkReadStatusRequested, this, &MainWindow::setSelectedReadStatus);
@@ -425,7 +436,21 @@ void MainWindow::buildCentre()
     m_splitter->setSizes({240, 760, 280});
     m_splitter->setCollapsible(1, false);
 
-    setCentralWidget(central);
+    // The library is always the first tab. The tab bar only appears once a document is open.
+    m_documentTabs = new QTabWidget(this);
+    m_documentTabs->setDocumentMode(true);
+    m_documentTabs->setTabBarAutoHide(true);
+    m_documentTabs->setTabsClosable(true);
+    m_documentTabs->setMovable(false);
+    m_documentTabs->addTab(central, tr("Library"));
+    for (const QTabBar::ButtonPosition side : {QTabBar::LeftSide, QTabBar::RightSide}) {
+        if (QWidget *close = m_documentTabs->tabBar()->tabButton(0, side)) {
+            m_documentTabs->tabBar()->setTabButton(0, side, nullptr);
+            close->deleteLater();
+        }
+    }
+    connect(m_documentTabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeDocumentTab);
+    setCentralWidget(m_documentTabs);
     syncSortControls();
 }
 
@@ -483,11 +508,25 @@ void MainWindow::buildMenus()
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
     QMenu *view = menuBar()->addMenu(tr("&View"));
-    QAction *find = view->addAction(tr("&Search"), QKeySequence::Find, this, [this] {
-        m_search->setFocus();
-        m_search->selectAll();
+    view->addAction(tr("&Search"), QKeySequence::Find, this, [this] {
+        if (auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->currentWidget())) {
+            reader->focusSearch();
+        } else {
+            m_search->setFocus();
+            m_search->selectAll();
+        }
     });
-    Q_UNUSED(find)
+    view->addAction(tr("Close &tab"), QKeySequence(Qt::CTRL | Qt::Key_W), this, [this] {
+        if (m_documentTabs->currentIndex() > 0)
+            closeDocumentTab(m_documentTabs->currentIndex());
+    });
+    view->addAction(tr("Next tab"), QKeySequence(Qt::CTRL | Qt::Key_Tab), this, [this] {
+        m_documentTabs->setCurrentIndex((m_documentTabs->currentIndex() + 1) % m_documentTabs->count());
+    });
+    view->addAction(tr("Previous tab"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Tab), this, [this] {
+        const int count = m_documentTabs->count();
+        m_documentTabs->setCurrentIndex((m_documentTabs->currentIndex() + count - 1) % count);
+    });
     view->addSeparator();
     view->addAction(tr("&Grid"), QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] { setViewMode(ViewMode::Grid); });
     view->addAction(tr("&List"), QKeySequence(Qt::CTRL | Qt::Key_2), this, [this] { setViewMode(ViewMode::List); });
@@ -894,10 +933,104 @@ std::optional<QString> MainWindow::firstFilePath(qint64 publicationId)
     return std::nullopt;
 }
 
-void MainWindow::openPublication(qint64 id)
+QList<FileRecord> MainWindow::formatChoices(qint64 id)
+{
+    QList<FileRecord> choices;
+    QStringList seen;
+    guarded(tr("Reading the files"), [&] {
+        const std::optional<Publication> publication = m_session.publications().get(id);
+        if (!publication)
+            return;
+        for (const FileRecord &file : m_session.files().filesFor(publication->parentId.value_or(id))) {
+            // The first copy that's there now stands for its format.
+            if (!seen.contains(file.format) && QFileInfo::exists(m_session.files().absolutePath(file.id))) {
+                seen << file.format;
+                choices << file;
+            }
+        }
+    });
+    return choices;
+}
+
+void MainWindow::openOrChooseFormat(qint64 id)
+{
+    const QList<FileRecord> choices = formatChoices(id);
+    if (choices.size() <= 1) {
+        openPublication(id);
+        return;
+    }
+
+    QMenu menu(this);
+    menu.setTitle(tr("Open as"));
+    for (const FileRecord &file : choices) {
+        const QString label = file.pageCount ? tr("%1 (%2 pages)").arg(file.format.toUpper()).arg(*file.pageCount)
+                                             : file.format.toUpper();
+        const qint64 fileId = file.id;
+        menu.addAction(label, this, [this, id, fileId] { openPublicationFile(id, fileId); });
+    }
+    menu.exec(QCursor::pos());
+}
+
+ReaderTab *MainWindow::openPublication(qint64 id)
+{
+    const QList<FileRecord> choices = formatChoices(id);
+    if (choices.isEmpty()) {
+        statusBar()->showMessage(tr("This publication's file can't be found right now."), 8000);
+        return nullptr;
+    }
+    return openPublicationFile(id, choices.first().id);
+}
+
+ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId)
+{
+    for (int i = 1; i < m_documentTabs->count(); ++i) {
+        auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
+        if (reader && reader->publicationId() == id && reader->fileId() == fileId) {
+            m_documentTabs->setCurrentIndex(i);
+            return reader;
+        }
+    }
+
+    ReaderTab *reader = nullptr;
+    guarded(tr("Opening the file"), [&] {
+        const std::optional<FileRecord> file = m_session.files().get(fileId);
+        const std::optional<Publication> publication = m_session.publications().get(id);
+        const QString path = file ? m_session.files().absolutePath(fileId) : QString();
+        if (!file || !publication || !QFileInfo::exists(path)) {
+            statusBar()->showMessage(tr("This publication's file can't be found right now."), 8000);
+            return;
+        }
+        reader = new ReaderTab(m_session, id, fileId, file->format, path, m_documentTabs);
+        connect(reader, &ReaderTab::openElsewhereRequested, this,
+                [](const QString &file) { QDesktopServices::openUrl(QUrl::fromLocalFile(file)); });
+        connect(reader, &ReaderTab::statusMessage, this,
+                [this](const QString &message) { statusBar()->showMessage(message, 8000); });
+
+        // In a tab bar, & marks a shortcut key, and a long title would crowd out the other tabs.
+        QString title = publication->title;
+        title.replace(u'&', QStringLiteral("&&"));
+        QString shortTitle = QFontMetrics(font()).elidedText(title, Qt::ElideRight, 220);
+        if (formatChoices(id).size() > 1)
+            shortTitle += QStringLiteral(" (%1)").arg(file->format.toUpper());
+        const int index = m_documentTabs->addTab(reader, shortTitle);
+        m_documentTabs->setTabToolTip(index, publication->title);
+        m_documentTabs->setCurrentIndex(index);
+    });
+    return reader;
+}
+
+void MainWindow::closeDocumentTab(int index)
+{
+    if (index <= 0)
+        return; // The library stays.
+    QWidget *tab = m_documentTabs->widget(index);
+    m_documentTabs->removeTab(index);
+    delete tab;
+}
+
+void MainWindow::openPublicationElsewhere(qint64 id)
 {
     guarded(tr("Opening the file"), [&] {
-        // Until Papertrail has its own reader, files open in whatever the system uses for them.
         const std::optional<QString> path = firstFilePath(id);
         if (path)
             QDesktopServices::openUrl(QUrl::fromLocalFile(*path));
@@ -934,7 +1067,17 @@ void MainWindow::showContextMenu(const QPoint &position)
     if (count == 1) {
         if (const auto id = m_model->idAt(index.row())) {
             const qint64 publication = *id;
-            menu.addAction(tr("Open"), this, [this, publication] { openPublication(publication); });
+            const QList<FileRecord> choices = formatChoices(publication);
+            if (choices.size() > 1) {
+                for (const FileRecord &file : choices) {
+                    const qint64 fileId = file.id;
+                    menu.addAction(tr("Open %1").arg(file.format.toUpper()), this,
+                                   [this, publication, fileId] { openPublicationFile(publication, fileId); });
+                }
+            } else {
+                menu.addAction(tr("Open"), this, [this, publication] { openPublication(publication); });
+            }
+            menu.addAction(tr("Open in another app"), this, [this, publication] { openPublicationElsewhere(publication); });
             menu.addAction(tr("Show in folder"), this, [this, publication] { showPublicationInFolder(publication); });
             menu.addAction(tr("Edit..."), this, [this, publication] { editPublication(publication); });
             menu.addSeparator();
@@ -945,7 +1088,37 @@ void MainWindow::showContextMenu(const QPoint &position)
     for (const ReadStatus value : {ReadStatus::Unread, ReadStatus::Reading, ReadStatus::Read})
         status->addAction(readStatusLabel(value), this, [this, value] { setSelectedReadStatus(value); });
     menu.addAction(tr("Mark as checked"), this, &MainWindow::markSelectedChecked);
+    if (count >= 2 && count <= kMaxToCombine) {
+        menu.addSeparator();
+        menu.addAction(tr("Combine into one publication..."), this, [this] {
+            QMessageBox box(QMessageBox::Question, tr("Combine publications"),
+                            tr("Treat these as one publication, such as the same book in different formats?\n\n"
+                               "The first one's details are kept, and the others only fill in what it's missing. "
+                               "Tags, notes and highlights all carry over. Your files aren't changed."),
+                            QMessageBox::Yes | QMessageBox::Cancel, this);
+            box.setTextFormat(Qt::PlainText);
+            if (box.exec() == QMessageBox::Yes)
+                combineSelected();
+        });
+    }
     menu.exec(view->viewport()->mapToGlobal(position));
+}
+
+void MainWindow::combineSelected()
+{
+    guarded(tr("Combining the publications"), [&] {
+        const QList<qint64> ids = selectedIds();
+        if (ids.size() < 2)
+            return;
+        Transaction transaction(m_session.database());
+        for (qsizetype i = 1; i < ids.size(); ++i)
+            mergePublications(m_session.database(), ids.first(), ids.at(i), QStringLiteral("manual"));
+        transaction.commit();
+        m_selection->clear();
+        m_details->showPublication(ids.first());
+        statusBar()->showMessage(tr("Combined %1 into one.").arg(publicationCount(ids.size())), 5000);
+        refreshNow();
+    });
 }
 
 void MainWindow::askForBulkTag()
@@ -1114,7 +1287,7 @@ void MainWindow::onImportFinished(const import::ImportReport &report)
         return;
     }
     if (report.publicationsCreated == 0 && report.duplicates == 0 && report.moved == 0 && report.updated == 0
-        && report.unreadable == 0 && report.reclassified == 0) {
+        && report.unreadable == 0 && report.reclassified == 0 && report.formatsJoined == 0) {
         return;
     }
     QStringList parts;
@@ -1123,6 +1296,8 @@ void MainWindow::onImportFinished(const import::ImportReport &report)
         parts << tr("%1 duplicate files linked").arg(report.duplicates);
     if (report.moved > 0)
         parts << tr("%1 moved").arg(report.moved);
+    if (report.formatsJoined > 0)
+        parts << tr("%1 recognised as another format of a publication").arg(report.formatsJoined);
     if (report.reclassified > 0)
         parts << tr("%1 moved out of Preprints").arg(report.reclassified);
     if (report.updated > 0)

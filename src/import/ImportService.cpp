@@ -1,6 +1,8 @@
 #include "import/ImportService.h"
 
 #include "core/db/Database.h"
+#include "core/model/Identifiers.h"
+#include "core/repo/PublicationMerge.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -24,6 +26,7 @@ namespace {
 const char *const kFingerprintJob = "fingerprint";
 const char *const kInspectJob = "inspect";
 const char *const kReclassifyJob = "reclassify";
+const char *const kJoinFormatsJob = "join_formats";
 
 // Commit this often during a scan, so a scan stopped part way keeps what it has found.
 constexpr int kScanBatchSize = 500;
@@ -38,6 +41,35 @@ QString formatForFile(const QString &name)
     if (suffix == QStringLiteral("azw"))
         return QStringLiteral("azw3");
     return suffix;
+}
+
+// A title without its subtitle, ready to compare. A PDF's metadata often has only one or the other.
+QString mainTitleKey(const QString &title)
+{
+    return titleSortKey(title.section(u':', 0, 0));
+}
+
+// Long enough that two different works are unlikely to share it, unlike "Introduction" or "Notes".
+bool isDistinctiveTitle(const QString &key)
+{
+    return key.size() >= 12 && key.contains(u' ');
+}
+
+bool sameMainTitle(const Publication &a, const Publication &b)
+{
+    const QString keyA = mainTitleKey(a.title);
+    const QString keyB = mainTitleKey(b.title);
+    return !keyA.isEmpty() && keyA == keyB;
+}
+
+QStringList formatsOf(const QList<FileRecord> &files)
+{
+    QStringList formats;
+    for (const FileRecord &file : files) {
+        if (!formats.contains(file.format))
+            formats << file.format;
+    }
+    return formats;
 }
 
 QString jobPayload(qint64 fileId)
@@ -321,6 +353,8 @@ ImportReport ImportService::processQueue(const ProgressCallback &progress, const
             processInspect(job, report);
         else if (job.kind == QLatin1StringView(kReclassifyJob))
             processReclassify(job, report);
+        else if (job.kind == QLatin1StringView(kJoinFormatsJob))
+            processJoinFormats(job, report);
         else
             finishJob(job);
         ++done;
@@ -538,6 +572,136 @@ void ImportService::processReclassify(const Job &job, ImportReport &report)
     transaction.commit();
 }
 
+bool ImportService::holdsAnyFormat(qint64 publicationId, const QStringList &formats)
+{
+    const QStringList held = formatsOf(m_files.filesFor(publicationId));
+    return std::any_of(formats.cbegin(), formats.cend(), [&](const QString &format) { return held.contains(format); });
+}
+
+// Looks for a publication that this one is another format of. Two copies in one format aren't that:
+// they may be different editions or scans, so they stay apart unless they're the same contents.
+//
+// In order of confidence:
+//   1. The same name in the same folder, differing only by extension. That's someone's own filing.
+//   2. The same DOI or ISBN, and a title that agrees. The title's checked because a chapter or
+//      article can carry the identifier of the book or volume it came from.
+//   3. The same title, first author and year, with no identifier to go on. This is a judgement, so the
+//      result gets marked for checking.
+std::optional<ImportService::OtherFormat> ImportService::findOtherFormat(const Publication &publication, qint64 selfId,
+                                                                         const QStringList &formats,
+                                                                         const QList<FileRecord> &files)
+{
+    if (publication.parentId)
+        return std::nullopt;
+
+    const auto usable = [&](qint64 id) -> std::optional<Publication> {
+        if (id == selfId || holdsAnyFormat(id, formats))
+            return std::nullopt;
+        std::optional<Publication> candidate = m_publications.get(id);
+        if (!candidate || candidate->parentId || !m_publications.childIds(id).isEmpty())
+            return std::nullopt;
+        return candidate;
+    };
+
+    for (const FileRecord &file : files) {
+        const QFileInfo info(file.relativePath);
+        const QString base = info.completeBaseName();
+        auto sameName = m_db.prepare(
+            "SELECT id, relative_path FROM file WHERE root_id = ? AND file_name >= ? AND file_name < ?");
+        sameName->bind(1, file.rootId);
+        sameName->bind(2, base + u'.');
+        sameName->bind(3, base + u'/'); // The character after the full stop.
+        while (sameName->step()) {
+            const QFileInfo other(sameName->textAt(1));
+            if (other.path() != info.path() || other.completeBaseName() != base)
+                continue;
+            for (const qint64 id : m_files.publicationsFor(sameName->int64At(0))) {
+                if (usable(id))
+                    return OtherFormat{id, true};
+            }
+        }
+    }
+
+    const auto byIdentifier = [&](const char *sql, const QString &value) -> std::optional<OtherFormat> {
+        if (value.isEmpty())
+            return std::nullopt;
+        QList<qint64> ids;
+        {
+            auto select = m_db.prepare(sql);
+            select->bind(1, value);
+            while (select->step())
+                ids << select->int64At(0);
+        }
+        for (const qint64 id : ids) {
+            const std::optional<Publication> candidate = usable(id);
+            if (candidate && sameMainTitle(publication, *candidate))
+                return OtherFormat{id, true};
+        }
+        return std::nullopt;
+    };
+    if (const auto found = byIdentifier("SELECT id FROM publication WHERE doi = ?", publication.doi))
+        return found;
+    if (const auto found = byIdentifier("SELECT id FROM publication WHERE isbn13 = ?", publication.isbn13))
+        return found;
+    if (const auto found = byIdentifier("SELECT id FROM publication WHERE isbn10 = ?", publication.isbn10))
+        return found;
+
+    const QString key = mainTitleKey(publication.title);
+    if (!isDistinctiveTitle(key) || publication.authors.isEmpty() || publication.authors.first().family.isEmpty())
+        return std::nullopt;
+    QList<qint64> sameStart;
+    {
+        auto select = m_db.prepare("SELECT id FROM publication WHERE title_sort >= ? AND title_sort < ? LIMIT 50");
+        select->bind(1, key);
+        select->bind(2, key + QString::fromUcs4(U"\U0010FFFF"));
+        while (select->step())
+            sameStart << select->int64At(0);
+    }
+    for (const qint64 id : sameStart) {
+        const std::optional<Publication> candidate = usable(id);
+        if (!candidate || !sameMainTitle(publication, *candidate) || candidate->authors.isEmpty())
+            continue;
+        if (candidate->authors.first().family.compare(publication.authors.first().family, Qt::CaseInsensitive) != 0)
+            continue;
+        if (candidate->year && publication.year && *candidate->year != *publication.year)
+            continue;
+        if (!candidate->edition.isEmpty() && !publication.edition.isEmpty() && candidate->edition != publication.edition)
+            continue;
+        return OtherFormat{id, false};
+    }
+    return std::nullopt;
+}
+
+// Looks through the library once, for formats imported as separate publications before they could be
+// recognised. What's joined is what a new import would have joined.
+void ImportService::processJoinFormats(const Job &job, ImportReport &report)
+{
+    QList<qint64> ids;
+    {
+        auto select = m_db.prepare("SELECT DISTINCT publication_id FROM publication_file ORDER BY publication_id");
+        while (select->step())
+            ids << select->int64At(0);
+    }
+
+    for (const qint64 id : ids) {
+        const std::optional<Publication> publication = m_publications.get(id);
+        if (!publication || !m_publications.childIds(id).isEmpty())
+            continue;
+        const QList<FileRecord> files = m_files.filesFor(id);
+        const std::optional<OtherFormat> other = findOtherFormat(*publication, id, formatsOf(files), files);
+        if (!other)
+            continue;
+
+        Transaction transaction(m_db);
+        mergePublications(m_db, other->publicationId, id, QStringLiteral("import"));
+        if (!other->certain)
+            m_publications.setNeedsReview({other->publicationId}, true);
+        transaction.commit();
+        ++report.formatsJoined;
+    }
+    finishJob(job);
+}
+
 void ImportService::createPublication(const FileRecord &file, const InspectResult *inspection, ImportReport &report)
 {
     // A file that keeps failing can come through here again after a rescan.
@@ -610,6 +774,32 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
                                                     p.doi, isbn, p.issn, p.arxivId});
     p.type = classification.type;
     p.needsReview = !titleIsReliable || !classification.confident;
+
+    if (const std::optional<OtherFormat> other = findOtherFormat(p, 0, {file.format}, {file})) {
+        std::optional<Publication> existing = m_publications.get(other->publicationId);
+        if (existing) {
+            // This file may know more than the first one did. A real title replaces one that was
+            // only ever a guess, as long as nobody has chosen it by hand.
+            const QList<ProvenanceEntry> titles = m_publications.provenance(existing->id, QStringLiteral("title"));
+            const bool titleWasGuess = !titles.isEmpty()
+                && std::none_of(titles.cbegin(), titles.cend(), [](const ProvenanceEntry &entry) {
+                       return entry.source == QLatin1StringView("manual") || entry.source == QLatin1StringView("embedded");
+                   });
+            if (titleWasGuess && titleIsReliable)
+                existing->title = p.title;
+            PublicationRepository::fillGaps(*existing, p);
+            if (existing->type == PublicationType::Other)
+                existing->type = p.type;
+            if (titleWasGuess && titleIsReliable && classification.confident)
+                existing->needsReview = false;
+            if (!other->certain)
+                existing->needsReview = true;
+            m_publications.updateWithProvenance(*existing, QStringLiteral("import"));
+            m_files.link(existing->id, file.id, false);
+            ++report.formatsJoined;
+            return;
+        }
+    }
 
     const qint64 id = m_publications.create(p);
     m_files.link(id, file.id, true);

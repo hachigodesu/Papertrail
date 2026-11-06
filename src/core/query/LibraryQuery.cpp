@@ -349,7 +349,10 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
 
     // Read afterwards rather than joined, so it only ever costs one small lookup per row shown.
     Statement &file = m_db.cached(
-        "SELECT f.sha256, f.format, f.status FROM publication_file pf JOIN file f ON f.id = pf.file_id "
+        "SELECT f.sha256, f.format, f.status, "
+        "(SELECT group_concat(DISTINCT f2.format) FROM publication_file pf2 JOIN file f2 ON f2.id = pf2.file_id "
+        " WHERE pf2.publication_id = pf.publication_id) "
+        "FROM publication_file pf JOIN file f ON f.id = pf.file_id "
         "WHERE pf.publication_id = ? ORDER BY pf.is_primary DESC, f.id LIMIT 1");
     for (qsizetype i = 0; i < rows.size(); ++i) {
         file.bind(1, fileOwners.at(i));
@@ -357,6 +360,10 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
             rows[i].coverSha = file.textAt(0);
             rows[i].format = file.textAt(1);
             rows[i].fileStatus = file.textAt(2);
+            rows[i].formats = file.textAt(3).split(u',', Qt::SkipEmptyParts);
+            // The main file's format comes first, wherever SQLite happened to put it.
+            if (rows[i].formats.removeOne(rows[i].format))
+                rows[i].formats.prepend(rows[i].format);
         }
         file.reset();
     }

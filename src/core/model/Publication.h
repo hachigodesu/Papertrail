@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 #include <optional>
 
@@ -142,6 +143,7 @@ struct PublicationSummary {
     QString coverSha;
     QString format;
     QString fileStatus; // "ok", "missing", "offline" or "unreadable".
+    QStringList formats; // Every format it's available in, starting with the main file's.
 };
 
 } // namespace papertrail::core

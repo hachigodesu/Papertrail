@@ -7,7 +7,7 @@
 
 A desktop library manager and reader for university students and researchers, for Windows and Linux. Papertrail indexes your journal articles, textbooks, theses, reports and standards where they already are, and never modifies your files.
 
-**Status:** early development. The library window works, for browsing, filtering, tagging and editing, but documents open in your system's own app until the built-in reader is finished. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
+**Status:** early development. You can browse, filter, tag and edit your library, and read PDF and EPUB files in the built-in reader. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
 
 ## Building
 
