@@ -14,6 +14,7 @@
 #include "import/ImportService.h"
 
 #include <QCheckBox>
+#include <QApplication>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDirIterator>
@@ -22,12 +23,14 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QSignalSpy>
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QTableView>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QtTest>
 
@@ -63,6 +66,18 @@ class LibraryUiTest : public QObject {
 private slots:
     void init()
     {
+        // An error box would wait for a click forever, with no one here to click it. A test that
+        // brings one up fails, and says what it said.
+        m_unexpectedBoxes.clear();
+        m_boxWatcher = std::make_unique<QTimer>();
+        connect(m_boxWatcher.get(), &QTimer::timeout, this, [this] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                m_unexpectedBoxes << box->text();
+                box->close();
+            }
+        });
+        m_boxWatcher->start(100);
+
         m_dir = std::make_unique<QTemporaryDir>();
         LibraryPaths paths;
         paths.database = m_dir->filePath(QStringLiteral("library.db"));
@@ -74,6 +89,8 @@ private slots:
 
     void cleanup()
     {
+        m_boxWatcher.reset();
+        QVERIFY2(m_unexpectedBoxes.isEmpty(), qPrintable(m_unexpectedBoxes.join(QStringLiteral("; "))));
         m_window.reset();
         m_session.reset();
         m_dir.reset();
@@ -938,6 +955,8 @@ private:
         return folder;
     }
 
+    std::unique_ptr<QTimer> m_boxWatcher;
+    QStringList m_unexpectedBoxes;
     std::unique_ptr<QTemporaryDir> m_dir;
     std::unique_ptr<LibrarySession> m_session;
     std::unique_ptr<MainWindow> m_window;

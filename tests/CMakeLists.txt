@@ -60,3 +60,10 @@ target_compile_definitions(test_reader_perf PRIVATE PAPERTRAIL_WORKER_PATH="$<TA
 add_dependencies(test_reader_perf papertrail-worker)
 add_test(NAME test_reader_perf COMMAND test_reader_perf)
 set_tests_properties(test_reader_perf PROPERTIES LABELS perf TIMEOUT 900 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# On Windows, QtTest prints nothing unless it's told to, which leaves CI logs with no way of saying
+# what failed.
+get_property(all_tests DIRECTORY PROPERTY TESTS)
+foreach(one_test IN LISTS all_tests)
+    set_property(TEST ${one_test} APPEND PROPERTY ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1")
+endforeach()
