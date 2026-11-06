@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QString>
 
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -30,13 +31,15 @@ enum class WorkerFailure {
     Crashed,  // The worker died, most likely because of this file.
     TimedOut, // The worker took too long, and has been stopped.
     Rejected, // The worker reported that it couldn't read the file.
+    Cancelled, // Stopped on request. Says nothing about the file.
 };
 
 // Runs papertrail-worker and sends it one request at a time. It's restarted whenever it's needed
 // again after a crash or timeout, so a bad file can't take the app down with it.
 class WorkerClient {
 public:
-    explicit WorkerClient(const QString &workerPath);
+    // `cancelled`, if given, is checked while waiting, and stops the worker when it returns true.
+    explicit WorkerClient(const QString &workerPath, std::function<bool()> cancelled = {});
     ~WorkerClient();
 
     struct HashResult {
@@ -67,6 +70,7 @@ private:
     void stop();
 
     QString m_workerPath;
+    std::function<bool()> m_cancelled;
     std::unique_ptr<QProcess> m_process;
     qint64 m_nextId = 1;
     int m_startCount = 0;

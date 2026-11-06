@@ -49,7 +49,7 @@ Run one test function. On Windows, QtTest prints nothing to the console unless `
 QT_FORCE_STDERR_LOGGING=1 ./build/windows-debug/test_import.exe functionName
 ```
 
-`-functions` lists a program's test functions. Windows executables land in the root of `build/<preset>/`. On Linux they're in `src/app/`, `src/worker/`, `tests/` and `tools/<name>/` under the build folder.
+`-functions` lists a program's test functions. Windows executables land in the root of `build/<preset>/`. On Linux they're in `src/app/` (the app and its worker), `tests/` and `tools/<name>/` under the build folder. Don't run `papertrail` itself to test something: it opens the user's real library. Tests and `ui-preview` use their own.
 
 ### Linux (WSL2)
 
@@ -73,7 +73,7 @@ Test on all three platforms before calling work finished. They behave differentl
 
 ### Performance tests
 
-These are labelled `perf` and excluded from the normal test presets. They take minutes on a 100,000-publication library, with a 100 ms target (250 ms for ranked search). They need a release build:
+These are labelled `perf` and excluded from the normal test presets. They take minutes on a 100,000-publication library, with a 100 ms target for results (250 ms for ranked search). They need a release build:
 
 ```bash
 cmake --preset windows-release
@@ -87,12 +87,13 @@ cmake --build --preset windows-release
 ctest --preset windows-perf
 ```
 
-Use `linux-release` and `linux-perf` on Linux. `test_query_perf` reads `PAPERTRAIL_PERF_COUNT`, `PAPERTRAIL_PERF_DB` (reuse a library between runs) and `PAPERTRAIL_PERF_REPORT_ONLY` (never fail, for CI).
+Use `linux-release` and `linux-perf` on Linux. `test_query_perf` and `test_ui_perf` read `PAPERTRAIL_PERF_COUNT`, `PAPERTRAIL_PERF_DB` (reuse a library between runs) and `PAPERTRAIL_PERF_REPORT_ONLY` (never fail, for CI).
 
 ### Tools
 
 - `papertrail-import --db X --cache Y [--worker W] [--max-jobs N] FOLDER...` runs an import without the GUI.
 - `gen-library` builds synthetic libraries.
+- `ui-preview --db X --cache Y --out DIR` saves pictures of the window, for checking how it looks. Use `QT_QPA_PLATFORM=offscreen`, which gives a poor fallback font but no window on the user's screen.
 - `-DPAPERTRAIL_BUILD_FORMAT_PROBE=ON` adds `format-probe`, which tests document formats against the engines.
 - `tests/make_import_samples.py OUTPUT_DIR` generates the documents in `tests/samples/`. They're committed as binary because tests depend on their exact bytes.
 - `packaging/linux/build-appimage.sh` builds the AppImage, and `smoke-test-appimage.sh` tests it.
@@ -106,7 +107,7 @@ Use `linux-release` and `linux-perf` on Linux. `test_query_perf` reads `PAPERTRA
 | `papertrail_core` | Qt Core, SQLite | Database, schema, models, queries, repositories, settings |
 | `papertrail_engine` | MuPDF, DjVuLibre | Opens and renders documents, and extracts their text |
 | `papertrail_import` | core | Scanning, the job queue, metadata extraction and classification, the worker client |
-| `papertrail_ui` | Qt Widgets | GUI, still a placeholder window |
+| `papertrail_ui` | core, import, Qt Widgets | The library window |
 | `papertrail` | ui | The app |
 | `papertrail-worker` | engine, import | The only part of the app that opens documents so far |
 
@@ -125,6 +126,24 @@ This is a real risk: Arch's MuPDF hits a double free on `tests/samples/truncated
 `ImportService` holds work in the database's `job` table (`fingerprint`, then `inspect`), so stopping and re-running carries on. A partial unique index allows one active job per kind and file. Duplicates are matched by content hash, so one publication can have several file locations. `linkToKnownContents` also runs just before inspect, to catch copies that were queued at the same time.
 
 `createPublication` chooses evidence in a fixed order, and anything guessed is marked for review. For titles, that's embedded metadata unless it's junk, then first-page text, then the file name. Identifiers are only believed near the start of a document, and a document's type is decided firmly only from its first page, because reference lists mention other theses, reports and conferences. Heuristics in `src/import/Extractors.cpp` came from real-file failures: when changing them, add a made-up case with the same pattern to `test_extractors`.
+
+### Library window threads
+
+The window's thread never waits on slow work, and each background thread opens its own `Database` connection (WAL allows reads during writes, with a 5 s busy timeout on writes). `LibrarySession` holds the window thread's connection, and takes a lock file so only one copy can open a library.
+
+| Thread | Does |
+|---|---|
+| `ListQueryThread` | The list's total and pages. The newest request is served first, and results for an old generation are dropped |
+| `SidebarQueryThread` | Filter counts, which take a few hundred ms at 100,000. A newer request abandons one in progress |
+| `ImportThread` | Scans and the job queue. Its `cancelled` check also stops the worker mid-job, without counting against the file |
+| `BulkChanges` | Changes to many publications, in batches so other writers only wait briefly |
+| `CoverCache` pool | Decodes covers, newest request first |
+
+`PublicationListModel` backs both views and holds only a few pages. `data()` returns nothing for rows it hasn't fetched and requests the page, so anything needing a row's id must handle `idAt()` returning null. A selection is by row, and rows can move when the library changes: `MainWindow::onResultsChanged` clears a selection it can no longer vouch for. Count selections with `selectedRowRanges`, not `selectedRows()`, which is slow at 100,000.
+
+**Text from documents is untrusted.** Show it with `Qt::PlainText` or through the delegates' `drawLines`, and only follow links that pass `safeWebLink`.
+
+`FolderWatcher` differs by platform on purpose: Linux uses inotify, but on Windows `QFileSystemWatcher` stops people renaming their own folders, so it scans periodically and when the window is activated instead.
 
 ### Database and queries
 

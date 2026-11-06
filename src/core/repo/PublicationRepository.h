@@ -30,6 +30,13 @@ public:
     // Replaces the stored record, including its people, and refreshes updatedAt.
     void update(Publication &publication);
 
+    // As update(), and also keeps each changed field's earlier value under `source`.
+    void updateWithProvenance(Publication &publication, const QString &source);
+
+    // For many publications at once, without rewriting each one's people.
+    void setReadStatus(const QList<qint64> &ids, ReadStatus status);
+    void setNeedsReview(const QList<qint64> &ids, bool needsReview);
+
     void remove(qint64 id);
 
     std::optional<Publication> get(qint64 id);

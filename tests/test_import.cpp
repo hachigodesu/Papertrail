@@ -10,8 +10,13 @@
 #include <QCryptographicHash>
 #include <QDirIterator>
 #include <QFile>
+#include <QElapsedTimer>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QtTest>
+
+#include <atomic>
+#include <thread>
 
 using namespace papertrail;
 using namespace papertrail::core;
@@ -149,7 +154,7 @@ private slots:
         QTest::newRow("report") << "report.pdf" << int(PublicationType::TechnicalReport);
         QTest::newRow("standard") << "standard.pdf" << int(PublicationType::Standard);
         QTest::newRow("conference") << "conference.pdf" << int(PublicationType::ConferencePaper);
-        QTest::newRow("preprint") << "preprint.pdf" << int(PublicationType::Preprint);
+        QTest::newRow("preprint wording isn't either") << "preprint_stamp.pdf" << int(PublicationType::JournalArticle);
     }
 
     void eachKindOfDocumentIsClassified()
@@ -603,6 +608,186 @@ private slots:
             QCOMPARE(after.value(entry.key()).first, entry.value().first);
             QCOMPARE(after.value(entry.key()).second, entry.value().second);
         }
+    }
+
+    void anArxivStampIsNotEnoughToSortAPreprint()
+    {
+        copySample("preprint.pdf");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        const Publication p = *m_publications->get(m_query->ids({}, {}).first());
+        QCOMPARE(p.type, PublicationType::Other);
+        QVERIFY(p.needsReview); // It's a guess, and the arXiv number is still kept.
+        QCOMPARE(p.arxivId, QStringLiteral("2101.00001v2"));
+    }
+
+    void automaticSortingIntoPreprintsIsUndone()
+    {
+        copySample("preprint_stamp.pdf"); // Moved by the check that used to run on existing libraries.
+        copySample("preprint.pdf");       // Sorted when it was imported, by the earlier rule.
+        copySample("article.pdf");        // Marked by the user.
+        copySample("thesis.pdf");         // Never involved.
+        m_service->scan(m_root);
+        m_service->processQueue();
+
+        qint64 moved = 0;
+        qint64 sorted = 0;
+        qint64 marked = 0;
+        qint64 untouched = 0;
+        for (const qint64 id : m_query->ids({}, {})) {
+            Publication p = *m_publications->get(id);
+            if (p.title == QStringLiteral("Measuring Example Flows")) {
+                moved = id;
+                p.type = PublicationType::Preprint;
+                m_publications->updateWithProvenance(p, QStringLiteral("classifier"));
+            } else if (p.title == QStringLiteral("Sampling Made Simple")) {
+                sorted = id;
+                p.type = PublicationType::Preprint;
+                p.needsReview = false;
+                m_publications->update(p);
+            } else if (p.type == PublicationType::JournalArticle) {
+                marked = id;
+                p.type = PublicationType::Preprint;
+                m_publications->updateWithProvenance(p, QStringLiteral("manual"));
+            } else {
+                untouched = id;
+            }
+        }
+        QVERIFY(moved && sorted && marked && untouched);
+        const PublicationType untouchedType = m_publications->get(untouched)->type;
+        const QMap<QString, QPair<QByteArray, QDateTime>> before = fingerprintFolder();
+
+        // A check left waiting from the old version isn't run.
+        m_db->exec("INSERT INTO job (kind, payload, created_at, updated_at) "
+                   "SELECT 'reclassify', json_object('file', id), 0, 0 FROM file");
+        m_db->setUserVersion(3);
+        migrateLibrary(*m_db);
+
+        // The one with a recorded earlier type goes back at once.
+        QCOMPARE(m_publications->get(moved)->type, PublicationType::JournalArticle);
+        QCOMPARE(m_service->pendingJobs(), 1);
+
+        const ImportReport report = m_service->processQueue();
+        QCOMPARE(report.reclassified, 1);
+        QCOMPARE(report.publicationsCreated, 0);
+        QCOMPARE(m_publications->get(sorted)->type, PublicationType::Other);
+        QVERIFY(m_publications->get(sorted)->needsReview);
+        QCOMPARE(m_publications->get(marked)->type, PublicationType::Preprint);
+        QCOMPARE(m_publications->get(untouched)->type, untouchedType);
+        QCOMPARE(m_query->count([] { PublicationFilter f; f.tabTypes = typesForTab(LibraryTab::Preprints); return f; }()), 1);
+        QCOMPARE(fingerprintFolder(), before);
+    }
+
+    void fileStillChangingIsLeftForLater()
+    {
+        copySample("article.pdf");
+        QFile copied(docPath("article.pdf"));
+        QVERIFY(copied.open(QIODevice::ReadWrite));
+        QVERIFY(copied.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime));
+        copied.close();
+
+        ImportOptions options = serviceOptions();
+        options.settleMs = 3600000;
+        ImportService settling(*m_db, options);
+        const ScanReport report = settling.scan(m_root);
+        QCOMPARE(report.stillChanging, 1);
+        QCOMPARE(report.newFiles, 0);
+        QCOMPARE(settling.pendingJobs(), 0);
+
+        // Once it's stopped changing, it goes in as normal.
+        options.settleMs = 0;
+        ImportService settled(*m_db, options);
+        QCOMPARE(settled.scan(m_root).newFiles, 1);
+    }
+
+    void cancellingAScanDoesNotMarkFilesMissing()
+    {
+        copySample("article.pdf");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_query->flagCounts({}).missingOrOffline, 0);
+
+        ImportOptions options = serviceOptions();
+        options.cancelled = [] { return true; };
+        ImportService cancelled(*m_db, options);
+        const ScanReport report = cancelled.scan(m_root);
+        QVERIFY(report.stoppedEarly);
+        QCOMPARE(report.nowMissing, 0);
+        QCOMPARE(m_query->flagCounts({}).missingOrOffline, 0);
+    }
+
+    void cancellingDoesNotCountAgainstAFile()
+    {
+        // Hangs until it's cancelled, far sooner than the timeout.
+        const QString name = QStringLiteral("__hang__.pdf");
+        QVERIFY(QFile::copy(sample("article.pdf"), docs() + u'/' + name));
+        qputenv("PAPERTRAIL_WORKER_TEST_FAULTS", "1");
+
+        std::atomic_bool stop = false;
+        ImportOptions options = serviceOptions();
+        options.cancelled = [&] { return stop.load(); };
+        {
+            ImportService service(*m_db, options);
+            service.scan(m_root);
+            QElapsedTimer timer;
+            timer.start();
+            std::thread stopper([&] {
+                QThread::msleep(500);
+                stop = true;
+            });
+            const ImportReport report = service.processQueue();
+            stopper.join();
+            QVERIFY(report.stoppedEarly);
+            QCOMPARE(report.unreadable, 0);
+            QVERIFY(timer.elapsed() < 30000);
+            QCOMPARE(service.pendingJobs(), 1);
+        }
+        qunsetenv("PAPERTRAIL_WORKER_TEST_FAULTS");
+
+        auto attempts = m_db->prepare("SELECT attempts, status FROM job");
+        QVERIFY(attempts->step());
+        QCOMPARE(attempts->intAt(0), 0);
+        QCOMPARE(attempts->textAt(1), QStringLiteral("pending"));
+    }
+
+    void anInterruptedJobIsNotHeldAgainstItsFile()
+    {
+        copySample("article.pdf");
+        m_service->scan(m_root);
+        m_db->exec("UPDATE job SET status = 'running', attempts = 1");
+        m_service = makeService(); // As when starting up after the app was closed part way.
+        auto attempts = m_db->prepare("SELECT attempts, status FROM job");
+        QVERIFY(attempts->step());
+        QCOMPARE(attempts->intAt(0), 0);
+        QCOMPARE(attempts->textAt(1), QStringLiteral("pending"));
+    }
+
+    void aLibraryFolderInsideAnotherIsOnlyScannedOnce()
+    {
+        QDir(docs()).mkpath(QStringLiteral("inner"));
+        QVERIFY(QFile::copy(sample("article.pdf"), docs() + QStringLiteral("/inner/article.pdf")));
+        copySample("book.epub");
+
+        const qint64 inner = m_files->addRoot(QStringLiteral("Inner"), docs() + QStringLiteral("/inner"));
+        QCOMPARE(m_service->scan(m_root).newFiles, 1);
+        QCOMPARE(m_service->scan(inner).newFiles, 1);
+        QVERIFY(isPathInside(QStringLiteral("C:/a/b/c.pdf"), QStringLiteral("C:/a/b")));
+        QVERIFY(isPathInside(QStringLiteral("C:/a/b"), QStringLiteral("C:/a/b")));
+        QVERIFY(!isPathInside(QStringLiteral("C:/a/bc/d.pdf"), QStringLiteral("C:/a/b")));
+        QVERIFY(isPathInside(QStringLiteral("P:/x.pdf"), QStringLiteral("P:/")));
+    }
+
+    void summariesCarryWhatTheLibraryViewShows()
+    {
+        copySample("article.pdf");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        const QList<PublicationSummary> rows = m_query->page({}, {}, 0, 10);
+        QCOMPARE(rows.size(), 1);
+        QCOMPARE(rows.first().format, QStringLiteral("pdf"));
+        QCOMPARE(rows.first().fileStatus, QStringLiteral("ok"));
+        QVERIFY(!rows.first().coverSha.isEmpty());
+        QVERIFY(QFile::exists(coverPathFor(m_dir->filePath(QStringLiteral("cache")), rows.first().coverSha)));
     }
 
 private:

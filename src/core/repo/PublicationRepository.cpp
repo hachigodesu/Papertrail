@@ -286,6 +286,84 @@ void PublicationRepository::update(Publication &publication)
     publication.updatedAt = now;
 }
 
+namespace {
+
+QString peopleText(const QList<PersonName> &people)
+{
+    QStringList names;
+    for (const PersonName &person : people)
+        names << person.display();
+    return names.join(QStringLiteral("; "));
+}
+
+QString numberText(const std::optional<int> &value)
+{
+    return value ? QString::number(*value) : QString();
+}
+
+} // namespace
+
+void PublicationRepository::updateWithProvenance(Publication &publication, const QString &source)
+{
+    Transaction transaction(m_db);
+    const std::optional<Publication> before = get(publication.id);
+    if (!before)
+        throw std::invalid_argument("publication doesn't exist");
+    update(publication);
+
+    const auto record = [&](const char *field, const QString &oldValue, const QString &newValue) {
+        if (oldValue != newValue && !(oldValue.isEmpty() && newValue.isEmpty())) {
+            recordProvenance(publication.id, {QString::fromLatin1(field), source, std::nullopt, oldValue, newValue, 0});
+        }
+    };
+    record("type", toDbString(before->type), toDbString(publication.type));
+    record("title", before->title, publication.title);
+    for (const TextColumn &column : kTextColumns) {
+        // Personal notes aren't metadata, and have no earlier values to go back to.
+        if (qstrcmp(column.name, "notes") != 0)
+            record(column.name, (*before).*column.member, publication.*column.member);
+    }
+    for (const IntColumn &column : kIntColumns) {
+        if (qstrcmp(column.name, "rating") != 0)
+            record(column.name, numberText((*before).*column.member), numberText(publication.*column.member));
+    }
+    record("authors", peopleText(before->authors), peopleText(publication.authors));
+    record("editors", peopleText(before->editors), peopleText(publication.editors));
+    record("translators", peopleText(before->translators), peopleText(publication.translators));
+    record("advisors", peopleText(before->advisors), peopleText(publication.advisors));
+    transaction.commit();
+}
+
+void PublicationRepository::setReadStatus(const QList<qint64> &ids, ReadStatus status)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    Transaction transaction(m_db);
+    Statement &update = m_db.cached("UPDATE publication SET read_status = ?, updated_at = ? WHERE id = ?");
+    for (const qint64 id : ids) {
+        update.bind(1, toDbString(status));
+        update.bind(2, now);
+        update.bind(3, id);
+        update.step();
+        update.reset();
+    }
+    transaction.commit();
+}
+
+void PublicationRepository::setNeedsReview(const QList<qint64> &ids, bool needsReview)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    Transaction transaction(m_db);
+    Statement &update = m_db.cached("UPDATE publication SET needs_review = ?, updated_at = ? WHERE id = ?");
+    for (const qint64 id : ids) {
+        update.bind(1, needsReview ? 1 : 0);
+        update.bind(2, now);
+        update.bind(3, id);
+        update.step();
+        update.reset();
+    }
+    transaction.commit();
+}
+
 void PublicationRepository::remove(qint64 id)
 {
     Transaction transaction(m_db);

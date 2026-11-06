@@ -19,7 +19,7 @@ enum class PublicationType {
     Dissertation,
     TechnicalReport,
     Standard,
-    Preprint,
+    Preprint, // Only ever chosen by the user. See import::classify.
     Other,
 };
 
@@ -32,6 +32,7 @@ enum class LibraryTab {
     All,
     JournalVolumes,
     JournalArticles,
+    Preprints,
     ConferencePapers,
     Textbooks,
     ThesesAndDissertations,
@@ -126,7 +127,7 @@ struct Publication {
     qint64 updatedAt = 0;
 };
 
-// What a library list needs for one row, read without any joins.
+// What a library list needs for one row.
 struct PublicationSummary {
     qint64 id = 0;
     PublicationType type = PublicationType::Other;
@@ -135,6 +136,12 @@ struct PublicationSummary {
     std::optional<int> year;
     QString containerTitle;
     ReadStatus readStatus = ReadStatus::Unread;
+    bool needsReview = false;
+
+    // From the publication's main file, or its volume's. All null if it has no file.
+    QString coverSha;
+    QString format;
+    QString fileStatus; // "ok", "missing", "offline" or "unreadable".
 };
 
 } // namespace papertrail::core

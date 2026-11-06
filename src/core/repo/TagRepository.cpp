@@ -163,6 +163,14 @@ void TagRepository::assign(qint64 publicationId, qint64 tagId)
     insert.reset();
 }
 
+void TagRepository::assign(const QList<qint64> &publicationIds, qint64 tagId)
+{
+    Transaction transaction(m_db);
+    for (const qint64 id : publicationIds)
+        assign(id, tagId);
+    transaction.commit();
+}
+
 void TagRepository::unassign(qint64 publicationId, qint64 tagId)
 {
     auto remove = m_db.prepare("DELETE FROM publication_tag WHERE publication_id = ? AND tag_id = ?");

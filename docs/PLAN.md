@@ -235,7 +235,7 @@ An import report shows how many publications were linked, proposed or left unmat
 └──────────────┴───────────────────────────────────────┴──────────────────┘
 ```
 
-- **Tabs:** All, Journal Volumes, Journal Articles, Conference Papers, Textbooks, Theses & Dissertations, Technical Reports, Standards, Other.
+- **Tabs:** All, Journal Volumes, Journal Articles, Preprints, Conference Papers, Textbooks, Theses & Dissertations, Technical Reports, Standards, Other.
 - **Filter sidebar:** every filter shows live counts. Values within one filter combine with OR, and different filters combine with AND. Filters cover tags, year range, author, journal, publisher, conference, institution, language, format, read status, needs review, no text, no file linked, and missing or offline files.
 - **Search box:** plain text, or field searches such as `author:`, `tag:`, `year:>2010`, `doi:`. A scope switch extends the search to document contents.
 - **Grid and list:** both use virtualised models and load covers lazily.

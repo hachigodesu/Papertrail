@@ -14,6 +14,7 @@ class Database;
 enum class SettingKind {
     Value,       // Means the same on any computer.
     MachinePath, // A path on this computer, which usually won't exist on another.
+    ThisComputer, // Means nothing elsewhere, such as window sizes. Never exported or imported.
 };
 
 struct SettingDefinition {
@@ -44,7 +45,8 @@ public:
     void setValue(const QString &key, const QJsonValue &value);
     void reset(const QString &key);
 
-    // Every setting's current value, including defaults, ready for a library export.
+    // Every setting's current value, including defaults, ready for a library export. Leaves out
+    // settings that belong to this computer alone.
     QJsonObject exportAll();
 
     // Applies settings from an export. Unusable entries are reported rather than treated as errors.

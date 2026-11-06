@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QList>
 #include <QString>
 
@@ -38,6 +39,7 @@ public:
 
     qint64 addRoot(const QString &name, const QString &path);
     QList<LibraryRoot> roots();
+    QHash<qint64, qint64> fileCountsByRoot();
 
     // Points a root at a new location. Its files keep their relative paths and links.
     void repointRoot(qint64 rootId, const QString &newPath);

@@ -6,8 +6,8 @@
 
 namespace papertrail::import {
 
-WorkerClient::WorkerClient(const QString &workerPath)
-    : m_workerPath(workerPath)
+WorkerClient::WorkerClient(const QString &workerPath, std::function<bool()> cancelled)
+    : m_workerPath(workerPath), m_cancelled(std::move(cancelled))
 {
 }
 
@@ -69,6 +69,10 @@ WorkerClient::Reply WorkerClient::call(QJsonObject request, int timeoutMs)
         if (m_process->state() == QProcess::NotRunning) {
             stop();
             return {WorkerFailure::Crashed, QStringLiteral("the worker stopped unexpectedly"), {}};
+        }
+        if (m_cancelled && m_cancelled()) {
+            stop();
+            return {WorkerFailure::Cancelled, QStringLiteral("stopped on request"), {}};
         }
         if (deadline.hasExpired()) {
             stop();

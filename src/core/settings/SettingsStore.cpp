@@ -62,7 +62,13 @@ const QList<SettingDefinition> &settingDefinitions()
          {QStringLiteral("title"), QStringLiteral("author"), QStringLiteral("year"), QStringLiteral("added")}},
         {QStringLiteral("library.sort_ascending"), true, K::Value, {}},
         {QStringLiteral("library.rescan_on_startup"), true, K::Value, {}},
+        {QStringLiteral("library.watch_folders"), true, K::Value, {}},
+        {QStringLiteral("library.show_filters"), true, K::Value, {}},
+        {QStringLiteral("library.show_details"), true, K::Value, {}},
         {QStringLiteral("library.last_import_folder"), QStringLiteral(""), K::MachinePath, {}},
+        {QStringLiteral("window.geometry"), QStringLiteral(""), K::ThisComputer, {}},
+        {QStringLiteral("window.splitter"), QStringLiteral(""), K::ThisComputer, {}},
+        {QStringLiteral("window.list_columns"), QStringLiteral(""), K::ThisComputer, {}},
         {QStringLiteral("reader.page_layout"), QStringLiteral("continuous"), K::Value,
          {QStringLiteral("single"), QStringLiteral("two_page"), QStringLiteral("continuous")}},
         {QStringLiteral("reader.page_colours"), QStringLiteral("light"), K::Value,
@@ -109,8 +115,10 @@ void SettingsStore::reset(const QString &key)
 QJsonObject SettingsStore::exportAll()
 {
     QJsonObject settings;
-    for (const SettingDefinition &definition : settingDefinitions())
-        settings.insert(definition.key, value(definition.key));
+    for (const SettingDefinition &definition : settingDefinitions()) {
+        if (definition.kind != SettingKind::ThisComputer)
+            settings.insert(definition.key, value(definition.key));
+    }
     return settings;
 }
 
@@ -120,7 +128,8 @@ SettingsImportResult SettingsStore::importAll(const QJsonObject &settings)
     Transaction transaction(m_db);
     for (auto entry = settings.begin(); entry != settings.end(); ++entry) {
         const SettingDefinition *definition = findDefinition(entry.key());
-        if (!definition || !isValid(*definition, entry.value())) {
+        if (!definition || definition->kind == SettingKind::ThisComputer
+            || !isValid(*definition, entry.value())) {
             result.ignored << entry.key();
         } else if (definition->kind == SettingKind::MachinePath) {
             result.suggestedPaths.insert(entry.key(), entry.value());

@@ -7,7 +7,7 @@
 
 A desktop library manager and reader for university students and researchers, for Windows and Linux. Papertrail indexes your journal articles, textbooks, theses, reports and standards where they already are, and never modifies your files.
 
-**Status:** early development (milestone M0). Nothing is usable yet. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
+**Status:** early development. The library window works, for browsing, filtering, tagging and editing, but documents open in your system's own app until the built-in reader is finished. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
 
 ## Building
 
@@ -18,7 +18,7 @@ Requires CMake 3.25+, Ninja, a C++20 compiler and Qt 6.12 or newer. Windows buil
 Install MSYS2 at `C:\msys64`, then in a UCRT64 shell:
 
 ```bash
-pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-qt6-base
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-libmupdf mingw-w64-ucrt-x86_64-djvulibre
 ```
 
 Then from the project folder:
@@ -37,15 +37,15 @@ ctest --preset windows-debug
 
 ### Linux
 
-Install Qt 6.12 or newer, CMake and Ninja, then use the same commands with the `linux-debug` preset.
+Install Qt 6.12 or newer, MuPDF, DjVuLibre, CMake and Ninja, then use the same commands with the `linux-debug` preset.
 
 On Arch:
 
 ```bash
-sudo pacman -S --needed base-devel cmake ninja qt6-base
+sudo pacman -S --needed base-devel cmake ninja qt6-base libmupdf djvulibre
 ```
 
-Ubuntu's own Qt packages are older than 6.12, so install Qt with [aqtinstall](https://github.com/miurahr/aqtinstall) and pass its location to CMake with `-DCMAKE_PREFIX_PATH`.
+Ubuntu's own Qt and MuPDF packages are too old. Install Qt with [aqtinstall](https://github.com/miurahr/aqtinstall) and pass its location to CMake with `-DCMAKE_PREFIX_PATH`, and build MuPDF with `packaging/linux/install-mupdf.sh`.
 
 ## Licence
 

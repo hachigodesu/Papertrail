@@ -68,9 +68,10 @@ private slots:
     {
         m_settings->setValue(QStringLiteral("library.view"), QStringLiteral("list"));
         const QJsonObject exported = m_settings->exportAll();
-        QCOMPARE(exported.size(), settingDefinitions().size());
-        for (const SettingDefinition &definition : settingDefinitions())
-            QVERIFY2(exported.contains(definition.key), qPrintable(definition.key));
+        for (const SettingDefinition &definition : settingDefinitions()) {
+            const bool expected = definition.kind != SettingKind::ThisComputer;
+            QVERIFY2(exported.contains(definition.key) == expected, qPrintable(definition.key));
+        }
         QCOMPARE(exported.value(QStringLiteral("library.view")).toString(), QStringLiteral("list"));
     }
 

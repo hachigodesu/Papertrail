@@ -44,6 +44,7 @@ public:
     QList<qint64> withDescendants(qint64 id);
 
     void assign(qint64 publicationId, qint64 tagId);
+    void assign(const QList<qint64> &publicationIds, qint64 tagId);
     void unassign(qint64 publicationId, qint64 tagId);
     QList<Tag> tagsFor(qint64 publicationId);
 

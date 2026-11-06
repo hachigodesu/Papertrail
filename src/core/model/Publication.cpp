@@ -52,6 +52,8 @@ QList<PublicationType> typesForTab(LibraryTab tab)
         return {PublicationType::JournalVolume};
     case LibraryTab::JournalArticles:
         return {PublicationType::JournalArticle};
+    case LibraryTab::Preprints:
+        return {PublicationType::Preprint};
     case LibraryTab::ConferencePapers:
         return {PublicationType::ConferenceProceedings, PublicationType::ConferencePaper};
     case LibraryTab::Textbooks:
@@ -63,7 +65,7 @@ QList<PublicationType> typesForTab(LibraryTab tab)
     case LibraryTab::Standards:
         return {PublicationType::Standard};
     case LibraryTab::Other:
-        return {PublicationType::Preprint, PublicationType::Other};
+        return {PublicationType::Other};
     }
     return {};
 }

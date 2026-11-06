@@ -314,6 +314,53 @@ ALTER TABLE file ADD COLUMN problem TEXT;
 CREATE UNIQUE INDEX job_one_active ON job(kind, payload) WHERE status IN ('pending', 'running');
 )sql";
 
+// M3: preprints became a group of their own, and are recognised from more evidence. Anything that
+// might be one is looked at again in the background. Types chosen by the user are left alone then.
+const char *const kMigration3 = R"sql(
+INSERT OR IGNORE INTO job (kind, payload, created_at, updated_at)
+SELECT 'reclassify', json_object('file', f.id), unixepoch() * 1000, unixepoch() * 1000
+FROM file f
+JOIN publication_file pf ON pf.file_id = f.id AND pf.is_primary = 1
+JOIN publication p ON p.id = pf.publication_id
+WHERE f.status = 'ok' AND f.sha256 IS NOT NULL
+  AND p.type IN ('journal_article', 'conference_paper', 'technical_report', 'other');
+)sql";
+
+// Automatic sorting into preprints put too many published papers there, so it's been removed, and
+// its results are undone. A preprint is now only ever something the user has marked as one.
+//
+// Anything the check from migration 3 moved goes straight back. Anything sorted at import, under the
+// earlier rule, has no earlier type to go back to, so it's queued for working out again.
+const char *const kMigration4 = R"sql(
+DELETE FROM job WHERE kind = 'reclassify';
+
+CREATE TEMP TABLE undo_sorting AS
+SELECT p.id AS id,
+       (SELECT mp.previous_value FROM metadata_provenance mp
+        WHERE mp.publication_id = p.id AND mp.field = 'type' AND mp.source = 'classifier'
+          AND mp.new_value = 'preprint'
+        ORDER BY mp.recorded_at DESC, mp.id DESC LIMIT 1) AS earlier
+FROM publication p
+WHERE p.type = 'preprint'
+  AND NOT EXISTS (SELECT 1 FROM metadata_provenance mp
+                  WHERE mp.publication_id = p.id AND mp.field = 'type' AND mp.source = 'manual');
+
+INSERT INTO metadata_provenance (publication_id, field, source, previous_value, new_value, recorded_at)
+SELECT id, 'type', 'classifier', 'preprint', earlier, unixepoch() * 1000 FROM undo_sorting WHERE earlier IS NOT NULL;
+
+UPDATE publication
+SET type = (SELECT earlier FROM undo_sorting u WHERE u.id = publication.id), updated_at = unixepoch() * 1000
+WHERE id IN (SELECT id FROM undo_sorting WHERE earlier IS NOT NULL);
+
+INSERT OR IGNORE INTO job (kind, payload, created_at, updated_at)
+SELECT 'reclassify', json_object('file', pf.file_id), unixepoch() * 1000, unixepoch() * 1000
+FROM undo_sorting u
+JOIN publication_file pf ON pf.publication_id = u.id AND pf.is_primary = 1
+WHERE u.earlier IS NULL;
+
+DROP TABLE undo_sorting;
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -321,6 +368,8 @@ const std::vector<Migration> &libraryMigrations()
     static const std::vector<Migration> migrations = {
         {1, kMigration1},
         {2, kMigration2},
+        {3, kMigration3},
+        {4, kMigration4},
     };
     return migrations;
 }

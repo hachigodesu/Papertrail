@@ -5,12 +5,15 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+
+#include <algorithm>
 
 namespace papertrail::import {
 
@@ -20,6 +23,7 @@ namespace {
 
 const char *const kFingerprintJob = "fingerprint";
 const char *const kInspectJob = "inspect";
+const char *const kReclassifyJob = "reclassify";
 
 // Commit this often during a scan, so a scan stopped part way keeps what it has found.
 constexpr int kScanBatchSize = 500;
@@ -64,6 +68,22 @@ bool isSupportedFile(const QString &fileName)
     return supportedExtensions().contains(QFileInfo(fileName).suffix().toLower());
 }
 
+bool isPathInside(const QString &path, const QString &folder)
+{
+#ifdef Q_OS_WIN
+    const Qt::CaseSensitivity sensitivity = Qt::CaseInsensitive;
+#else
+    const Qt::CaseSensitivity sensitivity = Qt::CaseSensitive;
+#endif
+    const QString base = folder.endsWith(u'/') ? folder : folder + u'/';
+    return path.compare(folder, sensitivity) == 0 || path.startsWith(base, sensitivity);
+}
+
+QString coverPathFor(const QString &cacheDirectory, const QString &sha256)
+{
+    return QDir(cacheDirectory).filePath(QStringLiteral("covers/%1/%2.jpg").arg(sha256.left(2), sha256));
+}
+
 struct ImportService::Job {
     qint64 id = 0;
     QString kind;
@@ -72,17 +92,18 @@ struct ImportService::Job {
 };
 
 ImportService::ImportService(Database &db, const ImportOptions &options)
-    : m_db(db), m_options(options), m_files(db), m_publications(db), m_worker(options.workerPath)
+    : m_db(db), m_options(options), m_files(db), m_publications(db), m_worker(options.workerPath, options.cancelled)
 {
-    // Anything still marked as running was interrupted the last time the app stopped.
-    m_db.exec("UPDATE job SET status = 'pending' WHERE status = 'running'");
+    // Anything still marked as running was interrupted the last time the app stopped. That wasn't
+    // the file's fault: the worker's own crashes are dealt with as they happen.
+    m_db.exec("UPDATE job SET status = 'pending', attempts = max(attempts - 1, 0) WHERE status = 'running'");
 }
 
 ImportService::~ImportService() = default;
 
 QString ImportService::coverPath(const QString &sha256) const
 {
-    return QDir(m_options.cacheDirectory).filePath(QStringLiteral("covers/%1/%2.jpg").arg(sha256.left(2), sha256));
+    return coverPathFor(m_options.cacheDirectory, sha256);
 }
 
 void ImportService::enqueue(const char *kind, qint64 fileId)
@@ -108,6 +129,8 @@ qint64 ImportService::pendingJobs()
 ScanReport ImportService::scan(qint64 rootId)
 {
     ScanReport report;
+    QElapsedTimer timer;
+    timer.start();
     const std::optional<LibraryRoot> root = m_files.root(rootId);
     if (!root)
         throw std::invalid_argument("library location doesn't exist");
@@ -125,13 +148,31 @@ ScanReport ImportService::scan(qint64 rootId)
         known.insert(file.relativePath, file);
 
     const QDir base(root->path);
+    const qint64 changedBefore = QDateTime::currentMSecsSinceEpoch() - m_options.settleMs;
+
+    // A library folder inside this one looks after its own files. Otherwise each of them would be
+    // seen twice, and appear to be its own duplicate.
+    QStringList nestedRoots;
+    for (const LibraryRoot &other : m_files.roots()) {
+        if (other.id != rootId && isPathInside(other.path, root->path))
+            nestedRoots << other.path;
+    }
+
     QSet<QString> seen;
     int batch = 0;
     auto transaction = std::make_unique<Transaction>(m_db);
 
     QDirIterator it(root->path, QDir::Files | QDir::NoSymLinks | QDir::Readable, QDirIterator::Subdirectories);
     while (it.hasNext()) {
+        if (m_options.cancelled && m_options.cancelled()) {
+            report.stoppedEarly = true;
+            break;
+        }
         const QString path = it.next();
+        if (std::any_of(nestedRoots.cbegin(), nestedRoots.cend(),
+                        [&](const QString &nested) { return isPathInside(path, nested); })) {
+            continue;
+        }
         if (!isSupportedFile(path)) {
             ++report.unsupportedSkipped;
             continue;
@@ -156,6 +197,12 @@ ScanReport ImportService::scan(qint64 rootId)
             continue;
         }
 
+        // Windows keeps a copied file's original date, but locks it until the copy has finished.
+        if (m_options.settleMs > 0 && (modified > changedBefore || !QFile(path).open(QIODevice::ReadOnly))) {
+            ++report.stillChanging;
+            continue;
+        }
+
         FileRecord file;
         file.rootId = rootId;
         file.relativePath = relative;
@@ -176,13 +223,16 @@ ScanReport ImportService::scan(qint64 rootId)
         }
     }
 
-    for (auto entry = known.constBegin(); entry != known.constEnd(); ++entry) {
-        if (!seen.contains(entry.key()) && entry->status != FileStatus::Missing) {
-            m_files.setStatus(entry->id, FileStatus::Missing);
-            ++report.nowMissing;
+    if (!report.stoppedEarly) {
+        for (auto entry = known.constBegin(); entry != known.constEnd(); ++entry) {
+            if (!seen.contains(entry.key()) && entry->status != FileStatus::Missing) {
+                m_files.setStatus(entry->id, FileStatus::Missing);
+                ++report.nowMissing;
+            }
         }
     }
     transaction->commit();
+    report.elapsedMs = timer.elapsed();
     return report;
 }
 
@@ -218,6 +268,17 @@ void ImportService::finishJob(const Job &job)
     remove.reset();
 }
 
+// Puts a job back as though it hadn't been tried.
+void ImportService::requeueJob(const Job &job)
+{
+    Statement &update = m_db.cached(
+        "UPDATE job SET status = 'pending', attempts = max(attempts - 1, 0), updated_at = ? WHERE id = ?");
+    update.bind(1, QDateTime::currentMSecsSinceEpoch());
+    update.bind(2, job.id);
+    update.step();
+    update.reset();
+}
+
 // Returns true if the job has used all its tries and has now been marked as failed.
 bool ImportService::retryOrFailJob(const Job &job, const QString &error)
 {
@@ -240,7 +301,7 @@ ImportReport ImportService::processQueue(const ProgressCallback &progress, const
 
     Job job;
     while (true) {
-        if (shouldStop && shouldStop()) {
+        if ((shouldStop && shouldStop()) || (m_options.cancelled && m_options.cancelled())) {
             report.stoppedEarly = pendingJobs() > 0;
             break;
         }
@@ -258,6 +319,8 @@ ImportReport ImportService::processQueue(const ProgressCallback &progress, const
             processFingerprint(job, report);
         else if (job.kind == QLatin1StringView(kInspectJob))
             processInspect(job, report);
+        else if (job.kind == QLatin1StringView(kReclassifyJob))
+            processReclassify(job, report);
         else
             finishJob(job);
         ++done;
@@ -293,6 +356,10 @@ void ImportService::processFingerprint(const Job &job, ImportReport &report)
     const int timeout = int(qMin<qint64>(qMax<qint64>(m_options.minHashTimeoutMs, hashSeconds * 1000), 3600000));
     const WorkerClient::HashResult hash = m_worker.hash(path, timeout);
 
+    if (hash.failure == WorkerFailure::Cancelled) {
+        requeueJob(job);
+        return;
+    }
     if (hash.failure == WorkerFailure::Crashed || hash.failure == WorkerFailure::TimedOut) {
         if (retryOrFailJob(job, hash.error)) {
             Transaction transaction(m_db);
@@ -378,6 +445,10 @@ void ImportService::processInspect(const Job &job, ImportReport &report)
     const QString path = m_files.absolutePath(file->id);
     const WorkerClient::Inspection inspection = m_worker.inspect(path, coverPath(file->sha256), m_options.inspectTimeoutMs);
 
+    if (inspection.failure == WorkerFailure::Cancelled) {
+        requeueJob(job);
+        return;
+    }
     if (inspection.failure == WorkerFailure::Crashed || inspection.failure == WorkerFailure::TimedOut) {
         if (retryOrFailJob(job, inspection.error)) {
             Transaction transaction(m_db);
@@ -408,6 +479,62 @@ void ImportService::processInspect(const Job &job, ImportReport &report)
             createPublication(*file, &result, report);
     }
     finishJob(job);
+    transaction.commit();
+}
+
+// Takes a publication out of Preprints, if only an earlier version's automatic sorting put it there.
+// If the file can't be read now, its type is worked out from what's already known about it. A type
+// the user chose is never touched, including if they've marked something as a preprint themselves.
+void ImportService::processReclassify(const Job &job, ImportReport &report)
+{
+    const std::optional<FileRecord> file = m_files.get(job.fileId);
+    const QList<qint64> publications = file ? m_files.publicationsFor(file->id) : QList<qint64>();
+    if (!file || publications.isEmpty()) {
+        finishJob(job);
+        return;
+    }
+
+    InspectResult found;
+    bool gaveUp = false;
+    const QString path = m_files.absolutePath(file->id);
+    if (QFile::exists(path)) {
+        const WorkerClient::Inspection inspection = m_worker.inspect(path, QString(), m_options.inspectTimeoutMs);
+        if (inspection.failure == WorkerFailure::Cancelled) {
+            requeueJob(job);
+            return;
+        }
+        if (inspection.failure == WorkerFailure::Crashed || inspection.failure == WorkerFailure::TimedOut) {
+            if (!retryOrFailJob(job, inspection.error))
+                return;
+            gaveUp = true;
+        } else if (inspection.failure == WorkerFailure::None) {
+            found = inspection.result;
+        }
+    }
+
+    Transaction transaction(m_db);
+    const QString firstPage = found.text.section(u'\f', 0, 0);
+    const QString laterPages = found.text.section(u'\f', 1);
+    for (const qint64 id : publications) {
+        std::optional<Publication> p = m_publications.get(id);
+        if (!p || p->type != PublicationType::Preprint)
+            continue;
+        const QList<ProvenanceEntry> history = m_publications.provenance(id, QStringLiteral("type"));
+        if (std::any_of(history.cbegin(), history.cend(),
+                        [](const ProvenanceEntry &entry) { return entry.source == QLatin1StringView("manual"); })) {
+            continue;
+        }
+
+        const Classification classification = classify(
+            {file->format, found.pageCount ? found.pageCount : file->pageCount, firstPage, laterPages, p->title, p->doi,
+             p->isbn13.isEmpty() ? p->isbn10 : p->isbn13, p->issn, p->arxivId});
+        p->type = classification.type;
+        p->needsReview = p->needsReview || !classification.confident;
+        m_publications.updateWithProvenance(*p, QStringLiteral("classifier"));
+        ++report.reclassified;
+    }
+    if (!gaveUp)
+        finishJob(job);
     transaction.commit();
 }
 

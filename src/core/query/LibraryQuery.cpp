@@ -322,14 +322,17 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
 {
     const ListQuery query = buildListQuery(filter, sort, searchClause(filter));
     auto select = m_db.prepare(
-        "SELECT p.id, p.type, p.title, p.authors_display, p.year, p.container_title, p.read_status"
+        "SELECT p.id, p.type, p.title, p.authors_display, p.year, p.container_title, p.read_status, "
+        "p.needs_review, coalesce(p.parent_id, p.id)"
         + query.sql + " LIMIT ? OFFSET ?");
     bindAll(*select, query.bindings);
     select->bind(int(query.bindings.size()) + 1, limit);
     select->bind(int(query.bindings.size()) + 2, offset);
 
     QList<PublicationSummary> rows;
+    QList<qint64> fileOwners;
     rows.reserve(limit);
+    fileOwners.reserve(limit);
     while (select->step()) {
         PublicationSummary row;
         row.id = select->int64At(0);
@@ -339,7 +342,23 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
         row.year = select->optIntAt(4);
         row.containerTitle = select->textAt(5);
         row.readStatus = readStatusFromDb(select->textAt(6)).value_or(ReadStatus::Unread);
+        row.needsReview = select->intAt(7) != 0;
+        fileOwners << select->int64At(8);
         rows << row;
+    }
+
+    // Read afterwards rather than joined, so it only ever costs one small lookup per row shown.
+    Statement &file = m_db.cached(
+        "SELECT f.sha256, f.format, f.status FROM publication_file pf JOIN file f ON f.id = pf.file_id "
+        "WHERE pf.publication_id = ? ORDER BY pf.is_primary DESC, f.id LIMIT 1");
+    for (qsizetype i = 0; i < rows.size(); ++i) {
+        file.bind(1, fileOwners.at(i));
+        if (file.step()) {
+            rows[i].coverSha = file.textAt(0);
+            rows[i].format = file.textAt(1);
+            rows[i].fileStatus = file.textAt(2);
+        }
+        file.reset();
     }
     return rows;
 }
@@ -411,12 +430,13 @@ QList<TagCount> LibraryQuery::tagCounts(const PublicationFilter &filter)
     QList<TagCount> tags;
     QHash<qint64, std::optional<qint64>> parents;
     {
-        auto select = m_db.prepare("SELECT id, name, parent_id FROM tag ORDER BY name COLLATE NOCASE");
+        auto select = m_db.prepare("SELECT id, name, parent_id, colour FROM tag ORDER BY name COLLATE NOCASE");
         while (select->step()) {
             TagCount tag;
             tag.tagId = select->int64At(0);
             tag.name = select->textAt(1);
             tag.parentId = select->optInt64At(2);
+            tag.colour = select->textAt(3);
             parents.insert(tag.tagId, tag.parentId);
             tags << tag;
         }

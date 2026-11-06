@@ -35,6 +35,7 @@ struct TagCount {
     qint64 tagId = 0;
     QString name;
     std::optional<qint64> parentId;
+    QString colour;
     qint64 count = 0; // Publications with this tag or any tag beneath it, each counted once.
 };
 

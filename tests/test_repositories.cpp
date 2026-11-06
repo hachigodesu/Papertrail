@@ -501,6 +501,55 @@ private slots:
         QCOMPARE(count("SELECT count(*) FROM publication_file WHERE is_primary = 1"), 1);
     }
 
+    void editsKeepEarlierValues()
+    {
+        Publication p;
+        p.title = QStringLiteral("First");
+        p.doi = QStringLiteral("10.1000/one");
+        p.year = 2001;
+        p.notes = QStringLiteral("Personal");
+        p.authors = {{QStringLiteral("Hooke"), QStringLiteral("R")}};
+        const qint64 id = m_publications->create(p);
+
+        p.title = QStringLiteral("Second");
+        p.year = 2002;
+        p.notes = QStringLiteral("Still personal");
+        p.authors = {{QStringLiteral("Euler"), QString()}};
+        m_publications->updateWithProvenance(p, QStringLiteral("manual"));
+
+        QCOMPARE(m_publications->provenance(id, QStringLiteral("title")).first().previousValue, QStringLiteral("First"));
+        QCOMPARE(m_publications->provenance(id, QStringLiteral("title")).first().newValue, QStringLiteral("Second"));
+        QCOMPARE(m_publications->provenance(id, QStringLiteral("year")).first().previousValue, QStringLiteral("2001"));
+        QCOMPARE(m_publications->provenance(id, QStringLiteral("authors")).first().previousValue, QStringLiteral("Hooke, R"));
+        QVERIFY(m_publications->provenance(id, QStringLiteral("doi")).isEmpty());
+        QVERIFY(m_publications->provenance(id, QStringLiteral("notes")).isEmpty());
+    }
+
+    void changesCanBeMadeToManyAtOnce()
+    {
+        QList<qint64> ids;
+        for (int i = 0; i < 3; ++i) {
+            Publication p;
+            p.title = QStringLiteral("Paper %1").arg(i);
+            p.needsReview = true;
+            p.authors = {{QStringLiteral("Hooke"), QString()}};
+            ids << m_publications->create(p);
+        }
+        m_publications->setReadStatus(ids.mid(0, 2), ReadStatus::Read);
+        m_publications->setNeedsReview(ids.mid(1, 2), false);
+        const qint64 tag = m_tags->ensurePath(QStringLiteral("Bulk"));
+        m_tags->assign(ids, tag);
+        m_tags->assign(ids, tag); // Tagging twice is harmless.
+
+        QCOMPARE(m_publications->get(ids.at(0))->readStatus, ReadStatus::Read);
+        QCOMPARE(m_publications->get(ids.at(2))->readStatus, ReadStatus::Unread);
+        QVERIFY(m_publications->get(ids.at(0))->needsReview);
+        QVERIFY(!m_publications->get(ids.at(2))->needsReview);
+        QCOMPARE(m_tags->tagsFor(ids.at(2)).size(), 1);
+        // People weren't touched by the status changes.
+        QCOMPARE(m_publications->get(ids.at(0))->authors.size(), 1);
+    }
+
 private:
     int count(const char *sql)
     {

@@ -36,6 +36,7 @@ include(SQLite)
 add_subdirectory(src)
 add_subdirectory(tools/gen_library)
 add_subdirectory(tools/import_cli)
+add_subdirectory(tools/ui_preview)
 
 if(PAPERTRAIL_BUILD_FORMAT_PROBE)
     add_subdirectory(tools/format_probe)

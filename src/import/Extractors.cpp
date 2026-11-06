@@ -546,6 +546,8 @@ bool containsAny(const QString &text, const QStringList &needles)
 
 } // namespace
 
+// This never answers "preprint". Published papers carry too much of the same wording and the same
+// identifiers, such as an arXiv number or "accepted for publication", so that's for the user to say.
 Classification classify(const ClassificationInput &input)
 {
     // Only the first page decides a type firmly. Importing real papers showed why: their reference
@@ -560,9 +562,6 @@ Classification classify(const ClassificationInput &input)
     // A real thesis is long, and its wording can be on a title page after a blank first page.
     const QString front = text + u' ' + later.left(4000);
     const bool longEnoughForThesis = pages == 0 || pages >= 30;
-
-    if (!input.arxivId.isEmpty())
-        return {PublicationType::Preprint, true};
 
     static const QRegularExpression standardNumber(
         QStringLiteral("\\b(iso|iec|astm|ansi|din|bs en|ieee std|en)\\s*[/-]?\\s*[a-z]?\\s*\\d{2,}"));

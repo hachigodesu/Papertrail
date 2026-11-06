@@ -76,6 +76,15 @@ qint64 FileRepository::addRoot(const QString &name, const QString &path)
     return m_db.lastInsertId();
 }
 
+QHash<qint64, qint64> FileRepository::fileCountsByRoot()
+{
+    QHash<qint64, qint64> counts;
+    auto select = m_db.prepare("SELECT root_id, count(*) FROM file GROUP BY root_id");
+    while (select->step())
+        counts.insert(select->int64At(0), select->int64At(1));
+    return counts;
+}
+
 QList<LibraryRoot> FileRepository::roots()
 {
     QList<LibraryRoot> roots;

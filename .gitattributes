@@ -12,6 +12,7 @@
 *.cmake text eol=lf
 *.desktop text eol=lf
 *.svg text eol=lf
+*.cmd text eol=crlf
 
 # Test documents must never be altered: hashes depend on their exact bytes
 tests/samples/** binary

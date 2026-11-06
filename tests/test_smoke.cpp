@@ -1,5 +1,7 @@
+#include "ui/LibrarySession.h"
 #include "ui/MainWindow.h"
 
+#include <QTemporaryDir>
 #include <QtTest>
 
 class SmokeTest : public QObject {
@@ -8,7 +10,13 @@ class SmokeTest : public QObject {
 private slots:
     void mainWindowOpens()
     {
-        papertrail::ui::MainWindow window;
+        QTemporaryDir dir;
+        papertrail::ui::LibraryPaths paths;
+        paths.database = dir.filePath(QStringLiteral("library.db"));
+        paths.cacheDirectory = dir.filePath(QStringLiteral("cache"));
+        papertrail::ui::LibrarySession session(paths);
+
+        papertrail::ui::MainWindow window(session);
         window.show();
 
         QVERIFY(QTest::qWaitForWindowExposed(&window));

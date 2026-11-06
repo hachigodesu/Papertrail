@@ -359,6 +359,11 @@ def main():
               (10, "This made-up preprint explains simple sampling.")],
              info={"Title": "Sampling Made Simple"})
 
+    text_pdf(out / "preprint_stamp.pdf",
+             [(20, "Measuring Example Flows"), (10, "Preprint submitted to the Journal of Made-up Results"),
+              (10, "doi:10.1000/example.2020.1"), (10, "This made-up paper has no arXiv number.")],
+             info={"Title": "Measuring Example Flows"})
+
     drawing_only_pdf(out / "scanned_no_text.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))
     encrypted_pdf(out / "encrypted.pdf", [(20, "Locked Paper"), (10, "You should not be able to read this text.")])

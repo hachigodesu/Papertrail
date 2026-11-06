@@ -300,7 +300,16 @@ private slots:
                                 << int(type) << sure;
         };
         using T = PublicationType;
-        row("preprint", "pdf", 12, "", "", "", "", "2101.00001", T::Preprint, true);
+        // Preprint wording and identifiers never sort anything by themselves: published papers have them too.
+        row("arxiv stamp", "pdf", 12, "", "", "", "", "2101.00001", T::Other, false);
+        row("arxiv stamp and doi", "pdf", 12, "", "10.1/a", "", "", "2101.00001", T::JournalArticle, true);
+        row("preprint submitted", "pdf", 12, "Preprint submitted to Elsevier", "10.1/a", "", "", "", T::JournalArticle, true);
+        row("accepted manuscript", "pdf", 12, "Author Accepted Manuscript", "10.1/a", "", "", "", T::JournalArticle, true);
+        row("biorxiv doi", "pdf", 12, "results", "10.1101/2020.01.01.123456", "", "", "", T::JournalArticle, true);
+        row("stamp alone", "pdf", 12, "PREPRINT", "", "", "", "", T::Other, false);
+        row("cold spring harbor journal", "pdf", 12, "results", "10.1101/gr.123456", "", "", "", T::JournalArticle, true);
+        row("date on a final version", "pdf", 12, "Accepted for publication 12 March 2012", "10.1/a", "", "", "", T::JournalArticle, true);
+        row("citation in press", "pdf", 12, "as shown by Example et al. (in press)", "10.1/a", "", "", "", T::JournalArticle, true);
         row("standard", "pdf", 30, "INTERNATIONAL STANDARD ISO 9001", "", "", "", "", T::Standard, true);
         row("dissertation", "pdf", 200, "Doctor of Philosophy", "", "", "", "", T::Dissertation, true);
         row("thesis", "pdf", 80, "A thesis submitted in partial fulfilment", "", "", "", "", T::Thesis, true);
