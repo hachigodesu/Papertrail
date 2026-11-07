@@ -4,6 +4,14 @@
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
 
+#include <QDir>
+#include <QFileDialog>
+#include <QIcon>
+#include <QInputDialog>
+#include <QListWidget>
+#include <QMenu>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QAbstractListModel>
 #include <QAction>
 #include <QCache>
@@ -40,6 +48,9 @@ namespace papertrail::ui {
 using namespace core;
 
 namespace {
+
+// A token for finding a highlight holds which round it's from, as well as which highlight.
+constexpr qint64 kTokenRound = 1000000000000;
 
 constexpr int kNoPageRole = Qt::UserRole + 1;
 constexpr int kPageRole = Qt::UserRole + 2;
@@ -252,6 +263,10 @@ void ReaderTab::buildToolbar()
     });
     m_toolbar->addWidget(m_sideToggle);
     m_toolbar->addSeparator();
+    m_highlightAction = m_toolbar->addAction(tr("Highlight"), this, [this] { annotateSelection(AnnotationType::Highlight); });
+    m_highlightAction->setToolTip(tr("Highlights the selected text. Right-click it for colours, underlining and notes."));
+    m_highlightAction->setEnabled(false);
+    m_toolbar->addSeparator();
 
     m_backButton = button(QStringLiteral("←"), tr("Back to where the last link was followed"), [this] { m_view->goBack(); });
     m_backButton->setEnabled(false);
@@ -375,6 +390,38 @@ void ReaderTab::buildSidePanel()
     m_thumbnails->setIconSize(QSize(kThumbnailWidth, kThumbnailWidth * 3 / 2));
     connect(m_thumbnails, &QListView::clicked, this, [this](const QModelIndex &index) { m_view->goToPage(index.row()); });
     m_side->addTab(m_thumbnails, tr("Pages"));
+
+    m_annotationPanel = new QWidget(m_side);
+    auto *notes = new QVBoxLayout(m_annotationPanel);
+    notes->setContentsMargins(0, 0, 0, 0);
+    m_annotationList = new QListWidget(m_annotationPanel); // Items show text as it is, so a file's can't become formatting.
+    m_annotationList->setAccessibleName(tr("Highlights and notes"));
+    m_annotationList->setWordWrap(true);
+    m_annotationList->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_annotationList, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) { goToAnnotation(item->data(Qt::UserRole).toLongLong()); });
+    connect(m_annotationList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) { goToAnnotation(item->data(Qt::UserRole).toLongLong()); });
+    connect(m_annotationList, &QListWidget::customContextMenuRequested, this, [this](const QPoint &position) {
+        QListWidgetItem *item = m_annotationList->itemAt(position);
+        if (!item)
+            return;
+        const qint64 id = item->data(Qt::UserRole).toLongLong();
+        QMenu menu(this);
+        menu.addAction(tr("Edit note..."), this, [this, id] { askToEditNote(id); });
+        QMenu *colours = menu.addMenu(tr("Colour"));
+        const QStringList names = {tr("Yellow"), tr("Green"), tr("Blue"), tr("Pink")};
+        for (int i = 0; i < annotationColours().size(); ++i) {
+            const QString colour = annotationColours().at(i);
+            colours->addAction(names.at(i), this, [this, id, colour] { setAnnotationColour(id, colour); });
+        }
+        menu.addSeparator();
+        menu.addAction(tr("Delete"), this, [this, id] { deleteAnnotation(id); });
+        menu.exec(m_annotationList->viewport()->mapToGlobal(position));
+    });
+    notes->addWidget(m_annotationList, 1);
+    auto *exportButton = new QPushButton(tr("Export to Markdown..."), m_annotationPanel);
+    connect(exportButton, &QPushButton::clicked, this, &ReaderTab::askToExportAnnotations);
+    notes->addWidget(exportButton);
+    m_side->addTab(m_annotationPanel, tr("Notes"));
 }
 
 void ReaderTab::connectClient()
@@ -393,6 +440,7 @@ void ReaderTab::connectClient()
             m_stack->setCurrentWidget(m_view);
             restorePlace();
             applyPendingMatch();
+            loadAnnotations();
         }
     });
     connect(m_client, &DocumentClient::pageRendered, m_view, &PageView::setPageImage);
@@ -424,6 +472,7 @@ void ReaderTab::connectClient()
         m_thumbnailModel->setPages(sizes);
         m_client->requestOutline();
         updatePageBox();
+        locateAnnotations();
         if (!m_activeSearch.isEmpty()) {
             const QString text = m_activeSearch;
             m_activeSearch.clear();
@@ -438,6 +487,13 @@ void ReaderTab::connectClient()
     connect(m_view, &PageView::pagesWanted, m_client, &DocumentClient::setWantedPages);
     connect(m_view, &PageView::linksWanted, m_client, &DocumentClient::requestLinks);
     connect(m_view, &PageView::selectionWanted, m_client, &DocumentClient::requestSelection);
+    connect(m_view, &PageView::contextMenuWanted, this, &ReaderTab::addAnnotationActions);
+    connect(m_view, &PageView::selectionChanged, this, [this] {
+        if (m_highlightAction)
+            m_highlightAction->setEnabled(m_view->hasSelection());
+    });
+    connect(m_client, &DocumentClient::anchored, this, &ReaderTab::onAnchored);
+    connect(m_client, &DocumentClient::located, this, &ReaderTab::onLocated);
     connect(m_view, &PageView::currentPageChanged, this, [this] { updatePageBox(); });
     connect(m_view, &PageView::zoomChanged, this, [this] {
         updateZoomBox();
@@ -680,6 +736,364 @@ void ReaderTab::focusSearch()
 {
     m_search->setFocus();
     m_search->selectAll();
+}
+
+QList<int> ReaderTab::markedPages() const
+{
+    return m_view->pagesWithMarks();
+}
+
+void ReaderTab::loadAnnotations()
+{
+    m_annotations.clear();
+    m_annotationsElsewhere.clear();
+    try {
+        if (const std::optional<FileRecord> file = m_session.files().get(m_fileId))
+            m_contentHash = file->sha256;
+        AnnotationRepository annotations(m_session.database());
+        m_annotations = annotations.forContents(m_contentHash);
+        for (const Annotation &annotation : annotations.forPublication(m_publicationId)) {
+            if (annotation.contentHash != m_contentHash)
+                m_annotationsElsewhere << annotation;
+        }
+    } catch (const std::exception &error) {
+        emit statusMessage(tr("The highlights couldn't be read: %1").arg(QString::fromUtf8(error.what())));
+    }
+    locateAnnotations();
+}
+
+// Fixed pages have what they need. Text that moves is looked for afresh, in the background.
+void ReaderTab::locateAnnotations()
+{
+    m_view->clearMarks();
+    m_locatedParts.clear();
+    ++m_locateRound;
+    for (const Annotation &annotation : std::as_const(m_annotations)) {
+        const bool needsFinding = std::any_of(annotation.parts.cbegin(), annotation.parts.cend(),
+                                              [](const AnnotationPart &part) { return part.rects.isEmpty() && !part.place.isEmpty(); });
+        if (!needsFinding) {
+            showMark(annotation);
+            continue;
+        }
+        const qint64 token = m_locateRound * kTokenRound + annotation.id;
+        for (int part = 0; part < annotation.parts.size(); ++part) {
+            const AnnotationPart &found = annotation.parts.at(part);
+            m_client->requestLocate(token, part, found.place, found.text, found.occurrence);
+        }
+    }
+    refreshAnnotationList();
+}
+
+void ReaderTab::onLocated(qint64 token, int part, int page, const QList<QRectF> &rects)
+{
+    if (token / kTokenRound != m_locateRound)
+        return;
+    const qint64 id = token % kTokenRound;
+    auto annotation = std::find_if(m_annotations.cbegin(), m_annotations.cend(), [id](const Annotation &a) { return a.id == id; });
+    if (annotation == m_annotations.cend())
+        return;
+    QList<QPair<int, QList<QRectF>>> &parts = m_locatedParts[id];
+    if (parts.size() < annotation->parts.size())
+        parts.resize(annotation->parts.size());
+    if (part < parts.size())
+        parts[part] = qMakePair(page, rects);
+    if (page >= 0) {
+        // A selection across pages has a part on each, and each one's rectangles are drawn on its own page.
+        QList<AnnotationMark> marks = m_view->marksOn(page);
+        AnnotationMark mark;
+        mark.id = id;
+        mark.rects = rects;
+        mark.colour = QColor(annotation->colour);
+        mark.underline = annotation->type == AnnotationType::Underline;
+        mark.hasNote = !annotation->note.isEmpty();
+        marks << mark;
+        m_view->setMarks(page, marks);
+    }
+    refreshAnnotationList();
+}
+
+void ReaderTab::showMark(const Annotation &annotation)
+{
+    for (const AnnotationPart &part : annotation.parts) {
+        if (part.page < 0 || part.rects.isEmpty())
+            continue;
+        QList<AnnotationMark> marks = m_view->marksOn(part.page);
+        AnnotationMark mark;
+        mark.id = annotation.id;
+        mark.rects = part.rects;
+        mark.colour = QColor(annotation.colour);
+        mark.underline = annotation.type == AnnotationType::Underline;
+        mark.hasNote = !annotation.note.isEmpty();
+        marks << mark;
+        m_view->setMarks(part.page, marks);
+    }
+}
+
+void ReaderTab::refreshAnnotationList()
+{
+    const auto describe = [](const Annotation &annotation) {
+        QString text = annotation.selectedText().simplified();
+        if (text.size() > 200)
+            text = text.left(200) + QStringLiteral("...");
+        if (!annotation.note.isEmpty())
+            text += QStringLiteral("\n") + annotation.note;
+        return text;
+    };
+    const auto swatch = [](const QString &colour) {
+        QPixmap pixmap(12, 12);
+        pixmap.fill(QColor(colour));
+        return QIcon(pixmap);
+    };
+
+    const QSignalBlocker blocker(m_annotationList);
+    m_annotationList->clear();
+    for (const Annotation &annotation : std::as_const(m_annotations)) {
+        int page = annotation.firstPage();
+        bool found = true;
+        if (const auto located = m_locatedParts.constFind(annotation.id); located != m_locatedParts.constEnd()) {
+            page = -1;
+            for (const auto &part : *located) {
+                if (part.first >= 0 && page < 0)
+                    page = part.first;
+            }
+            found = page >= 0;
+        } else if (page < 0) {
+            found = true; // Still being looked for.
+        }
+        QString heading = page >= 0 ? tr("Page %1").arg(page + 1) : QString();
+        if (!found)
+            heading = tr("Can't be found in this layout");
+        auto *item = new QListWidgetItem(swatch(annotation.colour), (heading.isEmpty() ? QString() : heading + QStringLiteral("\n")) + describe(annotation),
+                                         m_annotationList);
+        item->setData(Qt::UserRole, annotation.id);
+    }
+    // Kept, and said to be from elsewhere: the text it was made on may not line up with this one.
+    for (const Annotation &annotation : std::as_const(m_annotationsElsewhere)) {
+        auto *item = new QListWidgetItem(swatch(annotation.colour), tr("From another copy or format\n") + describe(annotation), m_annotationList);
+        item->setData(Qt::UserRole, annotation.id);
+    }
+    if (m_side)
+        m_side->setTabText(m_side->indexOf(m_annotationPanel),
+                           m_annotationList->count() > 0 ? tr("Notes (%1)").arg(m_annotationList->count()) : tr("Notes"));
+}
+
+void ReaderTab::goToAnnotation(qint64 id)
+{
+    if (const auto located = m_locatedParts.constFind(id); located != m_locatedParts.constEnd()) {
+        for (const auto &part : *located) {
+            if (part.first >= 0) {
+                m_view->goToPage(part.first);
+                return;
+            }
+        }
+    }
+    for (const Annotation &annotation : std::as_const(m_annotations)) {
+        if (annotation.id != id)
+            continue;
+        if (annotation.firstPage() >= 0) {
+            const AnnotationPart &part = annotation.parts.first();
+            m_view->goToPoint(part.page, part.rects.isEmpty() ? 0 : qMax(0.0, part.rects.first().top() - 40));
+        } else if (!annotation.parts.isEmpty() && !annotation.parts.first().place.isEmpty()) {
+            m_client->requestPageForBookmark(annotation.parts.first().place);
+        }
+        return;
+    }
+}
+
+void ReaderTab::annotateSelection(AnnotationType type, const QString &note, const QString &colour)
+{
+    const QList<SelectionPart> parts = m_view->selectionParts();
+    if (parts.isEmpty())
+        return;
+
+    Annotation annotation;
+    annotation.publicationId = m_publicationId;
+    annotation.contentHash = m_contentHash;
+    annotation.type = type;
+    annotation.colour = colour.isEmpty() ? annotationColours().first() : colour;
+    annotation.note = note;
+
+    if (!m_reflowable) {
+        for (const SelectionPart &selected : parts) {
+            AnnotationPart part;
+            part.page = selected.page;
+            part.rects = selected.rects;
+            part.text = selected.text;
+            annotation.parts << part;
+        }
+        try {
+            AnnotationRepository(m_session.database()).create(annotation);
+        } catch (const std::exception &error) {
+            emit statusMessage(tr("That couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
+            return;
+        }
+        m_annotations << annotation;
+        m_view->clearSelection();
+        showMark(annotation);
+        refreshAnnotationList();
+        emit annotationsChanged();
+        return;
+    }
+
+    // Screen positions wouldn't last, so what will find this again has to be worked out by the document's process.
+    const qint64 draft = m_nextDraft++;
+    DraftAnnotation entry;
+    entry.annotation = annotation;
+    entry.waitingFor = int(parts.size());
+    for (const SelectionPart &selected : parts) {
+        AnnotationPart part;
+        part.text = selected.text;
+        entry.annotation.parts << part;
+    }
+    m_drafts.insert(draft, entry);
+    for (int i = 0; i < parts.size(); ++i) {
+        const SelectionPart &selected = parts.at(i);
+        m_client->requestAnchor(draft, i, selected.page, selected.text,
+                                selected.rects.isEmpty() ? QPointF() : selected.rects.first().topLeft());
+    }
+    m_view->clearSelection();
+}
+
+void ReaderTab::onAnchored(qint64 token, int part, const QString &place, int occurrence)
+{
+    auto draft = m_drafts.find(token);
+    if (draft == m_drafts.end())
+        return;
+    if (part < draft->annotation.parts.size()) {
+        draft->annotation.parts[part].place = place;
+        draft->annotation.parts[part].occurrence = occurrence;
+    }
+    if (--draft->waitingFor > 0)
+        return;
+
+    Annotation annotation = draft->annotation;
+    m_drafts.erase(draft);
+    try {
+        AnnotationRepository(m_session.database()).create(annotation);
+    } catch (const std::exception &error) {
+        emit statusMessage(tr("That couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
+        return;
+    }
+    m_annotations << annotation;
+    const qint64 ticket = m_locateRound * kTokenRound + annotation.id;
+    for (int i = 0; i < annotation.parts.size(); ++i) {
+        const AnnotationPart &found = annotation.parts.at(i);
+        m_client->requestLocate(ticket, i, found.place, found.text, found.occurrence);
+    }
+    refreshAnnotationList();
+    emit annotationsChanged();
+}
+
+void ReaderTab::setAnnotationNote(qint64 id, const QString &note)
+{
+    try {
+        AnnotationRepository(m_session.database()).setNote(id, note);
+    } catch (const std::exception &error) {
+        emit statusMessage(tr("That couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
+        return;
+    }
+    loadAnnotations();
+    emit annotationsChanged();
+}
+
+void ReaderTab::setAnnotationColour(qint64 id, const QString &colour)
+{
+    try {
+        AnnotationRepository(m_session.database()).setColour(id, colour);
+    } catch (const std::exception &error) {
+        emit statusMessage(tr("That couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
+        return;
+    }
+    loadAnnotations();
+    emit annotationsChanged();
+}
+
+void ReaderTab::deleteAnnotation(qint64 id)
+{
+    try {
+        AnnotationRepository(m_session.database()).remove(id);
+    } catch (const std::exception &error) {
+        emit statusMessage(tr("That couldn't be deleted: %1").arg(QString::fromUtf8(error.what())));
+        return;
+    }
+    loadAnnotations();
+    emit annotationsChanged();
+}
+
+bool ReaderTab::exportAnnotations(const QString &path)
+{
+    try {
+        const std::optional<Publication> publication = m_session.publications().get(m_publicationId);
+        if (!publication)
+            return false;
+        QList<Annotation> all = m_annotations;
+        all += m_annotationsElsewhere;
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly))
+            return false;
+        file.write(annotationsToMarkdown(*publication, all).toUtf8());
+        return file.commit();
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
+void ReaderTab::askToExportAnnotations()
+{
+    const std::optional<Publication> publication = m_session.publications().get(m_publicationId);
+    QString name = publication ? publication->title.simplified() : tr("Notes");
+    name.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral(" "));
+    const QString path = QFileDialog::getSaveFileName(this, tr("Export highlights and notes"), name.left(80) + QStringLiteral(".md"),
+                                                      tr("Markdown (*.md)"));
+    if (path.isEmpty())
+        return;
+    emit statusMessage(exportAnnotations(path) ? tr("Exported to %1").arg(QDir::toNativeSeparators(path)) : tr("That couldn't be saved."));
+}
+
+void ReaderTab::askForNoteAndAnnotate()
+{
+    bool ok = false;
+    const QString note = QInputDialog::getMultiLineText(this, tr("Add a note"), tr("Note:"), QString(), &ok);
+    if (ok)
+        annotateSelection(AnnotationType::Note, note.trimmed());
+}
+
+void ReaderTab::askToEditNote(qint64 id)
+{
+    const std::optional<Annotation> annotation = AnnotationRepository(m_session.database()).get(id);
+    if (!annotation)
+        return;
+    bool ok = false;
+    const QString note = QInputDialog::getMultiLineText(this, tr("Edit note"), tr("Note:"), annotation->note, &ok);
+    if (ok)
+        setAnnotationNote(id, note.trimmed());
+}
+
+void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
+{
+    menu->addSeparator();
+    if (m_view->hasSelection()) {
+        QMenu *highlight = menu->addMenu(tr("Highlight"));
+        const QStringList names = {tr("Yellow"), tr("Green"), tr("Blue"), tr("Pink")};
+        for (int i = 0; i < annotationColours().size(); ++i) {
+            const QString colour = annotationColours().at(i);
+            highlight->addAction(names.at(i), this, [this, colour] { annotateSelection(AnnotationType::Highlight, QString(), colour); });
+        }
+        menu->addAction(tr("Underline"), this, [this] { annotateSelection(AnnotationType::Underline); });
+        menu->addAction(tr("Add a note..."), this, &ReaderTab::askForNoteAndAnnotate);
+    }
+    if (const std::optional<qint64> id = m_view->annotationAt(viewportPoint)) {
+        const qint64 annotation = *id;
+        menu->addSeparator();
+        menu->addAction(tr("Edit note..."), this, [this, annotation] { askToEditNote(annotation); });
+        QMenu *colours = menu->addMenu(tr("Colour"));
+        const QStringList names = {tr("Yellow"), tr("Green"), tr("Blue"), tr("Pink")};
+        for (int i = 0; i < annotationColours().size(); ++i) {
+            const QString colour = annotationColours().at(i);
+            colours->addAction(names.at(i), this, [this, annotation, colour] { setAnnotationColour(annotation, colour); });
+        }
+        menu->addAction(tr("Delete highlight"), this, [this, annotation] { deleteAnnotation(annotation); });
+    }
 }
 
 void ReaderTab::showMatch(int page, const QString &text)

@@ -3,6 +3,7 @@
 #include "ui/DocumentClient.h"
 
 #include <QAbstractScrollArea>
+#include <QColor>
 #include <QHash>
 #include <QImage>
 #include <QList>
@@ -15,10 +16,26 @@
 
 #include <optional>
 
+class QMenu;
+
 namespace papertrail::ui {
 
 // Shows a document's pages, and only ever holds the pages near the view in memory. This does no
 // parsing of its own: images, links and text all come from the document's own process.
+struct AnnotationMark {
+    qint64 id = 0;
+    QList<QRectF> rects; // In points.
+    QColor colour;
+    bool underline = false;
+    bool hasNote = false;
+};
+
+struct SelectionPart {
+    int page = 0;
+    QList<QRectF> rects;
+    QString text;
+};
+
 class PageView : public QAbstractScrollArea {
     Q_OBJECT
 
@@ -80,6 +97,14 @@ public:
     void clearSelection();
     QString selectedText() const;
     bool hasSelection() const { return !m_selectionText.isEmpty(); }
+    QList<SelectionPart> selectionParts() const; // In page order.
+
+    // What's drawn on each page for highlights and notes. These are looked after by whoever owns the view.
+    void setMarks(int page, const QList<AnnotationMark> &marks);
+    void clearMarks();
+    QList<AnnotationMark> marksOn(int page) const { return m_marks.value(page); }
+    QList<int> pagesWithMarks() const;
+    std::optional<qint64> annotationAt(const QPoint &viewportPoint) const;
 
     // For tests.
     QRectF pageRect(int page) const;
@@ -97,6 +122,9 @@ signals:
     void placeChanged();
     void selectionChanged();
     void historyChanged();
+
+    // A right-click menu is about to appear, for the owner to add to.
+    void contextMenuWanted(QMenu *menu, const QPoint &viewportPoint);
 
     // A link out of the document has been clicked. It comes from the file, so it can't be trusted.
     void externalLinkActivated(const QString &uri);
@@ -174,6 +202,7 @@ private:
     QHash<int, QList<ReaderLink>> m_links;
     QSet<int> m_linksAsked;
 
+    QHash<int, QList<AnnotationMark>> m_marks;
     QHash<int, QList<QRectF>> m_searchHits;
     int m_currentHitPage = -1;
     QRectF m_currentHitRect;

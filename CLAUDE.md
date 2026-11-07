@@ -173,6 +173,10 @@ Lookups are `job` rows of kind `lookup`, which belong to `LookupRepository` and 
 
 Rate limits differ by source and by kind of request, and OpenAlex's anonymous searches run out at about 100 a day. A 429 blocks that source alone, and the queue only waits when no source could answer. A failure of the network or a source puts the job back without counting it as an attempt.
 
+### Highlights and notes
+
+`AnnotationRepository` keeps these by content hash, so they survive a file moving. Fixed pages store a page and rectangles. Reflowable text stores the words, a place and which repeat it was, because rectangles wouldn't survive a layout change: `ReaderTab::locateAnnotations` asks the document's process to find them again (the `anchor` and `locate` ops) each time the layout changes. `PageView` only draws the marks it's given.
+
 ### Full-text search
 
 Document text is in `fulltext.db`, attached to a connection as `fulltext` by `attachFullText` (`LibrarySession` and the query threads do this, and `core/repo/FullTextIndex` holds the rest). It's kept by content hash, and each page's row number is its document's id times `kFullTextPagesPerDocument`, plus the page, so that looking within one document is quick however common the word is. `FullTextIndexer` needs no list of work: what's left is always whatever files aren't indexed yet. It runs on `IndexThread` and reads through the worker's `pagetext` op, so stopping is safe and a bad file costs only that file. `PublicationFilter::searchContents` adds these matches to the search, and `ParsedSearch::contentsMatch` is the part of a search that documents can answer, since they have no fields.

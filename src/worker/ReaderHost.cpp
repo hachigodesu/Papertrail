@@ -3,6 +3,7 @@
 #include "engine/Document.h"
 #include "import/Extractors.h"
 
+#include <limits>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -121,6 +122,8 @@ QString readablePath(engine::Engine &engine, const QString &path, const QString 
 
 namespace {
 
+constexpr qsizetype kLongestSingleLineText = 60;
+
 class Host {
 public:
     Host(engine::Engine &engine, FILE *out) : m_engine(engine), m_out(out) {}
@@ -146,6 +149,10 @@ public:
                 outline(reply);
             else if (op == QStringLiteral("links"))
                 links(request, reply);
+            else if (op == QStringLiteral("anchor"))
+                anchor(request, reply);
+            else if (op == QStringLiteral("locate"))
+                locate(request, reply);
             else if (op == QStringLiteral("search"))
                 search(request, reply);
             else if (op == QStringLiteral("select"))
@@ -290,6 +297,67 @@ private:
         reply.insert(QStringLiteral("page"), number);
         reply.insert(QStringLiteral("rects"),
                      rectsToJson(m_document->search(number, request.value(QStringLiteral("text")).toString())));
+    }
+
+    // Notes what would find this text again after the pages have moved: where its page starts, and which of
+    // any repeats on that page it is. Long stretches are unlikely to repeat, and run over several lines.
+    void anchor(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        reply.insert(QStringLiteral("place"), m_document->placeForPage(number));
+        const QString text = request.value(QStringLiteral("text")).toString().simplified();
+        int occurrence = 0;
+        if (text.size() <= kLongestSingleLineText) {
+            const QPointF wanted(request.value(QStringLiteral("x")).toDouble(), request.value(QStringLiteral("y")).toDouble());
+            const QList<QRectF> rects = m_document->search(number, text);
+            double nearest = std::numeric_limits<double>::max();
+            for (int i = 0; i < rects.size(); ++i) {
+                const QPointF gap = rects.at(i).topLeft() - wanted;
+                const double distance = gap.manhattanLength();
+                if (distance < nearest) {
+                    nearest = distance;
+                    occurrence = i;
+                }
+            }
+        }
+        reply.insert(QStringLiteral("occurrence"), occurrence);
+    }
+
+    // Finds text from an anchor, looking on the page its place is now on, then either side of it.
+    void locate(const QJsonObject &request, QJsonObject &reply)
+    {
+        const QString text = request.value(QStringLiteral("text")).toString().simplified();
+        const int occurrence = request.value(QStringLiteral("occurrence")).toInt();
+        const int start = m_document->pageForPlace(request.value(QStringLiteral("place")).toString());
+        const int count = m_document->pageCount();
+
+        const auto find = [&](const QString &needle) {
+            for (const int offset : {0, 1, 2, 3, -1, -2}) {
+                const int number = start + offset;
+                if (number < 0 || number >= count)
+                    continue;
+                const QList<QRectF> rects = m_document->search(number, needle);
+                if (rects.isEmpty())
+                    continue;
+                reply.insert(QStringLiteral("page"), number);
+                // A long stretch is one match over several lines, and a short one is one rectangle each.
+                if (needle.size() > kLongestSingleLineText) {
+                    reply.insert(QStringLiteral("rects"), rectsToJson(rects));
+                } else {
+                    // On the page it started on, the same one as before. Elsewhere, the first is the best guess.
+                    const int index = offset == 0 ? qBound(0, occurrence, int(rects.size()) - 1) : 0;
+                    reply.insert(QStringLiteral("rects"), rectsToJson({rects.at(index)}));
+                }
+                return true;
+            }
+            return false;
+        };
+        if (find(text))
+            return;
+        // A new layout can carry a long stretch over a page break, so its start shows where it is.
+        if (text.size() > kLongestSingleLineText && find(text.left(kLongestSingleLineText)))
+            return;
+        reply.insert(QStringLiteral("page"), -1);
     }
 
     void select(const QJsonObject &request, QJsonObject &reply)

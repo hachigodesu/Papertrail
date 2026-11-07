@@ -1,14 +1,21 @@
 #pragma once
 
+#include "core/repo/AnnotationRepository.h"
 #include "ui/DocumentClient.h"
 #include "ui/PageView.h"
 
 #include <QList>
 #include <QRectF>
+#include <QHash>
+#include <QList>
+#include <QPair>
 #include <QWidget>
 
 #include <optional>
 
+class QListWidget;
+class QMenu;
+class QAction;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -76,12 +83,24 @@ public:
     // whose pages move with its layout, the page can't be relied on, so it goes to the first match instead.
     void showMatch(int page, const QString &text);
 
+    // Highlights and notes. These are kept in the library's database, and never in the file.
+    void annotateSelection(core::AnnotationType type, const QString &note = QString(), const QString &colour = QString());
+    void setAnnotationNote(qint64 id, const QString &note);
+    void setAnnotationColour(qint64 id, const QString &colour);
+    void deleteAnnotation(qint64 id);
+    bool exportAnnotations(const QString &path);
+    QListWidget *annotationList() const { return m_annotationList; }
+    QList<int> markedPages() const;
+
 signals:
     // The user asked to open this file with something else, because it can't be shown here.
     void openElsewhereRequested(const QString &path);
 
     // Reports what's happening with this tab's search and problems, for the window's status bar.
     void statusMessage(const QString &message);
+
+    // A highlight or note has been added, changed or removed.
+    void annotationsChanged();
 
 private:
     struct Hit {
@@ -105,7 +124,38 @@ private:
 
     LibrarySession &m_session;
     void applyPendingMatch();
+    void loadAnnotations();
+    void locateAnnotations();
+    void showMark(const core::Annotation &annotation);
+    void refreshAnnotationList();
+    void goToAnnotation(qint64 id);
+    void onAnchored(qint64 token, int part, const QString &place, int occurrence);
+    void onLocated(qint64 token, int part, int page, const QList<QRectF> &rects);
+    void addAnnotationActions(QMenu *menu, const QPoint &viewportPoint);
+    void askForNoteAndAnnotate();
+    void askToEditNote(qint64 id);
+    void askToExportAnnotations();
+
     std::optional<std::pair<int, QString>> m_pendingMatch;
+
+    // What's on this file's contents, and what's on other copies or formats of this publication.
+    QString m_contentHash;
+    QList<core::Annotation> m_annotations;
+    QList<core::Annotation> m_annotationsElsewhere;
+    QHash<qint64, QList<QPair<int, QList<QRectF>>>> m_locatedParts; // By annotation and part, in text that moves.
+    qint64 m_locateRound = 0; // Answers from before the layout last changed are out of date.
+
+    struct DraftAnnotation {
+        core::Annotation annotation;
+        int waitingFor = 0;
+    };
+    QHash<qint64, DraftAnnotation> m_drafts;
+    qint64 m_nextDraft = 1;
+
+    QWidget *m_annotationPanel = nullptr;
+    QListWidget *m_annotationList = nullptr;
+    QAction *m_highlightAction = nullptr;
+
     qint64 m_publicationId;
     qint64 m_fileId;
     QString m_format;

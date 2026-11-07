@@ -79,6 +79,11 @@ public:
     // Only the newest selection on each page matters.
     void requestSelection(int page, const QPointF &a, const QPointF &b);
 
+    // For highlights in text whose pages move. `token` comes back with the answer. If the process dies, the
+    // answer still comes, as nothing found, so nothing waits for ever.
+    void requestAnchor(qint64 token, int part, int page, const QString &text, const QPointF &firstCorner);
+    void requestLocate(qint64 token, int part, const QString &place, const QString &text, int occurrence);
+
     void requestBookmark(int page);
     void requestPageForBookmark(const QString &bookmark);
 
@@ -105,6 +110,8 @@ signals:
     void outlineReady(const QList<papertrail::ui::ReaderOutlineItem> &items);
     void linksReady(int page, const QList<papertrail::ui::ReaderLink> &links);
     void selectionReady(int page, const QList<QRectF> &rects, const QString &text);
+    void anchored(qint64 token, int part, const QString &place, int occurrence);
+    void located(qint64 token, int part, int page, const QList<QRectF> &rects);
     void bookmarkReady(int page, const QString &bookmark);
     void bookmarkResolved(int page);
     void searchHits(int page, const QList<QRectF> &rects);
@@ -113,13 +120,15 @@ signals:
     void recovered(); // The helper crashed, and has been restarted.
 
 private:
-    enum class Kind { Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Select, Bookmark, Find, Search };
+    enum class Kind { Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Select, Bookmark, Anchor, Locate, Find, Search };
 
     struct Request {
         Kind kind = Kind::Open;
         QJsonObject body;
         int page = -1;
         double scale = 1;
+        qint64 token = 0;
+        int part = 0;
     };
 
     void startProcess();

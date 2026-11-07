@@ -42,6 +42,15 @@ add_dependencies(test_reader papertrail-worker)
 add_test(NAME test_reader COMMAND test_reader)
 set_tests_properties(test_reader PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 600)
 
+qt_add_executable(test_annotations test_annotations.cpp)
+target_link_libraries(test_annotations PRIVATE papertrail_ui Qt6::Test)
+target_compile_definitions(test_annotations PRIVATE
+    PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
+    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples")
+add_dependencies(test_annotations papertrail-worker)
+add_test(NAME test_annotations COMMAND test_annotations)
+set_tests_properties(test_annotations PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 600)
+
 qt_add_executable(test_fulltext test_fulltext.cpp)
 target_link_libraries(test_fulltext PRIVATE papertrail_ui Qt6::Test)
 target_compile_definitions(test_fulltext PRIVATE

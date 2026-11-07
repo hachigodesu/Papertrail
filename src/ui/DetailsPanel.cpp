@@ -1,5 +1,6 @@
 #include "ui/DetailsPanel.h"
 
+#include "core/repo/AnnotationRepository.h"
 #include "core/repo/FullTextIndex.h"
 #include "core/repo/VolumeArticles.h"
 
@@ -537,6 +538,8 @@ void DetailsPanel::reload()
         addLink(tr("Web"), p.url, safeWebLink(p.url));
     addFact(tr("Language"), p.language);
     addFact(tr("Abstract"), p.abstract);
+    if (const qint64 annotations = AnnotationRepository(m_session.database()).countFor(p.id))
+        addFact(tr("Highlights and notes"), QLocale().toString(annotations));
     if (p.createdAt != 0) {
         addFact(tr("Added"),
                 QLocale().toString(QDateTime::fromMSecsSinceEpoch(p.createdAt).date(), QLocale::ShortFormat));

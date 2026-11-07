@@ -550,6 +550,56 @@ void PageView::setSelection(int page, const QList<QRectF> &rects, const QString 
     emit selectionChanged();
 }
 
+QList<SelectionPart> PageView::selectionParts() const
+{
+    QList<int> pages = m_selected.keys();
+    std::sort(pages.begin(), pages.end());
+    QList<SelectionPart> parts;
+    for (const int page : pages) {
+        const Selected &selected = m_selected[page];
+        if (!selected.text.isEmpty())
+            parts << SelectionPart{page, selected.rects, selected.text};
+    }
+    return parts;
+}
+
+void PageView::setMarks(int page, const QList<AnnotationMark> &marks)
+{
+    if (marks.isEmpty())
+        m_marks.remove(page);
+    else
+        m_marks.insert(page, marks);
+    viewport()->update();
+}
+
+void PageView::clearMarks()
+{
+    m_marks.clear();
+    viewport()->update();
+}
+
+QList<int> PageView::pagesWithMarks() const
+{
+    QList<int> pages = m_marks.keys();
+    std::sort(pages.begin(), pages.end());
+    return pages;
+}
+
+std::optional<qint64> PageView::annotationAt(const QPoint &viewportPoint) const
+{
+    for (auto it = m_marks.cbegin(); it != m_marks.cend(); ++it) {
+        for (const AnnotationMark &mark : it.value()) {
+            for (const QRectF &rect : mark.rects) {
+                const QPoint first = viewportPointFor(it.key(), rect.topLeft());
+                const QPoint last = viewportPointFor(it.key(), rect.bottomRight());
+                if (QRect(first, last).normalized().contains(viewportPoint))
+                    return mark.id;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 void PageView::clearSelection()
 {
     if (m_selected.isEmpty())
@@ -681,6 +731,29 @@ void PageView::drawPage(QPainter &painter, int page, const QRectF &target)
         return QRectF(target.x() + rect.x() * m_scale, target.y() + rect.y() * m_scale, rect.width() * m_scale,
                       rect.height() * m_scale);
     };
+    const auto marks = m_marks.constFind(page);
+    if (marks != m_marks.constEnd()) {
+        for (const AnnotationMark &mark : *marks) {
+            QColor colour = mark.colour;
+            for (const QRectF &rect : mark.rects) {
+                const QRectF area = toTarget(rect);
+                if (mark.underline) {
+                    colour.setAlpha(255);
+                    painter.fillRect(QRectF(area.left(), area.bottom() - 2, area.width(), 2), colour);
+                } else {
+                    colour.setAlpha(110);
+                    painter.fillRect(area, colour);
+                }
+            }
+            // A corner to show there's a note to read.
+            if (mark.hasNote && !mark.rects.isEmpty()) {
+                QColor corner = mark.colour;
+                corner.setAlpha(255);
+                const QRectF area = toTarget(mark.rects.first());
+                painter.fillRect(QRectF(area.left() - 3, area.top(), 3, area.height()), corner);
+            }
+        }
+    }
     const auto hits = m_searchHits.constFind(page);
     if (hits != m_searchHits.constEnd()) {
         for (const QRectF &rect : *hits)
@@ -915,6 +988,7 @@ void PageView::contextMenuEvent(QContextMenuEvent *event)
         QApplication::clipboard()->setText(selectedText());
     });
     copy->setEnabled(hasSelection());
+    emit contextMenuWanted(&menu, event->pos());
     menu.exec(event->globalPos());
 }
 

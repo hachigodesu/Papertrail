@@ -307,6 +307,14 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
         if (ok)
             emit bookmarkReady(request.page, reply.value(QStringLiteral("bookmark")).toString());
         break;
+    case Kind::Anchor:
+        emit anchored(request.token, request.part, ok ? reply.value(QStringLiteral("place")).toString() : QString(),
+                      ok ? reply.value(QStringLiteral("occurrence")).toInt() : 0);
+        break;
+    case Kind::Locate:
+        emit located(request.token, request.part, ok ? reply.value(QStringLiteral("page")).toInt(-1) : -1,
+                     ok ? rectsFromJson(reply.value(QStringLiteral("rects"))) : QList<QRectF>());
+        break;
     case Kind::Find:
         if (ok)
             emit bookmarkResolved(reply.value(QStringLiteral("page")).toInt());
@@ -344,6 +352,12 @@ void DocumentClient::handleLostRequest()
         ++m_searchDone;
         emit searchProgress(m_searchDone, m_pageCount);
         continueSearch();
+        break;
+    case Kind::Anchor:
+        emit anchored(request.token, request.part, QString(), 0);
+        break;
+    case Kind::Locate:
+        emit located(request.token, request.part, -1, {});
         break;
     default:
         break;
@@ -471,6 +485,35 @@ void DocumentClient::requestSelection(int page, const QPointF &a, const QPointF 
                                {QStringLiteral("ax"), a.x()}, {QStringLiteral("ay"), a.y()},
                                {QStringLiteral("bx"), b.x()}, {QStringLiteral("by"), b.y()}};
     m_selections.insert(page, request);
+    pump();
+}
+
+void DocumentClient::requestAnchor(qint64 token, int part, int page, const QString &text, const QPointF &firstCorner)
+{
+    Request request;
+    request.kind = Kind::Anchor;
+    request.token = token;
+    request.part = part;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("anchor")},
+                               {QStringLiteral("page"), page},
+                               {QStringLiteral("text"), text},
+                               {QStringLiteral("x"), firstCorner.x()},
+                               {QStringLiteral("y"), firstCorner.y()}};
+    m_urgent << request;
+    pump();
+}
+
+void DocumentClient::requestLocate(qint64 token, int part, const QString &place, const QString &text, int occurrence)
+{
+    Request request;
+    request.kind = Kind::Locate;
+    request.token = token;
+    request.part = part;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("locate")},
+                               {QStringLiteral("place"), place},
+                               {QStringLiteral("text"), text},
+                               {QStringLiteral("occurrence"), occurrence}};
+    m_background << request;
     pump();
 }
 
