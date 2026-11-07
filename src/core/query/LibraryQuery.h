@@ -72,6 +72,7 @@ public:
 private:
     // The SQL condition for the filter's search text, or empty if it has none.
     QByteArray searchClause(const PublicationFilter &filter);
+    void addContentMatches(const QString &contentsMatch, const QString &fieldMatch);
 
     // Publications from removed folders are never part of the library view.
     bool anyHidden();
@@ -81,6 +82,7 @@ private:
     // A search's matches are worked out once and reused by the page, the total and the
     // sidebar, until the search text or the library changes.
     QString m_searchText;
+    bool m_searchedContents = false;
     QByteArray m_searchStamp;
     qint64 m_searchCount = 0;
 };

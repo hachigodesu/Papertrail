@@ -35,6 +35,9 @@ public:
     DetailsPanel(LibrarySession &session, CoverCache &covers, QWidget *parent = nullptr);
 
     void showPublication(qint64 id);
+
+    // What to show matches for from inside documents. Empty means none are wanted.
+    void setContentsSearch(const QString &match, const QString &readerText);
     void showSelectionCount(qint64 count);
     void showNothing();
     void reload(); // Reads the shown publication again, after a change elsewhere.
@@ -54,6 +57,8 @@ public:
     QComboBox *readStatusBox() const { return m_readStatus; }
     QCheckBox *preprintBox() const { return m_preprint; }
     QLabel *collectionsLabel() const { return m_collections; }
+    QWidget *matchesSection() const { return m_matchesSection; }
+    QListWidget *matchList() const { return m_matchList; }
     QWidget *articlesSection() const { return m_articlesSection; }
     QListWidget *articleList() const { return m_articleList; }
     QLabel *partOfLabel() const { return m_partOf; }
@@ -70,6 +75,9 @@ signals:
     void openRequested(qint64 id);
     void openFileRequested(qint64 id, qint64 fileId);
     void showInFolderRequested(qint64 id);
+
+    // Where a search found something inside a document.
+    void openMatchRequested(qint64 publicationId, qint64 fileId, int page, const QString &text);
 
     // For a volume and the articles inside it.
     void articlesFromContentsRequested(qint64 volumeId);
@@ -110,6 +118,10 @@ private:
     QVBoxLayout *m_tagRows = nullptr;
     QLineEdit *m_tagEdit = nullptr;
     QCheckBox *m_preprint = nullptr;
+    QWidget *m_matchesSection = nullptr;
+    QListWidget *m_matchList = nullptr;
+    QString m_contentsMatch;
+    QString m_contentsText;
     QWidget *m_articlesSection = nullptr;
     QListWidget *m_articleList = nullptr;
     QLabel *m_partOf = nullptr;

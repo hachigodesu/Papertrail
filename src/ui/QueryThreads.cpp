@@ -1,6 +1,7 @@
 #include "ui/QueryThreads.h"
 
 #include "core/db/Database.h"
+#include "core/repo/FullTextIndex.h"
 
 #include <QMutexLocker>
 
@@ -56,6 +57,7 @@ void ListQueryThread::run()
     QString openError;
     try {
         db = std::make_unique<Database>(m_path);
+        attachFullText(*db, fullTextPathFor(m_path));
         query = std::make_unique<LibraryQuery>(*db);
     } catch (const std::exception &error) {
         openError = QString::fromUtf8(error.what());
@@ -143,6 +145,7 @@ void SidebarQueryThread::run()
     QString openError;
     try {
         db = std::make_unique<Database>(m_path);
+        attachFullText(*db, fullTextPathFor(m_path));
         query = std::make_unique<LibraryQuery>(*db);
     } catch (const std::exception &error) {
         openError = QString::fromUtf8(error.what());

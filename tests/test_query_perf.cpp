@@ -11,6 +11,7 @@
 #include "core/db/Schema.h"
 #include "core/query/LibraryQuery.h"
 #include "core/repo/CollectionRepository.h"
+#include "core/repo/FullTextIndex.h"
 #include "core/repo/TagRepository.h"
 
 #include <QElapsedTimer>
@@ -192,6 +193,72 @@ private slots:
         }
         m_out << '\n';
         m_out.flush();
+        if (!reportOnly())
+            QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(", "))));
+    }
+
+    void searchingInsideDocumentsMeetsTheTarget()
+    {
+        // A twentieth of the library, with 20 pages each. Its own index file, so it's gone with the test.
+        QTemporaryDir indexDir;
+        attachFullText(*m_db, indexDir.filePath(QStringLiteral("fulltext.db")));
+        QElapsedTimer filling;
+        filling.start();
+        qint64 documents = 0;
+        {
+            static const QStringList words = {QStringLiteral("beam"), QStringLiteral("analysis"), QStringLiteral("fatigue"), QStringLiteral("steel"),
+                                              QStringLiteral("model"), QStringLiteral("results"), QStringLiteral("method"), QStringLiteral("finite"),
+                                              QStringLiteral("element"), QStringLiteral("crack"), QStringLiteral("load"), QStringLiteral("test")};
+            FullTextIndex index(*m_db);
+            QStringList shas;
+            {
+                auto select = m_db->prepare("SELECT DISTINCT sha256 FROM file WHERE sha256 IS NOT NULL AND id % 20 = 0");
+                while (select->step())
+                    shas << select->textAt(0);
+            }
+            quint32 seed = 1;
+            for (const QString &sha : std::as_const(shas)) {
+                const qint64 document = index.beginDocument(sha);
+                QStringList pages;
+                for (int page = 0; page < 20; ++page) {
+                    QString text;
+                    for (int word = 0; word < 400; ++word) {
+                        seed = seed * 1664525u + 1013904223u;
+                        text += words.at((seed >> 16) % words.size()) + u' ';
+                    }
+                    pages << text;
+                }
+                index.addPages(document, 0, pages);
+                index.finishDocument(document, 20, QString());
+                ++documents;
+            }
+        }
+        m_out << "Index of " << documents << " documents, 20 pages each, took " << filling.elapsed() << " ms to fill\n";
+
+        const auto contents = [](const char *text) {
+            PublicationFilter filter;
+            filter.searchText = QString::fromUtf8(text);
+            filter.searchContents = true;
+            return filter;
+        };
+        QStringList failures;
+        const auto time = [&](const char *name, const PublicationFilter &filter, double target) {
+            const double ms = medianMs([&] {
+                LibraryQuery query(*m_db);
+                query.page(filter, {}, 0, kPageSize);
+                query.count(filter);
+            });
+            report(name, ms, target);
+            if (ms > target)
+                failures << QString::fromUtf8(name);
+        };
+        m_out << "Searching inside documents (target " << kRankedLimitMs << " ms, except for the slow case)\n";
+        time("inside: a word on every page", contents("analysis"), 1000);
+        time("inside: exact phrase", contents("\"finite element\""), 1000);
+        time("inside: a word nowhere", contents("zzzznotthere"), kRankedLimitMs);
+        m_out << '\n';
+        m_out.flush();
+        m_db->exec("DETACH DATABASE fulltext");
         if (!reportOnly())
             QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(", "))));
     }

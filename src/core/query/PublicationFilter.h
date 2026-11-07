@@ -14,6 +14,7 @@ namespace papertrail::core {
 // different fields combine with AND. An empty field applies no restriction.
 struct PublicationFilter {
     QString searchText; // The search box, including field searches such as author:knuth.
+    bool searchContents = false; // Also looks for its plain words inside documents, if they've been indexed.
     QList<PublicationType> tabTypes; // From the selected tab.
     QList<PublicationType> types;
 

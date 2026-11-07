@@ -37,6 +37,8 @@ add_library(papertrail_ui STATIC
     QueryThreads.h
     ReaderTab.cpp
     ReaderTab.h
+    IndexThread.cpp
+    IndexThread.h
     VolumeDialogs.cpp
     VolumeDialogs.h
     ReviewTab.cpp

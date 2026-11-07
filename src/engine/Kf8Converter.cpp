@@ -4,6 +4,7 @@
 
 #include "engine/Backends.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -147,8 +148,9 @@ void convertKf8ToEpub(fz_context *ctx, const QString &path, const QString &epubP
         throw EngineError("this Kindle book has no text to convert");
 
     // Written under another name first, so that an interrupted conversion can't look like a finished one.
+    // The name is this process's own, because the reader and the indexer can convert one book at the same time.
     QDir().mkpath(QFileInfo(epubPath).absolutePath());
-    const QString temporary = epubPath + QStringLiteral(".tmp");
+    const QString temporary = epubPath + QStringLiteral(".%1.tmp").arg(QCoreApplication::applicationPid());
     try {
         EpubWriter writer(ctx, temporary.toUtf8());
         writer.add("mimetype", kMimetype, sizeof(kMimetype) - 1, false);
@@ -163,11 +165,12 @@ void convertKf8ToEpub(fz_context *ctx, const QString &path, const QString &epubP
         throw;
     }
 
-    QFile::remove(epubPath);
-    if (!QFile::rename(temporary, epubPath)) {
-        QFile::remove(temporary);
+    // Another process may have got there first, and may have it open. Theirs is just as good.
+    if (QFile::rename(temporary, epubPath))
+        return;
+    QFile::remove(temporary);
+    if (!QFile::exists(epubPath))
         throw EngineError("could not save the converted book");
-    }
 }
 
 } // namespace papertrail::engine

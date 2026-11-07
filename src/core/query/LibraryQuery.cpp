@@ -1,6 +1,7 @@
 #include "core/query/LibraryQuery.h"
 
 #include "core/db/Database.h"
+#include "core/repo/FullTextIndex.h"
 #include "core/query/SearchParser.h"
 
 #include <QHash>
@@ -236,7 +237,9 @@ ListQuery buildListQuery(const PublicationFilter &filter, const PublicationSort 
 {
     const QString ftsMatch = parseSearch(filter.searchText).ftsMatch;
     ListQuery query;
-    if (sort.field == SortField::Relevance && !ftsMatch.isEmpty()) {
+    // How well words match inside documents can't be compared with how well they match a title, so a search
+    // that includes them falls through to the ordinary order, which treats best match as by title.
+    if (sort.field == SortField::Relevance && !ftsMatch.isEmpty() && !filter.searchContents) {
         Conditions c = buildConditions(filter, QByteArray(), anyHidden);
         query.sql = " FROM publication_fts JOIN publication p ON p.id = publication_fts.rowid "
                     "WHERE publication_fts MATCH ?";
@@ -291,7 +294,18 @@ QByteArray LibraryQuery::searchClause(const PublicationFilter &filter)
     if (match.isEmpty())
         return {};
 
-    if (match != m_searchText || m_db.changeStamp() != m_searchStamp) {
+    const ParsedSearch parsed = parseSearch(filter.searchText);
+    const bool contents = filter.searchContents && !parsed.contentsMatch.isEmpty() && hasFullText(m_db);
+    QByteArray stamp = m_db.changeStamp();
+    if (contents) {
+        // Indexing happens on another connection, and in another file from the one the stamp looks at.
+        Statement &version = m_db.cached("PRAGMA fulltext.data_version");
+        version.step();
+        stamp += '/' + QByteArray::number(version.int64At(0));
+        version.reset();
+    }
+
+    if (match != m_searchText || contents != m_searchedContents || stamp != m_searchStamp) {
         m_db.exec("CREATE TEMP TABLE IF NOT EXISTS search_match (id INTEGER PRIMARY KEY)");
         m_db.exec("DELETE FROM temp.search_match");
         Statement &fill = m_db.cached(
@@ -299,6 +313,8 @@ QByteArray LibraryQuery::searchClause(const PublicationFilter &filter)
         fill.bind(1, match);
         fill.step();
         fill.reset();
+        if (contents)
+            addContentMatches(parsed.contentsMatch, parsed.fieldMatch);
 
         Statement &size = m_db.cached("SELECT count(*) FROM temp.search_match");
         size.step();
@@ -306,7 +322,14 @@ QByteArray LibraryQuery::searchClause(const PublicationFilter &filter)
         size.reset();
 
         m_searchText = match;
+        m_searchedContents = contents;
         m_searchStamp = m_db.changeStamp(); // Taken last, since filling the table changes it.
+        if (contents) {
+            Statement &version = m_db.cached("PRAGMA fulltext.data_version");
+            version.step();
+            m_searchStamp += '/' + QByteArray::number(version.int64At(0));
+            version.reset();
+        }
     }
 
     // A leading + stops SQLite using this condition to choose its starting point.
@@ -320,6 +343,50 @@ bool LibraryQuery::anyHidden()
     const bool any = select.intAt(0) != 0;
     select.reset();
     return any;
+}
+
+void LibraryQuery::addContentMatches(const QString &contentsMatch, const QString &fieldMatch)
+{
+    m_db.exec("CREATE TEMP TABLE IF NOT EXISTS content_hit (document INTEGER, page INTEGER)");
+    m_db.exec("DELETE FROM temp.content_hit");
+    {
+        auto hits = m_db.prepare("INSERT INTO temp.content_hit SELECT rowid / ?1, rowid % ?1 FROM fulltext.page_text WHERE page_text MATCH ?2");
+        hits->bind(1, kFullTextPagesPerDocument);
+        hits->bind(2, contentsMatch);
+        hits->step();
+    }
+
+    // Field searches such as author: can only be answered from the metadata, so they still have to agree.
+    const QByteArray agreeing = fieldMatch.isEmpty()
+        ? QByteArray()
+        : " WHERE pf.publication_id IN (SELECT rowid FROM publication_fts WHERE publication_fts MATCH ?)";
+    {
+        auto whole = m_db.prepare(
+            "INSERT OR IGNORE INTO temp.search_match "
+            "SELECT DISTINCT pf.publication_id FROM (SELECT DISTINCT document FROM temp.content_hit) h "
+            "JOIN fulltext.document d ON d.id = h.document JOIN file f ON f.sha256 = d.sha256 "
+            "JOIN publication_file pf ON pf.file_id = f.id" + agreeing);
+        if (!fieldMatch.isEmpty())
+            whole->bind(1, fieldMatch);
+        whole->step();
+    }
+    {
+        // An article is found by what's on its own pages of its volume's file.
+        const QByteArray articleAgreeing = fieldMatch.isEmpty()
+            ? QByteArray()
+            : " AND c.id IN (SELECT rowid FROM publication_fts WHERE publication_fts MATCH ?)";
+        auto articles = m_db.prepare(
+            "INSERT OR IGNORE INTO temp.search_match "
+            "SELECT DISTINCT c.id FROM publication c "
+            "JOIN publication_file pf ON pf.publication_id = c.parent_id JOIN file f ON f.id = pf.file_id "
+            "JOIN fulltext.document d ON d.sha256 = f.sha256 "
+            "JOIN temp.content_hit h ON h.document = d.id AND h.page + 1 BETWEEN c.page_start AND c.page_end "
+            "WHERE c.parent_id IS NOT NULL" + articleAgreeing);
+        if (!fieldMatch.isEmpty())
+            articles->bind(1, fieldMatch);
+        articles->step();
+    }
+    m_db.exec("DELETE FROM temp.content_hit");
 }
 
 qint64 LibraryQuery::count(const PublicationFilter &filter)

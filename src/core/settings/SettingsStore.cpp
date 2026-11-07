@@ -58,6 +58,8 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("metadata.crossref_email"), QStringLiteral(""), K::Value, {}},
         // Nothing's sent anywhere until the user has made this choice.
         {QStringLiteral("metadata.mode_chosen"), false, K::Value, {}},
+        {QStringLiteral("library.index_contents"), true, K::Value, {}},
+        {QStringLiteral("library.search_contents"), false, K::Value, {}},
         {QStringLiteral("library.view"), QStringLiteral("grid"), K::Value,
          {QStringLiteral("grid"), QStringLiteral("list")}},
         {QStringLiteral("library.sort_field"), QStringLiteral("title"), K::Value,

@@ -1,6 +1,8 @@
 add_library(papertrail_import STATIC
     Extractors.cpp
     Extractors.h
+    FullTextIndexer.cpp
+    FullTextIndexer.h
     ImportService.cpp
     ImportService.h
     WorkerClient.cpp

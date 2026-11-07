@@ -72,6 +72,10 @@ public:
     void previousHit();
     void applySearch();
 
+    // Goes to where a search across the library found something, and looks for it here too. For a file
+    // whose pages move with its layout, the page can't be relied on, so it goes to the first match instead.
+    void showMatch(int page, const QString &text);
+
 signals:
     // The user asked to open this file with something else, because it can't be shown here.
     void openElsewhereRequested(const QString &path);
@@ -100,6 +104,8 @@ private:
     void onContentsActivated(QTreeWidgetItem *item);
 
     LibrarySession &m_session;
+    void applyPendingMatch();
+    std::optional<std::pair<int, QString>> m_pendingMatch;
     qint64 m_publicationId;
     qint64 m_fileId;
     QString m_format;

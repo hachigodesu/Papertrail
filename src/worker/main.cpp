@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string>
 
 using namespace papertrail;
@@ -219,6 +220,58 @@ QJsonObject inspectFile(engine::Engine &engine, const QString &originalPath, con
     return reply;
 }
 
+// A run of pages' text for the full-text index. A document stays open between requests for the same file,
+// since reading a long one takes many of them.
+QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
+{
+    constexpr int kMostCharactersOnAPage = 400000; // More than any real page, and it keeps a reply bounded.
+    static QString openPath;
+    static std::unique_ptr<engine::Document> document;
+
+    const QString path = request.value(QStringLiteral("path")).toString();
+    if (path != openPath || !document) {
+        document.reset();
+        openPath.clear();
+        try {
+            QString readable = path;
+            if (isKindleSuffix(QFileInfo(path).suffix().toLower()))
+                readable = worker::readablePath(engine, path, request.value(QStringLiteral("convertedPath")).toString());
+            document = engine.open(readable);
+            openPath = path;
+        } catch (const engine::EngineError &error) {
+            return failure(QString::fromUtf8(error.what()));
+        }
+    }
+    if (document->needsPassword())
+        return failure(QStringLiteral("it needs a password"));
+
+    int pageCount = 0;
+    try {
+        pageCount = document->pageCount();
+    } catch (const engine::EngineError &error) {
+        return failure(QString::fromUtf8(error.what()));
+    }
+
+    const int start = request.value(QStringLiteral("start")).toInt();
+    const int count = request.value(QStringLiteral("count")).toInt();
+    QJsonArray pages;
+    for (int page = start; page < pageCount && page < start + count; ++page) {
+        // A page that can't be read is an empty one, and later pages may still be fine.
+        QString text;
+        try {
+            text = document->pageText(page);
+        } catch (const engine::EngineError &) {
+        }
+        pages.append(text.left(kMostCharactersOnAPage));
+    }
+
+    QJsonObject reply;
+    reply.insert(QStringLiteral("ok"), true);
+    reply.insert(QStringLiteral("pageCount"), pageCount);
+    reply.insert(QStringLiteral("pages"), pages);
+    return reply;
+}
+
 // Fault injection for testing how the app copes with a worker that dies or hangs. It only ever
 // happens with this environment variable set, which the app itself never does.
 void applyTestFaults(const QString &path)
@@ -266,6 +319,8 @@ int main(int argc, char *argv[])
         QJsonObject reply;
         if (op == QStringLiteral("hash")) {
             reply = hashFile(path);
+        } else if (op == QStringLiteral("pagetext")) {
+            reply = pageTexts(engine, object);
         } else if (op == QStringLiteral("inspect")) {
             reply = inspectFile(engine, path, object.value(QStringLiteral("coverPath")).toString(),
                                 object.value(QStringLiteral("convertedPath")).toString());

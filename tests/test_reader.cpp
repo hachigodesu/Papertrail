@@ -501,6 +501,28 @@ private slots:
         QVERIFY(!QFile::exists(m_dir->filePath(QStringLiteral("locked.epub"))));
     }
 
+    void twoProcessesCanConvertOneKf8BookAtOnce()
+    {
+        // The reader and the indexer can both get to a book before it has been converted. Found on Arch.
+        const QString converted = m_dir->filePath(QStringLiteral("shared.epub"));
+        for (int round = 0; round < 3; ++round) {
+            QFile::remove(converted);
+            DocumentClient first(worker());
+            DocumentClient second(worker());
+            QSignalSpy firstOpened(&first, &DocumentClient::opened);
+            QSignalSpy secondOpened(&second, &DocumentClient::opened);
+            QSignalSpy firstFailed(&first, &DocumentClient::failed);
+            QSignalSpy secondFailed(&second, &DocumentClient::failed);
+            first.open(sample(QStringLiteral("kf8_frankenstein.azw3")), {}, converted);
+            second.open(sample(QStringLiteral("kf8_frankenstein.azw3")), {}, converted);
+            QTRY_VERIFY_WITH_TIMEOUT(firstOpened.size() + firstFailed.size() > 0 && secondOpened.size() + secondFailed.size() > 0, kWaitMs);
+            QCOMPARE(firstFailed.size(), 0);
+            QCOMPARE(secondFailed.size(), 0);
+            QVERIFY(QFile::exists(converted));
+        }
+        QCOMPARE(QDir(m_dir->path()).entryList({QStringLiteral("*.tmp")}, QDir::Files).size(), 0);
+    }
+
     void aKf8BookOpensFromTheLibraryAndResumes()
     {
         openLibraryWindow();

@@ -92,6 +92,28 @@ WorkerClient::HashResult WorkerClient::hash(const QString &path, int timeoutMs)
     return {reply.failure, reply.error, reply.body.value(QStringLiteral("sha256")).toString()};
 }
 
+WorkerClient::PageTexts WorkerClient::pageTexts(const QString &path, const QString &convertedPath, int start, int count, int timeoutMs)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("op"), QStringLiteral("pagetext"));
+    request.insert(QStringLiteral("path"), path);
+    request.insert(QStringLiteral("convertedPath"), convertedPath);
+    request.insert(QStringLiteral("start"), start);
+    request.insert(QStringLiteral("count"), count);
+    const Reply reply = call(request, timeoutMs);
+
+    PageTexts texts;
+    texts.failure = reply.failure;
+    texts.error = reply.error;
+    if (reply.failure != WorkerFailure::None)
+        return texts;
+    texts.pageCount = reply.body.value(QStringLiteral("pageCount")).toInt();
+    const QJsonArray pages = reply.body.value(QStringLiteral("pages")).toArray();
+    for (const QJsonValue &page : pages)
+        texts.pages << page.toString();
+    return texts;
+}
+
 WorkerClient::Inspection WorkerClient::inspect(const QString &path, const QString &coverPath, const QString &convertedPath,
                                                int timeoutMs)
 {

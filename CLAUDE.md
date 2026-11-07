@@ -146,6 +146,7 @@ The window's thread never waits on slow work, and each background thread opens i
 | `ImportThread` | Scans and the job queue. Its `cancelled` check also stops the worker mid-job, without counting against the file |
 | `BulkChanges` | Changes to many publications, in batches so other writers only wait briefly |
 | `CoverCache` pool | Decodes covers, newest request first |
+| `IndexThread` | Reads document text into the full-text index, through the worker |
 | `LookupThread` | Runs `LookupEngine` through the queued online lookups |
 
 Tests that show a window should fail on a `QMessageBox`, which would otherwise wait forever for a click: see `m_boxWatcher` in `test_reader.cpp`.
@@ -171,6 +172,10 @@ A reading place belongs to a format, not to a publication. Use `ReadingStateRepo
 Lookups are `job` rows of kind `lookup`, which belong to `LookupRepository` and not `ImportService`. `LookupEngine::decide` holds the table of what each mode does with a result. `plannedChanges` in `Matching.cpp` decides what a result may change: it leaves fields set by hand alone, only fills gaps in DOI, ISBN and abstract, and can never move anything to or from Preprint. Sources can only suggest that (`preprintHint`).
 
 Rate limits differ by source and by kind of request, and OpenAlex's anonymous searches run out at about 100 a day. A 429 blocks that source alone, and the queue only waits when no source could answer. A failure of the network or a source puts the job back without counting it as an attempt.
+
+### Full-text search
+
+Document text is in `fulltext.db`, attached to a connection as `fulltext` by `attachFullText` (`LibrarySession` and the query threads do this, and `core/repo/FullTextIndex` holds the rest). It's kept by content hash, and each page's row number is its document's id times `kFullTextPagesPerDocument`, plus the page, so that looking within one document is quick however common the word is. `FullTextIndexer` needs no list of work: what's left is always whatever files aren't indexed yet. It runs on `IndexThread` and reads through the worker's `pagetext` op, so stopping is safe and a bad file costs only that file. `PublicationFilter::searchContents` adds these matches to the search, and `ParsedSearch::contentsMatch` is the part of a search that documents can answer, since they have no fields.
 
 ### Volumes and articles
 

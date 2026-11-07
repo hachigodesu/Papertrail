@@ -24,6 +24,11 @@ namespace papertrail::core {
 // Anything else with a colon is treated as ordinary text, so it never causes an error.
 struct ParsedSearch {
     QString ftsMatch; // An FTS5 expression, with all input safely quoted. Empty if none.
+
+    // The same, split up for searching inside documents, which only have words and no fields.
+    QString contentsMatch; // The plain words and phrases.
+    QString fieldMatch;    // The rest, which only the metadata can answer.
+    QString contentsText;  // What to look for in a reader: a phrase if there is one, or else the longest word.
     QStringList tagPrefixes;
     QStringList doiPrefixes;
     QStringList isbns;

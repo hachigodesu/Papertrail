@@ -1,5 +1,6 @@
 #include "ui/DetailsPanel.h"
 
+#include "core/repo/FullTextIndex.h"
 #include "core/repo/VolumeArticles.h"
 
 #include "core/repo/PublicationMerge.h"
@@ -206,6 +207,24 @@ void DetailsPanel::buildSinglePage()
     m_collections->setWordWrap(true);
     column->addWidget(m_collections);
 
+    // Where a search of the library found something inside this document.
+    m_matchesSection = new QWidget;
+    auto *found = new QVBoxLayout(m_matchesSection);
+    found->setContentsMargins(0, 0, 0, 0);
+    found->addWidget(sectionHeading(tr("Found inside")));
+    m_matchList = new QListWidget; // List items show text as it is, so a document's text can't become formatting.
+    m_matchList->setAccessibleName(tr("Where the search found this inside the document"));
+    m_matchList->setMaximumHeight(190);
+    m_matchList->setWordWrap(true);
+    m_matchList->setToolTip(tr("Double-click to open it at this page."));
+    connect(m_matchList, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
+        if (m_id)
+            emit openMatchRequested(*m_id, item->data(Qt::UserRole).toLongLong(), item->data(Qt::UserRole + 1).toInt(), m_contentsText);
+    });
+    found->addWidget(m_matchList);
+    column->addWidget(m_matchesSection);
+    m_matchesSection->hide();
+
     // A volume lists its articles, and an article leads back to its volume.
     m_articlesSection = new QWidget;
     auto *articles = new QVBoxLayout(m_articlesSection);
@@ -402,6 +421,16 @@ void DetailsPanel::showSelectionCount(qint64 count)
     m_pages->setCurrentIndex(2);
 }
 
+void DetailsPanel::setContentsSearch(const QString &match, const QString &readerText)
+{
+    if (match == m_contentsMatch && readerText == m_contentsText)
+        return;
+    m_contentsMatch = match;
+    m_contentsText = readerText;
+    if (m_id)
+        reload();
+}
+
 void DetailsPanel::showPublication(qint64 id)
 {
     saveNotes();
@@ -533,6 +562,20 @@ void DetailsPanel::reload()
         collections << collection.name;
     m_collections->setText(tr("In collections: %1").arg(collections.join(QStringLiteral(", "))));
     m_collections->setVisible(!collections.isEmpty());
+
+    m_matchList->clear();
+    if (!m_contentsMatch.isEmpty()) {
+        try {
+            for (const ContentMatch &match : FullTextIndex(m_session.database()).matchesFor(p.id, m_contentsMatch)) {
+                auto *item = new QListWidgetItem(tr("Page %1: %2").arg(match.page + 1).arg(match.snippet), m_matchList);
+                item->setData(Qt::UserRole, match.fileId);
+                item->setData(Qt::UserRole + 1, match.page);
+            }
+        } catch (const std::exception &) {
+            // They're a help, not what's being looked at.
+        }
+    }
+    m_matchesSection->setVisible(m_matchList->count() > 0);
 
     const bool holdsArticles = !p.parentId && canHoldArticles(p.type);
     m_articlesSection->setVisible(holdsArticles);

@@ -17,6 +17,7 @@
 
 class QAbstractItemView;
 class QAction;
+class QCheckBox;
 class QComboBox;
 class QItemSelectionModel;
 class QLabel;
@@ -46,6 +47,7 @@ class LibrarySession;
 class PublicationListModel;
 class LookupThread;
 class ReaderTab;
+class IndexThread;
 class ReviewTab;
 
 // The library: tabs, search, filters, the grid or list of publications, and their details.
@@ -74,6 +76,9 @@ public:
     void showReviewTab();
     ReviewTab *reviewTab() const { return m_reviewTab; }
     LookupThread *lookupThread() const { return m_lookup; }
+    IndexThread *indexThread() const { return m_index; }
+    QCheckBox *searchInsideBox() const { return m_searchInside; }
+    QAction *indexContentsAction() const { return m_indexContents; }
     QPushButton *reviewButton() const { return m_reviewButton; }
     QMessageBox *reviewOffer() const { return m_reviewOffer; }
 
@@ -206,6 +211,9 @@ private:
     void onLookupProgress(qint64 done, qint64 remaining, const QString &source);
     void onLookupsFinished(const papertrail::metadata::LookupSummary &summary);
 
+    void kickIndexing();
+    void openAtMatch(qint64 publicationId, qint64 fileId, int page, const QString &text);
+
     void onImportBusyChanged(bool busy);
     void onImportProgress(qint64 done, qint64 remaining, const QString &file);
     void onRootScanned(qint64 rootId, const papertrail::import::ScanReport &report, const QStringList &folders);
@@ -215,6 +223,11 @@ private:
 
     LibrarySession &m_session;
     ImportThread *m_import = nullptr;
+    IndexThread *m_index = nullptr;
+    QCheckBox *m_searchInside = nullptr;
+    QAction *m_indexContents = nullptr;
+    QLabel *m_indexLabel = nullptr;
+    QPushButton *m_indexStop = nullptr;
     LookupThread *m_lookup = nullptr;
     ReviewTab *m_reviewTab = nullptr;
     QPointer<QMessageBox> m_reviewOffer;

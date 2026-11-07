@@ -392,6 +392,7 @@ void ReaderTab::connectClient()
             m_ready = true;
             m_stack->setCurrentWidget(m_view);
             restorePlace();
+            applyPendingMatch();
         }
     });
     connect(m_client, &DocumentClient::pageRendered, m_view, &PageView::setPageImage);
@@ -679,6 +680,25 @@ void ReaderTab::focusSearch()
 {
     m_search->setFocus();
     m_search->selectAll();
+}
+
+void ReaderTab::showMatch(int page, const QString &text)
+{
+    m_pendingMatch = std::make_pair(page, text);
+    if (m_ready)
+        applyPendingMatch();
+}
+
+void ReaderTab::applyPendingMatch()
+{
+    if (!m_pendingMatch)
+        return;
+    const auto [page, text] = *m_pendingMatch;
+    m_pendingMatch.reset();
+    m_view->goToPage(m_reflowable ? 0 : page);
+    m_search->setText(text);
+    m_activeSearch.clear(); // So that it searches again from here, even for the same words.
+    applySearch();
 }
 
 void ReaderTab::applySearch()

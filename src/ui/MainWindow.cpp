@@ -17,6 +17,8 @@
 #include "ui/LookupThread.h"
 #include "ui/OnlineLookupDialog.h"
 #include "core/repo/VolumeArticles.h"
+#include "core/query/SearchParser.h"
+#include "ui/IndexThread.h"
 #include "ui/ReviewTab.h"
 #include "ui/VolumeDialogs.h"
 #include "ui/MetadataEditor.h"
@@ -34,6 +36,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QCheckBox>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QJsonValue>
@@ -159,6 +162,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_watcher = new FolderWatcher(this);
     m_bulk = new BulkChanges(session.paths().database, this);
     m_lookup = new LookupThread(session.paths(), this);
+    m_index = new IndexThread(session.paths(), this);
 
     const QString sortSetting = session.settings().value(QStringLiteral("library.sort_field")).toString();
     m_sortField = sortFieldFromSetting(sortSetting);
@@ -227,6 +231,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_import->start();
     m_bulk->start();
     m_lookup->start();
+    m_index->start();
     {
         const QString mode = lookupMode();
         m_import->setLookupMode(mode == QLatin1StringView("offline") ? QString() : mode);
@@ -249,6 +254,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
             rescanAll();
         else
             m_import->resumeQueue();
+        kickIndexing();
     });
 }
 
@@ -294,6 +300,16 @@ void MainWindow::buildToolbar()
     m_search->setClearButtonEnabled(true);
     connect(m_search, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
     row->addWidget(m_search, 1);
+
+    m_searchInside = new QCheckBox(tr("Inside documents"), container);
+    m_searchInside->setToolTip(tr("Also looks for your words in the text of documents. Double-click a place under "
+                                  "Found inside in the details to open it there."));
+    m_searchInside->setChecked(m_session.settings().value(QStringLiteral("library.search_contents")).toBool());
+    connect(m_searchInside, &QCheckBox::toggled, this, [this](bool checked) {
+        guarded(tr("Saving the setting"), [&] { m_session.settings().setValue(QStringLiteral("library.search_contents"), checked); });
+        applyFilters();
+    });
+    row->addWidget(m_searchInside);
 
     m_reviewButton = new QPushButton(container);
     m_reviewButton->setToolTip(tr("Matches found online that are waiting for you to check them."));
@@ -469,6 +485,7 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::openRequested, this, &MainWindow::openPublication);
     connect(m_details, &DetailsPanel::openFileRequested, this, &MainWindow::openPublicationFile);
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
+    connect(m_details, &DetailsPanel::openMatchRequested, this, &MainWindow::openAtMatch);
     connect(m_details, &DetailsPanel::articlesFromContentsRequested, this, &MainWindow::showContentsDialog);
     connect(m_details, &DetailsPanel::addArticleRequested, this, &MainWindow::showAddArticleDialog);
     connect(m_details, &DetailsPanel::deleteArticleRequested, this, &MainWindow::askToDeleteArticle);
@@ -527,6 +544,16 @@ void MainWindow::buildStatusBar()
         m_importStop->show();
     });
 
+    m_indexLabel = new QLabel(this);
+    m_indexLabel->setTextFormat(Qt::PlainText);
+    m_indexLabel->hide();
+    m_indexStop = new QPushButton(tr("Stop indexing"), this);
+    m_indexStop->setToolTip(tr("Stops reading documents' text for now. It carries on from the same place the next time it starts."));
+    m_indexStop->hide();
+    connect(m_indexStop, &QPushButton::clicked, this, [this] { m_index->stopIndexing(); });
+    statusBar()->addPermanentWidget(m_indexLabel);
+    statusBar()->addPermanentWidget(m_indexStop);
+
     m_lookupLabel = new QLabel(this);
     m_lookupLabel->setTextFormat(Qt::PlainText);
     m_lookupStop = new QPushButton(tr("Stop lookups"), this);
@@ -552,6 +579,17 @@ void MainWindow::buildMenus()
     file->addAction(tr("Library &folders..."), this, &MainWindow::showFoldersDialog);
     file->addAction(tr("&Scan folders again"), QKeySequence(Qt::Key_F5), this, &MainWindow::rescanAll);
     file->addSeparator();
+    m_indexContents = file->addAction(tr("Index document text"));
+    m_indexContents->setCheckable(true);
+    m_indexContents->setChecked(m_session.settings().value(QStringLiteral("library.index_contents")).toBool());
+    m_indexContents->setToolTip(tr("Reads documents' text so that it can be searched. It stays on this computer, and your files aren't changed."));
+    connect(m_indexContents, &QAction::toggled, this, [this](bool on) {
+        guarded(tr("Saving the setting"), [&] { m_session.settings().setValue(QStringLiteral("library.index_contents"), on); });
+        if (on)
+            m_index->kick();
+        else
+            m_index->stopIndexing();
+    });
     m_rescanOnStartup = file->addAction(tr("Scan folders when Papertrail starts"));
     m_rescanOnStartup->setCheckable(true);
     m_rescanOnStartup->setChecked(m_session.settings().value(QStringLiteral("library.rescan_on_startup")).toBool());
@@ -637,6 +675,21 @@ void MainWindow::connectImport()
         else
             offerReviewIfDue();
     });
+    connect(m_index, &IndexThread::busyChanged, this, [this](bool busy) {
+        m_indexLabel->setVisible(busy);
+        m_indexStop->setVisible(busy);
+        if (busy)
+            m_indexLabel->setText(tr("Indexing document text..."));
+    });
+    connect(m_index, &IndexThread::progress, this, [this](qint64, qint64 remaining, const QString &) {
+        m_indexLabel->setText(tr("Indexing document text: %1 to go").arg(QLocale().toString(remaining)));
+    });
+    connect(m_index, &IndexThread::finished, this, [this](const import::FullTextReport &report) {
+        if (report.documents > 0)
+            refreshNow(); // More searches can find things now, and which files have no text is better known.
+    });
+    connect(m_index, &IndexThread::problem, this,
+            [this](const QString &message) { statusBar()->showMessage(tr("Indexing problem: %1").arg(message), 15000); });
     connect(m_lookup, &LookupThread::progress, this, &MainWindow::onLookupProgress);
     connect(m_lookup, &LookupThread::publicationChanged, this, [this](qint64 id) {
         scheduleRefresh();
@@ -705,6 +758,7 @@ PublicationFilter MainWindow::currentFilter() const
     filter.searchText = m_search->text().trimmed();
     filter.tabTypes = typesForTab(kTabs.value(m_tabs->currentIndex(), LibraryTab::All));
     m_sidebar->applyTo(filter);
+    filter.searchContents = m_searchInside->isChecked();
     return filter;
 }
 
@@ -722,6 +776,12 @@ void MainWindow::applyFilters()
     const PublicationFilter filter = currentFilter();
     m_model->setQuery(filter, currentSort());
     m_sidebarThread->request(++m_sidebarGeneration, filter);
+    if (filter.searchContents) {
+        const ParsedSearch parsed = parseSearch(filter.searchText);
+        m_details->setContentsSearch(parsed.contentsMatch, parsed.contentsText);
+    } else {
+        m_details->setContentsSearch(QString(), QString());
+    }
 }
 
 void MainWindow::scheduleRefresh()
@@ -1275,6 +1335,18 @@ void MainWindow::askToDeleteArticle(qint64 articleId)
     });
 }
 
+void MainWindow::kickIndexing()
+{
+    if (m_indexContents->isChecked() && !m_import->isBusy())
+        m_index->kick();
+}
+
+void MainWindow::openAtMatch(qint64 publicationId, qint64 fileId, int page, const QString &text)
+{
+    if (ReaderTab *reader = openPublicationFile(publicationId, fileId))
+        reader->showMatch(page, text);
+}
+
 void MainWindow::addCollectionActions(QMenu *menu)
 {
     QMenu *addTo = menu->addMenu(tr("Add to collection"));
@@ -1821,8 +1893,10 @@ void MainWindow::onImportBusyChanged(bool busy)
     if (m_foldersDialog)
         m_foldersDialog->setImportRunning(busy);
     updateStack();
-    if (!busy)
+    if (!busy) {
         offerReviewIfDue();
+        kickIndexing();
+    }
 }
 
 void MainWindow::onImportProgress(qint64 done, qint64 remaining, const QString &file)

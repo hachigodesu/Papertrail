@@ -168,6 +168,27 @@ ParsedSearch parseSearch(const QString &text)
 {
     ParsedSearch result;
     QStringList ftsTerms;
+    QStringList contentsTerms;
+    QStringList fieldTerms;
+    QString phrase;
+    QString longestWord;
+
+    // Words for the metadata, and also noted for searching inside documents if they're plain ones.
+    const auto addWords = [&](const Token &token) {
+        addFtsTerms(ftsTerms, token);
+        if (!token.field.isEmpty()) {
+            addFtsTerms(fieldTerms, token);
+            return;
+        }
+        addFtsTerms(contentsTerms, token);
+        if (token.quoted && phrase.isEmpty() && hasSearchableText(token.value))
+            phrase = token.value.trimmed();
+        const QStringList words = token.value.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+        for (const QString &word : words) {
+            if (hasSearchableText(word) && word.size() > longestWord.size())
+                longestWord = word;
+        }
+    };
 
     for (const Token &token : tokenise(text)) {
         if (token.field == QStringLiteral("tag")) {
@@ -183,18 +204,21 @@ ParsedSearch parseSearch(const QString &text)
         } else if (token.field == QStringLiteral("type")) {
             const QList<PublicationType> types = matchTypes(token.value);
             if (types.isEmpty())
-                addFtsTerms(ftsTerms, Token{QString(), token.value, token.quoted});
+                addWords(Token{QString(), token.value, token.quoted});
             else
                 result.types << types;
         } else if (token.field == QStringLiteral("year")) {
             if (!parseYear(token.value, result))
-                addFtsTerms(ftsTerms, Token{QString(), token.value, token.quoted});
+                addWords(Token{QString(), token.value, token.quoted});
         } else {
-            addFtsTerms(ftsTerms, token);
+            addWords(token);
         }
     }
 
     result.ftsMatch = ftsTerms.join(u' ');
+    result.contentsMatch = contentsTerms.join(u' ');
+    result.fieldMatch = fieldTerms.join(u' ');
+    result.contentsText = phrase.isEmpty() ? longestWord : phrase;
     return result;
 }
 

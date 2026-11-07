@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 #include <memory>
@@ -56,6 +57,14 @@ public:
         InspectResult result;
     };
     Inspection inspect(const QString &path, const QString &coverPath, const QString &convertedPath, int timeoutMs);
+
+    struct PageTexts {
+        WorkerFailure failure = WorkerFailure::None;
+        QString error;
+        int pageCount = 0;
+        QStringList pages;
+    };
+    PageTexts pageTexts(const QString &path, const QString &convertedPath, int start, int count, int timeoutMs);
 
     // How many times the worker has been started, for tests and reports.
     int startCount() const { return m_startCount; }

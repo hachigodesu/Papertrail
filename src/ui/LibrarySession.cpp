@@ -1,5 +1,7 @@
 #include "ui/LibrarySession.h"
 
+#include "core/repo/FullTextIndex.h"
+
 #include "core/db/Schema.h"
 
 #include <QCoreApplication>
@@ -39,6 +41,7 @@ LibrarySession::LibrarySession(const LibraryPaths &paths)
 
     m_db = std::make_unique<core::Database>(paths.database);
     core::migrateLibrary(*m_db);
+    core::attachFullText(*m_db, core::fullTextPathFor(paths.database));
     m_publications = std::make_unique<core::PublicationRepository>(*m_db);
     m_tags = std::make_unique<core::TagRepository>(*m_db);
     m_collections = std::make_unique<core::CollectionRepository>(*m_db);
