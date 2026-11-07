@@ -13,6 +13,7 @@ class QFormLayout;
 class QHBoxLayout;
 class QLabel;
 class QLineEdit;
+class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
 class QStackedWidget;
@@ -53,6 +54,10 @@ public:
     QComboBox *readStatusBox() const { return m_readStatus; }
     QCheckBox *preprintBox() const { return m_preprint; }
     QLabel *collectionsLabel() const { return m_collections; }
+    QWidget *articlesSection() const { return m_articlesSection; }
+    QListWidget *articleList() const { return m_articleList; }
+    QLabel *partOfLabel() const { return m_partOf; }
+    QPushButton *showVolumeButton() const { return m_showVolume; }
     QLabel *preprintHint() const { return m_preprintHint; }
     QWidget *undoRow() const { return m_undoRow; }
     void undoLookup();
@@ -65,6 +70,11 @@ signals:
     void openRequested(qint64 id);
     void openFileRequested(qint64 id, qint64 fileId);
     void showInFolderRequested(qint64 id);
+
+    // For a volume and the articles inside it.
+    void articlesFromContentsRequested(qint64 volumeId);
+    void addArticleRequested(qint64 volumeId);
+    void deleteArticleRequested(qint64 articleId);
 
     // Changes for everything selected, from the several-selected page.
     void bulkTagRequested(const QString &path);
@@ -100,6 +110,11 @@ private:
     QVBoxLayout *m_tagRows = nullptr;
     QLineEdit *m_tagEdit = nullptr;
     QCheckBox *m_preprint = nullptr;
+    QWidget *m_articlesSection = nullptr;
+    QListWidget *m_articleList = nullptr;
+    QLabel *m_partOf = nullptr;
+    QPushButton *m_showVolume = nullptr;
+    QPushButton *m_deleteArticle = nullptr;
     QLabel *m_collections = nullptr;
     QLabel *m_preprintHint = nullptr;
     QWidget *m_undoRow = nullptr;

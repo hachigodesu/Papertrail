@@ -16,7 +16,9 @@
 #include "ui/LibrarySession.h"
 #include "ui/LookupThread.h"
 #include "ui/OnlineLookupDialog.h"
+#include "core/repo/VolumeArticles.h"
 #include "ui/ReviewTab.h"
+#include "ui/VolumeDialogs.h"
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
 #include "ui/ReaderTab.h"
@@ -467,6 +469,9 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::openRequested, this, &MainWindow::openPublication);
     connect(m_details, &DetailsPanel::openFileRequested, this, &MainWindow::openPublicationFile);
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
+    connect(m_details, &DetailsPanel::articlesFromContentsRequested, this, &MainWindow::showContentsDialog);
+    connect(m_details, &DetailsPanel::addArticleRequested, this, &MainWindow::showAddArticleDialog);
+    connect(m_details, &DetailsPanel::deleteArticleRequested, this, &MainWindow::askToDeleteArticle);
     connect(m_details, &DetailsPanel::bulkTagRequested, this, &MainWindow::tagSelected);
     connect(m_details, &DetailsPanel::bulkReadStatusRequested, this, &MainWindow::setSelectedReadStatus);
     connect(m_details, &DetailsPanel::bulkMarkCheckedRequested, this, &MainWindow::markSelectedChecked);
@@ -1175,6 +1180,15 @@ void MainWindow::showContextMenu(const QPoint &position)
             menu.addAction(tr("Open in another app"), this, [this, publication] { openPublicationElsewhere(publication); });
             menu.addAction(tr("Show in folder"), this, [this, publication] { showPublicationInFolder(publication); });
             menu.addAction(tr("Edit..."), this, [this, publication] { editPublication(publication); });
+            guarded(tr("Reading the publication"), [&] {
+                const std::optional<Publication> details = m_session.publications().get(publication);
+                if (details && !details->parentId && canHoldArticles(details->type)) {
+                    menu.addAction(tr("Create articles from contents..."), this, [this, publication] { showContentsDialog(publication); });
+                    menu.addAction(tr("Add an article..."), this, [this, publication] { showAddArticleDialog(publication); });
+                } else if (details && details->parentId) {
+                    menu.addAction(tr("Delete article..."), this, [this, publication] { askToDeleteArticle(publication); });
+                }
+            });
             menu.addSeparator();
         }
     }
@@ -1200,6 +1214,65 @@ void MainWindow::showContextMenu(const QPoint &position)
         });
     }
     menu.exec(view->viewport()->mapToGlobal(position));
+}
+
+void MainWindow::showContentsDialog(qint64 volumeId)
+{
+    ContentsDialog dialog(m_session, volumeId, this);
+    if (dialog.exec() == QDialog::Accepted) {
+        statusBar()->showMessage(tr("Created %1.").arg(publicationCount(dialog.createdCount())), 8000);
+        m_details->reload();
+        refreshNow();
+    }
+}
+
+void MainWindow::showAddArticleDialog(qint64 volumeId)
+{
+    guarded(tr("Adding the article"), [&] {
+        std::optional<int> pageCount;
+        for (const FileRecord &file : m_session.files().filesFor(volumeId)) {
+            if (file.pageCount) {
+                pageCount = file.pageCount;
+                break;
+            }
+        }
+        AddArticleDialog dialog(pageCount, this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        createArticles(m_session.database(), volumeId, {dialog.draft()}, false);
+        m_details->reload();
+        refreshNow();
+    });
+}
+
+void MainWindow::askToDeleteArticle(qint64 articleId)
+{
+    guarded(tr("Deleting the article"), [&] {
+        const std::optional<Publication> article = m_session.publications().get(articleId);
+        if (!article || !article->parentId)
+            return;
+        QMessageBox box(QMessageBox::Question, tr("Delete article"),
+                        tr("Delete the article \"%1\"? Its tags and notes will be gone for good. The volume and its file aren't touched.")
+                            .arg(article->title),
+                        QMessageBox::Yes | QMessageBox::Cancel, this);
+        box.setTextFormat(Qt::PlainText);
+        box.setDefaultButton(QMessageBox::Cancel);
+        if (box.exec() != QMessageBox::Yes)
+            return;
+
+        // These save as they go, so they come first.
+        for (int i = m_documentTabs->count() - 1; i > 0; --i) {
+            const auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
+            if (reader && reader->publicationId() == articleId)
+                closeDocumentTab(i);
+        }
+        if (m_details->currentId() == articleId) {
+            m_selectedId.reset();
+            m_details->showNothing();
+        }
+        m_session.publications().remove(articleId);
+        refreshNow();
+    });
 }
 
 void MainWindow::addCollectionActions(QMenu *menu)

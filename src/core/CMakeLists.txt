@@ -26,6 +26,8 @@ add_library(papertrail_core STATIC
     repo/ReadingStateRepository.h
     repo/TagRepository.cpp
     repo/TagRepository.h
+    repo/VolumeArticles.cpp
+    repo/VolumeArticles.h
     repo/CollectionRepository.cpp
     repo/CollectionRepository.h
     settings/SettingsStore.cpp

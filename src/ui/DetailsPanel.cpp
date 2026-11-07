@@ -1,5 +1,7 @@
 #include "ui/DetailsPanel.h"
 
+#include "core/repo/VolumeArticles.h"
+
 #include "core/repo/PublicationMerge.h"
 #include "metadata/Matching.h"
 #include "ui/CoverCache.h"
@@ -21,6 +23,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -201,6 +205,73 @@ void DetailsPanel::buildSinglePage()
     m_collections = plainLabel();
     m_collections->setWordWrap(true);
     column->addWidget(m_collections);
+
+    // A volume lists its articles, and an article leads back to its volume.
+    m_articlesSection = new QWidget;
+    auto *articles = new QVBoxLayout(m_articlesSection);
+    articles->setContentsMargins(0, 0, 0, 0);
+    articles->addWidget(sectionHeading(tr("Articles")));
+    m_articleList = new QListWidget; // List items show text as it is, so a title can't become formatting.
+    m_articleList->setAccessibleName(tr("Articles in this volume"));
+    m_articleList->setMaximumHeight(170);
+    m_articleList->setTextElideMode(Qt::ElideRight);
+    m_articleList->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_articleList, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
+        emit openRequested(item->data(Qt::UserRole).toLongLong());
+    });
+    connect(m_articleList, &QListWidget::customContextMenuRequested, this, [this](const QPoint &position) {
+        QListWidgetItem *item = m_articleList->itemAt(position);
+        if (!item)
+            return;
+        const qint64 id = item->data(Qt::UserRole).toLongLong();
+        QMenu menu(this);
+        menu.addAction(tr("Open"), this, [this, id] { emit openRequested(id); });
+        menu.addAction(tr("Show its details"), this, [this, id] { showPublication(id); });
+        menu.addSeparator();
+        menu.addAction(tr("Delete article..."), this, [this, id] { emit deleteArticleRequested(id); });
+        menu.exec(m_articleList->viewport()->mapToGlobal(position));
+    });
+    articles->addWidget(m_articleList);
+    auto *articleButtons = new QHBoxLayout;
+    auto *fromContents = new QPushButton(tr("From contents..."));
+    fromContents->setToolTip(tr("Proposes articles from this file's table of contents, for you to check."));
+    connect(fromContents, &QPushButton::clicked, this, [this] {
+        if (m_id)
+            emit articlesFromContentsRequested(*m_id);
+    });
+    auto *addArticle = new QPushButton(tr("Add..."));
+    addArticle->setToolTip(tr("Adds one article by hand."));
+    connect(addArticle, &QPushButton::clicked, this, [this] {
+        if (m_id)
+            emit addArticleRequested(*m_id);
+    });
+    articleButtons->addWidget(fromContents);
+    articleButtons->addWidget(addArticle);
+    articleButtons->addStretch();
+    articles->addLayout(articleButtons);
+    column->addWidget(m_articlesSection);
+
+    m_partOf = plainLabel();
+    m_partOf->setWordWrap(true);
+    column->addWidget(m_partOf);
+    auto *partOfButtons = new QHBoxLayout;
+    m_showVolume = new QPushButton(tr("Show its volume"));
+    connect(m_showVolume, &QPushButton::clicked, this, [this] {
+        if (!m_id)
+            return;
+        const std::optional<Publication> article = m_session.publications().get(*m_id);
+        if (article && article->parentId)
+            showPublication(*article->parentId);
+    });
+    m_deleteArticle = new QPushButton(tr("Delete article..."));
+    connect(m_deleteArticle, &QPushButton::clicked, this, [this] {
+        if (m_id)
+            emit deleteArticleRequested(*m_id);
+    });
+    partOfButtons->addWidget(m_showVolume);
+    partOfButtons->addWidget(m_deleteArticle);
+    partOfButtons->addStretch();
+    column->addLayout(partOfButtons);
     m_tagEdit = new QLineEdit;
     m_tagEdit->setPlaceholderText(tr("Add a tag, such as Engineering > FEM"));
     m_tagEdit->setAccessibleName(tr("Add a tag"));
@@ -462,6 +533,40 @@ void DetailsPanel::reload()
         collections << collection.name;
     m_collections->setText(tr("In collections: %1").arg(collections.join(QStringLiteral(", "))));
     m_collections->setVisible(!collections.isEmpty());
+
+    const bool holdsArticles = !p.parentId && canHoldArticles(p.type);
+    m_articlesSection->setVisible(holdsArticles);
+    if (holdsArticles) {
+        m_articleList->clear();
+        for (const qint64 articleId : m_session.publications().childIds(p.id)) {
+            const std::optional<Publication> article = m_session.publications().get(articleId);
+            if (!article)
+                continue;
+            QString text = article->title;
+            if (article->pageStart) {
+                text += article->pageEnd && *article->pageEnd != *article->pageStart
+                    ? tr(" (pages %1 to %2)").arg(*article->pageStart).arg(*article->pageEnd)
+                    : tr(" (page %1)").arg(*article->pageStart);
+            }
+            auto *item = new QListWidgetItem(text, m_articleList);
+            item->setData(Qt::UserRole, articleId);
+            item->setToolTip(article->title);
+        }
+    }
+
+    m_partOf->setVisible(p.parentId.has_value());
+    m_showVolume->setVisible(p.parentId.has_value());
+    m_deleteArticle->setVisible(p.parentId.has_value());
+    if (p.parentId) {
+        const std::optional<Publication> volume = m_session.publications().get(*p.parentId);
+        QString text = tr("Part of %1.").arg(volume ? volume->title : QString());
+        if (p.pageStart) {
+            text += QLatin1Char(' ')
+                + (p.pageEnd && *p.pageEnd != *p.pageStart ? tr("Pages %1 to %2 of its file.").arg(*p.pageStart).arg(*p.pageEnd)
+                                                           : tr("Page %1 of its file.").arg(*p.pageStart));
+        }
+        m_partOf->setText(text);
+    }
 
     clearLayout(m_fileRows);
     const qint64 fileOwner = p.parentId.value_or(p.id);

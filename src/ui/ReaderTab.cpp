@@ -482,8 +482,17 @@ void ReaderTab::restorePlace()
     } catch (const std::exception &) {
         return;
     }
-    if (place.isEmpty())
+    if (place.isEmpty()) {
+        // An article starts where it starts in its volume.
+        try {
+            const std::optional<Publication> publication = m_session.publications().get(m_publicationId);
+            if (publication && publication->parentId && publication->pageStart && *publication->pageStart > 1)
+                m_view->goToPage(*publication->pageStart - 1);
+        } catch (const std::exception &) {
+            // It'll just start at the beginning.
+        }
         return;
+    }
 
     if (place.contains(QStringLiteral("zoom"))) {
         const double zoom = place.value(QStringLiteral("zoom")).toDouble();

@@ -117,6 +117,11 @@ public:
     void addSelectedToCollection(qint64 id);
     void removeSelectedFromCollection(qint64 id);
 
+    // Articles inside a volume. These ask what they need to first.
+    void showContentsDialog(qint64 volumeId);
+    void showAddArticleDialog(qint64 volumeId);
+    void askToDeleteArticle(qint64 articleId);
+
     // Adds what can be done with collections to a menu, going by what's selected and what's in them.
     void addCollectionActions(QMenu *menu);
 

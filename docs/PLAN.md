@@ -244,7 +244,7 @@ An import report shows how many publications were linked, proposed or left unmat
 - **Search box:** plain text, or field searches such as `author:`, `tag:`, `year:>2010`, `doi:`. A scope switch extends the search to document contents.
 - **Grid and list:** both use virtualised models and load covers lazily.
 - **Bulk actions:** tag, edit a field, set read status, re-run lookup, export citations.
-- **Volumes:** expand to show their child articles. "Create articles from table of contents" proposes entries for review, and articles can also be added by hand.
+- **Volumes:** the details panel lists their child articles. "Create articles from table of contents" proposes entries for review, and articles can also be added by hand.
 
 ### Reader
 

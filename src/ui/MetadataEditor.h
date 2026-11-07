@@ -56,6 +56,8 @@ private:
 
     core::Publication m_original;
     QComboBox *m_type = nullptr;
+    QLineEdit *m_pageStart = nullptr;
+    QLineEdit *m_pageEnd = nullptr;
     QLineEdit *m_year = nullptr;
     QPlainTextEdit *m_abstract = nullptr;
     QLabel *m_error = nullptr;

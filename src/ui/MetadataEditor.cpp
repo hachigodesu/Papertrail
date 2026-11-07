@@ -89,6 +89,20 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
         m_year->setText(QString::number(*publication.year));
     main->addRow(tr("Year"), m_year);
 
+    if (publication.parentId) {
+        const auto addPage = [&](QLineEdit *&edit, const QString &label, const std::optional<int> &value) {
+            edit = new QLineEdit(mainPage);
+            edit->setValidator(new QIntValidator(1, 9999999, edit));
+            edit->setMaximumWidth(90);
+            edit->setToolTip(tr("Its position in the volume's file, which may differ from the number printed on the page."));
+            if (value)
+                edit->setText(QString::number(*value));
+            main->addRow(label, edit);
+        };
+        addPage(m_pageStart, tr("First page in the file"), publication.pageStart);
+        addPage(m_pageEnd, tr("Last page in the file"), publication.pageEnd);
+    }
+
     const QList<PublicationType> inContainer = {T::JournalVolume, T::JournalArticle, T::ConferencePaper, T::BookChapter,
                                                 T::Preprint};
     const QList<PublicationType> bookLike = {T::Textbook, T::Book, T::BookChapter, T::ConferenceProceedings};
@@ -242,6 +256,13 @@ Publication MetadataEditor::result() const
 
     const QString abstract = m_abstract->toPlainText().trimmed();
     p.abstract = abstract.isEmpty() ? QString() : abstract;
+
+    if (m_pageStart && m_pageEnd) {
+        const QString first = m_pageStart->text().trimmed();
+        const QString last = m_pageEnd->text().trimmed();
+        p.pageStart = first.isEmpty() ? std::nullopt : std::optional<int>(first.toInt());
+        p.pageEnd = last.isEmpty() ? std::nullopt : std::optional<int>(last.toInt());
+    }
 
     const QString year = m_year->text().trimmed();
     const std::optional<int> newYear = year.isEmpty() ? std::nullopt : std::optional<int>(year.toInt());

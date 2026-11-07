@@ -172,6 +172,10 @@ Lookups are `job` rows of kind `lookup`, which belong to `LookupRepository` and 
 
 Rate limits differ by source and by kind of request, and OpenAlex's anonymous searches run out at about 100 a day. A 429 blocks that source alone, and the queue only waits when no source could answer. A failure of the network or a source puts the job back without counting it as an attempt.
 
+### Volumes and articles
+
+An article is a publication with `parent_id`, `page_start` and `page_end`, and no file of its own: anything reading a file goes through `coalesce(parent_id, id)`, as `kOwnerOfFile` does. Those pages are positions in the file, not printed page numbers, so they don't go in the citation `pages` field. `core/repo/VolumeArticles` works out articles from a table of contents, and `ContentsDialog` reads the contents through a `DocumentClient`, so a bad file can't take the window down.
+
 ### Collections
 
 `CollectionRepository` holds named groupings. They're a filter like any other: `PublicationFilter::collectionIds` narrows every query, and `FilterSidebar` lists them with counts from `LibraryQuery::collectionCounts`.
