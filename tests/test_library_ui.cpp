@@ -2,6 +2,7 @@
 
 #include "core/model/Publication.h"
 #include "ui/BulkChanges.h"
+#include "ui/CitationActions.h"
 #include "ui/DetailsPanel.h"
 #include "ui/FilterSidebar.h"
 #include "ui/FolderWatcher.h"
@@ -16,6 +17,8 @@
 
 #include <QCheckBox>
 #include <QApplication>
+#include <QClipboard>
+#include <QMimeData>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDirIterator>
@@ -1260,6 +1263,125 @@ private slots:
         QVERIFY(m_window->details()->collectionsLabel()->text().contains(QStringLiteral("R&D <b>Project</b>")));
     }
 
+    void copyingAReferencePutsItOnTheClipboard()
+    {
+        const qint64 id = addCitable(QStringLiteral("Dent"), QStringLiteral("Carla"), QStringLiteral("Why Do Models Fail"), 2019);
+        openWindow();
+        CitationActions *citations = m_window->citations();
+
+        // Harvard to start with, with italics for a word processor and plain text for anything else.
+        QCOMPARE(citations->style(), citation::CitationStyle::Harvard);
+        QVERIFY(citations->copyReferences({id}));
+        const QMimeData *copied = QApplication::clipboard()->mimeData();
+        QCOMPARE(copied->text(), QStringLiteral("Dent, C., 2019. Why Do Models Fail. *Made-Up Review*, 12, 101-108.").remove(u'*'));
+        QVERIFY2(copied->html().contains(QStringLiteral("<i>Made-Up Review</i>")), qPrintable(copied->html()));
+
+        // The style chosen is remembered.
+        citations->setStyle(citation::CitationStyle::Apa);
+        QCOMPARE(m_session->settings().value(QStringLiteral("citation.style")).toString(), QStringLiteral("apa"));
+        QVERIFY(citations->copyInTextCitation({id}));
+        QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("(Dent, 2019)"));
+
+        // Several together make one citation, and a list with one reference on each line.
+        const qint64 other = addCitable(QStringLiteral("Avery"), QStringLiteral("Sam"), QStringLiteral("Earlier Work"), 2010);
+        QVERIFY(citations->copyInTextCitation({id, other}));
+        QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("(Avery, 2010; Dent, 2019)"));
+        QVERIFY(citations->copyReferences({id, other}));
+        QVERIFY(QApplication::clipboard()->text().startsWith(QStringLiteral("Avery, S. (2010).")));
+        QCOMPARE(QApplication::clipboard()->text().count(u'\n'), 1);
+
+        // Nothing, or too many, isn't copied.
+        QVERIFY(!citations->copyReferences({}));
+        QList<qint64> tooMany;
+        for (int i = 0; i <= CitationActions::kMaxToCopy; ++i)
+            tooMany << id;
+        QVERIFY(!citations->copyReferences(tooMany));
+    }
+
+    void theCiteMenuOffersStylesAndSaysWhatsChosen()
+    {
+        const qint64 id = addCitable(QStringLiteral("Dent"), QStringLiteral("Carla"), QStringLiteral("Why Do Models Fail"), 2019);
+        openWindow();
+        CitationActions *citations = m_window->citations();
+        citations->setStyle(citation::CitationStyle::Ieee);
+
+        QMenu menu;
+        citations->fillCiteMenu(&menu, 1, [id] { return QList<qint64>{id}; });
+        QCOMPARE(menu.actions().at(0)->text(), QStringLiteral("Copy reference (IEEE)"));
+        QVERIFY(menu.actions().at(0)->isEnabled());
+        QMenu *styles = nullptr;
+        for (QAction *action : menu.actions()) {
+            if (action->menu())
+                styles = action->menu();
+        }
+        QVERIFY(styles);
+        QCOMPARE(styles->actions().size(), 4);
+        for (QAction *action : styles->actions())
+            QCOMPARE(action->isChecked(), action->text() == QStringLiteral("IEEE"));
+        styles->actions().at(3)->trigger();
+        QCOMPARE(citations->style(), citation::CitationStyle::Chicago);
+
+        menu.actions().at(0)->trigger();
+        QVERIFY(QApplication::clipboard()->text().startsWith(QStringLiteral("Dent, Carla. 2019.")));
+
+        // A selection too large to copy can still be exported.
+        QMenu large;
+        citations->fillCiteMenu(&large, CitationActions::kMaxToCopy + 1, [] { return QList<qint64>(); });
+        QVERIFY(!large.actions().at(0)->isEnabled());
+        QVERIFY(large.actions().last()->isEnabled());
+        QVERIFY(large.actions().last()->text().startsWith(QStringLiteral("Export %1").arg(CitationActions::kMaxToCopy + 1)));
+
+        // The details panel's Cite button has the same menu.
+        m_window->details()->showPublication(id);
+        QMenu *details = m_window->details()->citeButton()->menu();
+        QVERIFY(details);
+        emit details->aboutToShow();
+        QVERIFY(!details->actions().isEmpty());
+        QVERIFY(details->actions().at(0)->text().startsWith(QStringLiteral("Copy reference")));
+
+        const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES");
+        if (!pictures.isEmpty()) { // For looking at by eye, if asked for.
+            m_window->resize(1200, 700);
+            QTest::qWait(300);
+            m_window->grab().save(QDir(pictures).filePath(QStringLiteral("cite-button.png")));
+        }
+    }
+
+    void citationsAreExportedInTheBackground()
+    {
+        const qint64 id = addCitable(QStringLiteral("Dent"), QStringLiteral("Carla"), QStringLiteral("Why Do Models Fail"), 2019);
+        addMany(1200);
+        openWindow();
+        QList<qint64> ids = m_session->query().ids({}, {});
+        QCOMPARE(ids.size(), 1201);
+
+        const QString path = m_dir->filePath(QStringLiteral("export.bib"));
+        QSignalSpy finished(m_window->citations(), &CitationActions::exportFinished);
+        m_window->citations()->startExport(ids, path, citation::ExportFormat::BibTeX);
+        QVERIFY(m_window->citations()->isExporting());
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, kLongWaitMs);
+        QVERIFY2(finished.first().at(0).toBool(), qPrintable(finished.first().at(1).toString()));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QString bib = QString::fromUtf8(file.readAll());
+        QCOMPARE(bib.count(QStringLiteral("\n@")) + (bib.startsWith(u'@') ? 1 : 0), 1201);
+        QVERIFY(bib.contains(QStringLiteral("@article{dent2019why,")));
+        QVERIFY(!m_window->citations()->isExporting());
+
+        // RIS and CSL-JSON too.
+        m_window->citations()->startExport({id}, m_dir->filePath(QStringLiteral("export.ris")), citation::ExportFormat::Ris);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 2, kLongWaitMs);
+        QFile ris(m_dir->filePath(QStringLiteral("export.ris")));
+        QVERIFY(ris.open(QIODevice::ReadOnly));
+        QVERIFY(ris.readAll().startsWith("TY  - JOUR"));
+
+        // A file that can't be written says so.
+        m_window->citations()->startExport({id}, m_dir->filePath(QStringLiteral("no/such/folder/x.json")), citation::ExportFormat::CslJson);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 3, kLongWaitMs);
+        QVERIFY(!finished.at(2).at(0).toBool());
+    }
+
+    // ---- Moving a library between computers ----
     void onlyOneCopyCanHaveALibraryOpen()
     {
         bool refused = false;
@@ -1335,6 +1457,19 @@ private:
                 return section->child(i);
         }
         return nullptr;
+    }
+
+    qint64 addCitable(const QString &family, const QString &given, const QString &title, int year)
+    {
+        Publication p;
+        p.title = title;
+        p.type = PublicationType::JournalArticle;
+        p.authors = {{family, given}};
+        p.containerTitle = QStringLiteral("Made-Up Review");
+        p.volume = QStringLiteral("12");
+        p.pages = QStringLiteral("101-108");
+        p.year = year;
+        return m_session->publications().create(p);
     }
 
     qint64 addPublication(const QString &title, PublicationType type, const QString &author = QString(),

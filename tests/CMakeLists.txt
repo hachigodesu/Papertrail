@@ -28,6 +28,8 @@ papertrail_core_test(test_library_query)
 
 papertrail_core_test(test_extractors papertrail_import)
 papertrail_core_test(test_import papertrail_import)
+papertrail_core_test(test_citations papertrail_citation)
+target_compile_definitions(test_citations PRIVATE PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 target_compile_definitions(test_import PRIVATE
     PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
     PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples")

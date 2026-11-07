@@ -22,6 +22,7 @@
 #include "ui/ApiKeyStore.h"
 #include "ui/IndexThread.h"
 #include "ui/ArticleCoverThread.h"
+#include "ui/CitationActions.h"
 #include "ui/SummaryDialog.h"
 #include "ui/ReviewTab.h"
 #include "ui/VolumeDialogs.h"
@@ -168,6 +169,8 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_lookup = new LookupThread(session.paths(), this);
     m_index = new IndexThread(session.paths(), this);
     m_articleCovers = new ArticleCoverThread(session.paths(), this);
+    m_citations = new CitationActions(session, this);
+    connect(m_citations, &CitationActions::message, this, [this](const QString &text) { statusBar()->showMessage(text, 8000); });
     m_keys = session.paths().keyStoreFactory ? session.paths().keyStoreFactory() : createSystemKeyStore();
     m_summaryTransport = session.paths().transportFactory ? session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
 
@@ -504,6 +507,9 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
     connect(m_details, &DetailsPanel::openMatchRequested, this, &MainWindow::openAtMatch);
     connect(m_details, &DetailsPanel::summarizeRequested, this, &MainWindow::showSummaryDialog);
+    connect(m_details, &DetailsPanel::citeMenuRequested, this, [this](QMenu *menu, qint64 id) {
+        m_citations->fillCiteMenu(menu, 1, [id] { return QList<qint64>{id}; });
+    });
     connect(m_details, &DetailsPanel::articlesFromContentsRequested, this, &MainWindow::showContentsDialog);
     connect(m_details, &DetailsPanel::addArticleRequested, this, &MainWindow::showAddArticleDialog);
     connect(m_details, &DetailsPanel::deleteArticleRequested, this, &MainWindow::askToDeleteArticle);
@@ -637,6 +643,8 @@ void MainWindow::buildMenus()
         m_session.settings().setValue(QStringLiteral("library.watch_folders"), on);
         m_watcher->setEnabled(on);
     });
+    file->addSeparator();
+    file->addAction(tr("&Export citations..."), this, &MainWindow::exportCitations);
     file->addSeparator();
     file->addAction(tr("&Online lookups..."), this, &MainWindow::showLookupSettings);
     file->addAction(tr("Look up details for the whole library..."), this, &MainWindow::askAndLookUpLibrary);
@@ -1228,6 +1236,19 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     return QMainWindow::eventFilter(watched, event);
 }
 
+void MainWindow::exportCitations()
+{
+    QList<qint64> ids;
+    guarded(tr("Reading the library"), [&] {
+        ids = selectedCount() > 0 ? selectedIds() : m_session.query().ids(currentFilter(), currentSort());
+    });
+    if (ids.isEmpty()) {
+        statusBar()->showMessage(tr("There's nothing to export."), 8000);
+        return;
+    }
+    m_citations->askAndExport(ids);
+}
+
 void MainWindow::closeDocumentTab(int index)
 {
     if (index <= 0)
@@ -1310,6 +1331,7 @@ void MainWindow::showContextMenu(const QPoint &position)
         status->addAction(readStatusLabel(value), this, [this, value] { setSelectedReadStatus(value); });
     menu.addAction(tr("Mark as checked"), this, &MainWindow::markSelectedChecked);
     menu.addAction(tr("Look up details online"), this, &MainWindow::askAndLookUpSelected);
+    m_citations->addCiteMenu(&menu, count, [this] { return selectedIds(); });
     menu.addSeparator();
     addCollectionActions(&menu);
     if (count >= 2 && count <= kMaxToCombine) {
@@ -1346,6 +1368,8 @@ void MainWindow::showContentsDialog(qint64 volumeId)
         if (dialog.namedCount() > 0)
             done << tr("Named %1.").arg(publicationCount(dialog.namedCount()));
         statusBar()->showMessage(done.join(u' '), 8000);
+        // A table of contents gives titles but not authors, so their details are looked up as a new file's would be.
+        lookUp(dialog.articleIds());
     }
     if (dialog.result() == QDialog::Accepted || dialog.filledNumbering()) {
         m_details->reload();
@@ -1366,7 +1390,7 @@ void MainWindow::showAddArticleDialog(qint64 volumeId)
         AddArticleDialog dialog(pageCount, this);
         if (dialog.exec() != QDialog::Accepted)
             return;
-        createArticles(m_session.database(), volumeId, {dialog.draft()}, false);
+        lookUp(createArticles(m_session.database(), volumeId, {dialog.draft()}, false));
         m_details->reload();
         refreshNow();
     });

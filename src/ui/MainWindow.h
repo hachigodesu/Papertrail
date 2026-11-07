@@ -50,6 +50,7 @@ class LookupThread;
 class ReaderTab;
 class ApiKeyStore;
 class IndexThread;
+class CitationActions;
 class ArticleCoverThread;
 class ReviewTab;
 
@@ -148,6 +149,10 @@ public:
     PublicationListModel *model() const { return m_model; }
     FilterSidebar *sidebar() const { return m_sidebar; }
     DetailsPanel *details() const { return m_details; }
+    CitationActions *citations() const { return m_citations; }
+
+    // Exports citations for what's selected, or everything shown if nothing is.
+    void exportCitations();
     QLineEdit *searchBox() const { return m_search; }
     QTabBar *tabBar() const { return m_tabs; }
     QComboBox *sortBox() const { return m_sortBox; }
@@ -233,6 +238,7 @@ private:
     LibrarySession &m_session;
     ImportThread *m_import = nullptr;
     IndexThread *m_index = nullptr;
+    CitationActions *m_citations = nullptr;
     QWidget *m_libraryPage = nullptr; // Always the first tab.
     ArticleCoverThread *m_articleCovers = nullptr;
     std::unique_ptr<ApiKeyStore> m_keys;

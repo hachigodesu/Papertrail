@@ -1,0 +1,66 @@
+# IEEE references and in-text citations for the made-up publications in test_citations.cpp.
+# Italics are between asterisks. Each is the first in its list, so it's numbered 1.
+
+[article]
+ref: [1] A. B. Example and B. Sample, “Lattice Vibrations in Pretend Crystals,” *Journal of Imaginary Findings*, vol. 3, no. 2, pp. 43–70, May 2021, doi: 10.5555/jif.2021.0002.
+cite: [1]
+
+[article-print]
+ref: [1] C. Dent, “Why Do Models Fail?” *Made-Up Review*, vol. 12, pp. 101–108, 2019.
+cite: [1]
+
+[article-seven-authors]
+ref: [1] A. Alpha *et al.*, “Collaborative Pretend Measurements,” *Journal of Imaginary Findings*, vol. 4, no. 1, pp. 1496–1500, 2022. [Online]. Available: https://example.org/paper
+cite: [1]
+
+[article-no-author]
+ref: [1] “Editorial,” *Pretend Letters*, vol. 1, no. 1, p. 1, 2020.
+cite: [1]
+
+[book]
+ref: [1] D. Fiction, *Imaginary Structures: A Practical Guide*, 3rd ed. Bristol: Example Press, 2018.
+cite: [1]
+
+[edited-book]
+ref: [1] E. Editor and F. Compiler, Eds., *Collected Pretend Essays*. Example Press, 2015.
+cite: [1]
+
+[chapter]
+ref: [1] G. Writer, “A Chapter on Nothing,” in *Collected Pretend Essays*, E. Editor, Ed. Leeds: Example Press, 2015, pp. 37–49.
+cite: [1]
+
+[paper]
+ref: [1] H. Tanaka, I. Garcia, and J. Park, “Fast Pretend Sorting,” in *Proceedings of the Made-Up Conference on Examples*, Lisbon, Portugal, 2016, pp. 195–203, doi: 10.5555/mce.2016.17.
+cite: [1]
+
+[proceedings]
+ref: [1] K. Lee, Ed., *Proceedings of the Made-Up Conference on Examples*, Lisbon, Portugal. Paris: Example Society, 2016.
+cite: [1]
+
+[issue]
+ref: [1] *Journal of Imaginary Findings*, vol. 3, no. 2, May 2021.
+cite: [1]
+
+[thesis]
+ref: [1] L. O'Neill, “Pretend Materials Under Stress,” Ph.D. dissertation, University of Examples, 2020. [Online]. Available: https://repository.example.org/123
+cite: [1]
+
+[dissertation]
+ref: [1] M. Novak, “Pretend Materials in Practice,” M.S. thesis, Example Institute, 2017.
+cite: [1]
+
+[report]
+ref: [1] Example Agency, “Annual Report on Pretend Data,” Example Agency, London, Rep. EA-2020-04, 2020. [Online]. Available: https://example.org/report.pdf
+cite: [1]
+
+[standard]
+ref: [1] *Specification for Pretend Bolts*, ESB 1234, 2019.
+cite: [1]
+
+[preprint]
+ref: [1] N. Haddad, “Sampling Made Simple,” Jan. 2021, arXiv:2101.00001. [Online]. Available: https://arxiv.org/abs/2101.00001
+cite: [1]
+
+[document]
+ref: [1] Example Charity, *Guidance on Pretend Things*. [Online]. Available: https://example.org/guidance
+cite: [1]

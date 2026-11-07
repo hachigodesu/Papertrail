@@ -174,9 +174,18 @@ void DetailsPanel::buildSinglePage()
     m_open = new QPushButton(tr("Open"));
     m_showInFolder = new QPushButton(tr("Show in folder"));
     m_edit = new QPushButton(tr("Edit..."));
+    m_cite = new QPushButton(tr("Cite"));
+    auto *citeMenu = new QMenu(m_cite);
+    m_cite->setMenu(citeMenu);
+    connect(citeMenu, &QMenu::aboutToShow, this, [this, citeMenu] {
+        citeMenu->clear();
+        if (m_id)
+            emit citeMenuRequested(citeMenu, *m_id);
+    });
     actions->addWidget(m_open);
     actions->addWidget(m_showInFolder);
     actions->addWidget(m_edit);
+    actions->addWidget(m_cite);
     connect(m_open, &QPushButton::clicked, this, [this] { if (m_id) emit openRequested(*m_id); });
     connect(m_showInFolder, &QPushButton::clicked, this, [this] { if (m_id) emit showInFolderRequested(*m_id); });
     connect(m_edit, &QPushButton::clicked, this, [this] { if (m_id) emit editRequested(*m_id); });

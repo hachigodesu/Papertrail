@@ -343,7 +343,8 @@ bool ContentsDialog::createChosen()
     }
     try {
         const auto named = std::count_if(drafts.cbegin(), drafts.cend(), [](const ArticleDraft &draft) { return draft.renames.has_value(); });
-        m_created = int(createArticles(m_session.database(), m_volumeId, drafts, true).size() - named);
+        m_articleIds = createArticles(m_session.database(), m_volumeId, drafts, true);
+        m_created = int(m_articleIds.size() - named);
         m_named = int(named);
     } catch (const std::exception &error) {
         m_message->setText(tr("Those articles couldn't be created: %1").arg(QString::fromUtf8(error.what())));

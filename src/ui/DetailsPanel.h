@@ -65,6 +65,7 @@ public:
     QListWidget *matchList() const { return m_matchList; }
     QWidget *articlesSection() const { return m_articlesSection; }
     QListWidget *articleList() const { return m_articleList; }
+    QPushButton *citeButton() const { return m_cite; }
     QLabel *partOfLabel() const { return m_partOf; }
     QPushButton *showVolumeButton() const { return m_showVolume; }
     QLabel *preprintHint() const { return m_preprintHint; }
@@ -84,6 +85,8 @@ signals:
 
     // The user wants a summary of this publication from Claude.
     void summarizeRequested(qint64 publicationId);
+    // The Cite button's menu is about to show, for whoever fills it.
+    void citeMenuRequested(QMenu *menu, qint64 publicationId);
 
     // Where a search found something inside a document.
     void openMatchRequested(qint64 publicationId, qint64 fileId, int page, const QString &text);
@@ -151,6 +154,7 @@ private:
     QPushButton *m_open = nullptr;
     QPushButton *m_showInFolder = nullptr;
     QPushButton *m_edit = nullptr;
+    QPushButton *m_cite = nullptr;
 
     QLabel *m_manyCount = nullptr;
     QLineEdit *m_manyTagEdit = nullptr;

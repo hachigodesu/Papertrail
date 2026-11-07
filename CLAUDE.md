@@ -110,7 +110,8 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 | `papertrail_import` | core | Scanning, the job queue, metadata extraction and classification, the worker client |
 | `papertrail_metadata` | core, import, Qt Network | Online sources, matching, the lookup engine |
 | `papertrail_summary` | core, metadata | Article summaries from Claude |
-| `papertrail_ui` | core, import, metadata, summary, QtKeychain, Qt Widgets | The library window |
+| `papertrail_citation` | core | Citation styles, and BibTeX, RIS and CSL-JSON export |
+| `papertrail_ui` | core, import, metadata, summary, citation, QtKeychain, Qt Widgets | The library window |
 | `papertrail` | ui | The app |
 | `papertrail-worker` | engine, import | The only part of the app that opens documents |
 
@@ -174,6 +175,10 @@ A reading place belongs to a format, not to a publication. Use `ReadingStateRepo
 Lookups are `job` rows of kind `lookup`, which belong to `LookupRepository` and not `ImportService`. `LookupEngine::decide` holds the table of what each mode does with a result. `plannedChanges` in `Matching.cpp` decides what a result may change: it leaves fields set by hand alone, only fills gaps in DOI, ISBN and abstract, and can never move anything to or from Preprint. Sources can only suggest that (`preprintHint`).
 
 Rate limits differ by source and by kind of request, and OpenAlex's anonymous searches run out at about 100 a day. A 429 blocks that source alone, and the queue only waits when no source could answer. A failure of the network or a source puts the job back without counting it as an attempt.
+
+### Citations
+
+`citation::citationItems` turns publications into `CitationItem`s, taking what an article or chapter lacks (its journal, book, editors, publisher) from what it's in. `Styles.cpp` holds the four styles, written out by hand rather than through CSL: Harvard (following rules the user chose, which mustn't be named or quoted anywhere), APA 7th, IEEE and Chicago author-date (18th). `formatReferences` sorts, numbers and adds 2020a/2020b letters across a list, so format a list in one call rather than item by item. Each style's output for every kind of publication is fixed in `tests/fixtures/citations/`, written by hand from the rules, and a change to a style should change those by hand too. `test_citations` also runs pdflatex, BibTeX and biber over an export where they're installed (the Ubuntu WSL distro has them). `CitationActions` is the window's side: copying with italics as HTML and plain text, and exporting on its own thread and database connection.
 
 ### Article summaries
 

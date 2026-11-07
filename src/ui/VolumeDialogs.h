@@ -30,6 +30,8 @@ public:
     QList<core::ArticleDraft> chosenDrafts(QString *problem = nullptr) const;
     int createdCount() const { return m_created; }
     int namedCount() const { return m_named; }
+    // The articles made or named, for looking up their details, which a table of contents doesn't give.
+    QList<qint64> articleIds() const { return m_articleIds; }
 
     // Whether the volume's numbers were filled in from its pages, which can happen without creating anything.
     bool filledNumbering() const { return m_filledNumbering; }
@@ -79,6 +81,7 @@ private:
     int m_pageCount = 0;
     int m_created = 0;
     int m_named = 0;
+    QList<qint64> m_articleIds;
     bool m_numberingRead = false;
     bool m_filledNumbering = false;
     QString m_numberingNote;
