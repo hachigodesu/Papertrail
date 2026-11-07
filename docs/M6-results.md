@@ -57,6 +57,8 @@ Papertrail sends a DOI, ISBN, arXiv number or title. It never sends authors, not
 - **A rate limit from one source stalled the whole queue.** With a daily allowance, that could have meant waiting for hours. Each source is now blocked separately, and the queue only waits when no source can answer.
 - **The review table had Authors at the bottom, and oversized rows.** I only noticed this from a picture of the screen. Authors now follow the title, and rows fit their text.
 
+- **The AppImage stopped starting on a minimal openSUSE.** Qt Network brings in Kerberos, whose `libcom_err` is one of the libraries linuxdeploy assumes every system has. CI's smoke test caught it, and the library is now bundled.
+
 ### The Linux build hang
 
 The first Linux run hung for over 30 minutes. The WSL virtual machine stopped answering, and used about 12 of the 16 logical CPUs with no I/O. It happened with both distros building at once, at their default of about 18 compile jobs each, in one VM with 7.9 GB of memory.

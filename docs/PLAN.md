@@ -46,7 +46,7 @@ The project folder is empty, so this is a new build.
 | MOBI, FB2 | MuPDF | Confirmed in M0, though MuPDF's site doesn't list them |
 | AZW3 (KF8) | libmobi v0.12 (LGPL-3+) converts to EPUB, then MuPDF | MuPDF alone gives a blank page. See `docs/M0-format-results.md` |
 | Database and search | SQLite with FTS5, used directly rather than through Qt SQL | Controls the FTS5 build and needs no server |
-| Networking | Qt Network | Metadata lookups |
+| Networking | Qt Network | Metadata lookups and article summaries |
 | Tests | Qt Test, with `-platform offscreen` for UI smoke tests | Already part of Qt |
 
 No embedded browser (Qt WebEngine) is needed, which keeps the install much smaller.
@@ -138,6 +138,7 @@ Code rules that keep it distro-neutral:
 - `person` and `publication_person`: role (author, editor, translator, advisor) and position in the author list.
 - `tag` (with `parent_id` and colour) and `publication_tag`.
 - `collection` and `collection_publication`: a named grouping and the publications in it.
+- `publication_summary`: an accepted summary, with its model, effort, date, cost, sources, and whether the paper itself was sent.
 - `metadata_provenance`: for each field, its source, confidence and previous value. This makes any automatic change reversible.
 - `annotation`: publication, content hash, location, type, colour, selected text and note. Using the hash means annotations survive a file being moved or renamed.
 - `reading_state`: last location, zoom and last opened.
@@ -177,6 +178,7 @@ The user sets a default in Settings and can override it for each import.
 - Publications, metadata and provenance
 - Tags and the tag hierarchy
 - Collections and what's in them
+- Accepted article summaries
 - Child articles
 - Highlights and notes
 - Read status, ratings and reading positions
@@ -210,7 +212,7 @@ An import report shows how many publications were linked, proposed or left unmat
 - All settings transfer, including between Windows and Linux.
 - Saved folder paths from the other computer are shown as suggestions and never applied automatically, because they usually won't exist on the new computer.
 
-**Privacy:** exports aren't encrypted and contain your notes, plus the Crossref contact email if you've set one. The export dialog says so.
+**Privacy:** exports aren't encrypted and contain your notes, plus the Crossref contact email if you've set one. The export dialog says so. They never contain a Claude API key.
 
 ---
 
@@ -266,6 +268,59 @@ A collection is a named grouping of publications, for something like a project, 
 - **Removed folders:** a publication hidden with its folder keeps its place in its collections, and is back in them if the folder returns.
 - **How they differ from tags:** tags describe what a publication is, and filter the whole library. A collection is a working set you open and work inside.
 
+### Article summaries
+
+Users can generate a summary of an article with Claude, using their own API key. This is off until a key is entered, and a summary is only ever requested by hand, one publication at a time. Nothing is summarized during an import.
+
+**What a summary covers:**
+
+1. What the study aimed to find, and its background
+2. The methodology used
+3. The results found
+4. The limitations
+5. The conclusion and discussion
+
+**How it works:**
+
+| Step | What happens |
+|---|---|
+| 1. Choose | The dialog shows exactly what will be sent, the model (Claude Sonnet 5.5 by default), the effort level (High by default) and the estimated cost |
+| 2. Confirm | Nothing is sent until the user confirms. The dialog says the cost applies whether or not the summary is kept |
+| 3. Read the result | The summary, the sources it used, how much of the paper it could read, and the actual cost |
+| 4. Decide | **Accept** stores the summary with the publication. **Discard** stores nothing |
+| 5. Last resort | If the result is poor, or the paper couldn't be read online, the user can choose to send the paper itself. This restates what's been spent so far and shows a new estimate, and needs its own confirmation. It never happens automatically |
+
+**Identifying the paper without uploading it.** The first request sends only identifying information: the DOI, URL, title, authors, year, journal and other identifiers. Claude can't read a paper from those alone, so the request lets it use Anthropic's web search and web fetch tools to find it. These can only read what's openly available, so a paywalled paper may only give an abstract.
+
+**A summary must not be made up.** Claude could otherwise produce a plausible summary from a title alone. So:
+
+- Each result states what it was based on: the full text, the abstract only, or nothing it could find.
+- A section it had no source for says so, rather than being filled in.
+- Sources are listed so that they can be checked.
+- If it can't be sure it found the right paper, it says so, and this is shown clearly.
+- The summary is always labelled as generated by Claude, and is kept apart from the abstract and the user's notes. It never changes a publication's metadata.
+
+**Estimated cost.** This is a range, because the output length and what the web tools read can't be known beforehand. Token counting gives the input size for the identifying information, and the range covers the rest, including web searches and the chosen effort level. Afterwards, the actual cost is worked out from the request's reported usage. Counting the tokens of a paper would itself send it to Anthropic, so the last-resort estimate is worked out on this computer from its page count and text, before anything leaves.
+
+**Models.** The list of models comes from Anthropic's Models API, so new ones appear without an update. That API doesn't give prices, so Papertrail ships a price table with its date shown, and a model it has no price for is marked as having no estimate. Effort can be set from Low to Max.
+
+**Sending the paper.**
+
+- It goes to Anthropic through the worker, which is the only part of the app that opens documents, and the file itself is only read.
+- PDFs are sent as they are. Other formats send their extracted text. A scanned paper with no text can't be sent in this way unless it's a PDF.
+- Anthropic's limits are 32 MB and 600 pages for a PDF. A paper over these limits is refused with an explanation, and is never cut short without saying so.
+- The dialog says that the paper leaves this computer, and that the user is responsible for being allowed to share it.
+
+**The API key.**
+
+- It's stored in the operating system's credential store, through QtKeychain (BSD licence, so compatible). If that's unavailable, it's asked for each session and kept only in memory.
+- It never goes in the database or the settings registry, because exports include every setting. It's never written to logs, and an export can't contain it.
+- It's only ever sent to Anthropic's API, and that connection doesn't follow redirects, so it can't be passed on to another host.
+
+**Treating what comes back as untrusted.** Web pages and papers can contain text written to steer an AI. Claude's only tools are web search and web fetch, Papertrail takes no action based on the answer, and a summary is shown as plain text and only saved if accepted. Anything sourced from a file, such as a title, is passed to Claude as data rather than as instructions.
+
+**When Claude declines.** Safety classifiers can decline a request, and biomedical papers may be more likely to trigger this. The dialog says so plainly. Trying another model is offered with a new estimate, so a request never moves to a different model or cost without the user agreeing.
+
 ### Other screens
 
 First-run setup (start a new library or import an export), import progress, review queue, tag manager, library export and import with a match report, and settings. Dark mode follows the system.
@@ -289,6 +344,7 @@ Each milestone ends with something you can run.
 | **M7** | Volumes: child articles, table-of-contents proposals, open at page, per-article tags | A journal volume can be split into searchable, citable articles |
 | **M8** | Full-text search: indexing, snippets, jump to match, "no text" flag | A phrase search across the library opens the right page |
 | **M9** | Highlights and notes: anchoring on fixed and reflowable formats, panel, Markdown export | Annotations survive restarts, file moves and EPUB font changes |
+| **M9.5** | Article summaries: API key handling, model and effort choice, cost estimates, summaries from identifying information, accept or discard, and sending the paper as a last resort | A paper can be summarized from its identifiers alone, with the cost shown beforehand and the sources shown afterwards. Nothing is sent without confirmation, and without a key the app makes no requests to Anthropic |
 | **M10** | Citations: BibTeX, RIS, CSL-JSON export, and copying a formatted citation or reference list in Harvard, APA, IEEE or Chicago | Output imports cleanly into BibTeX and Zotero, and each style matches test fixtures for every publication type |
 | **M11** | Library export and import: bundle format, content matching, merge and replace, settings transfer, match report | A library exported from one computer restores all tags, notes and settings on another, with its files in a completely different folder structure |
 | **M12** | Release: first-run flow, Windows installer and portable zip, Linux AppImage, Flatpak and AUR package, performance and crash hardening, docs, making the repository public | Clean installs work on fresh Windows, Arch and Ubuntu machines, and the Linux packages pass the distro checks |
@@ -352,6 +408,7 @@ Papertrail/
 - **Bad input:** corrupt, truncated and password-protected files must not bring down the app.
 - **Paths:** non-ASCII names, long Windows paths, spaces, and offline or repointed roots.
 - **Offline mode:** a test fails if any network request is made.
+- **Article summaries:** tests use recorded answers and a local server, so they spend nothing and CI never contacts Anthropic. They check that nothing is sent before confirmation, that the paper is never sent without its own confirmation, that the API key never appears in the database, settings, exports or logs, and that the key isn't sent to any other host.
 - **Export and import round trip:**
   - Export a library, shuffle and rename its files into a different folder structure, then import into an empty library. All tags, notes and settings must come back and every file must relink.
   - Run this from Windows to Linux and from Linux to Windows.

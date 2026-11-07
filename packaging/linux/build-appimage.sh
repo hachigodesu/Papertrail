@@ -38,6 +38,11 @@ export EXTRA_QT_MODULES="waylandclient"
 export LDAI_OUTPUT="$out/Papertrail-x86_64.AppImage"
 export OUTPUT="$LDAI_OUTPUT"
 
+# Qt Network brings in Kerberos and bundles most of it, but linuxdeploy leaves out libcom_err because it
+# assumes every system has it. A minimal openSUSE doesn't, and then the app can't start at all.
+com_err="$(ldconfig -p | awk '/libcom_err\.so\.2 / {print $NF; exit}')"
+[ -n "$com_err" ] || { echo "FAILED: libcom_err.so.2 isn't installed here" >&2; exit 1; }
+
 cd "$work"
 linuxdeploy-x86_64.AppImage \
     --appdir "$work/AppDir" \
@@ -45,8 +50,14 @@ linuxdeploy-x86_64.AppImage \
     --icon-file "$src/packaging/linux/papertrail.svg" \
     --executable "$work/AppDir/usr/bin/papertrail" \
     --executable "$work/AppDir/usr/bin/papertrail-worker" \
+    --library "$com_err" \
     --plugin qt \
     --output appimage
+
+if [ ! -e "$work/AppDir/usr/lib/libcom_err.so.2" ]; then
+    echo "FAILED: the AppImage has no libcom_err" >&2
+    exit 1
+fi
 
 # Online lookups can't work without this, and nothing else would notice it was missing.
 if ! ls "$work/AppDir/usr/plugins/tls/"*.so >/dev/null 2>&1; then
