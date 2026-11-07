@@ -6,6 +6,8 @@ add_library(papertrail_core STATIC
     model/Identifiers.cpp
     model/Identifiers.h
     model/Publication.cpp
+    model/PublicationFields.cpp
+    model/PublicationFields.h
     model/Publication.h
     query/LibraryQuery.cpp
     query/LibraryQuery.h
@@ -14,6 +16,8 @@ add_library(papertrail_core STATIC
     query/SearchParser.h
     repo/FileRepository.cpp
     repo/FileRepository.h
+    repo/LookupRepository.cpp
+    repo/LookupRepository.h
     repo/PublicationMerge.cpp
     repo/PublicationMerge.h
     repo/PublicationRepository.cpp

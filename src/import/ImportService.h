@@ -32,6 +32,10 @@ struct ImportOptions {
     // being copied. They're counted in ScanReport::stillChanging.
     qint64 settleMs = 0;
 
+    // If set, new publications are queued for online lookup in this mode. Asked each time, because it
+    // can change from one import to the next. Empty means no lookup, and nothing sent anywhere.
+    std::function<QString()> lookupMode;
+
     // Checked during a scan and while waiting for the worker, so that stopping doesn't have to
     // wait for a large file. Whatever it interrupts is simply done again next time.
     std::function<bool()> cancelled;

@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Papertrail is a C++20 / Qt 6 Widgets desktop library manager and reader for academic publications, for Windows and Linux. It indexes files where they already are and stores metadata in SQLite. `docs/PLAN.md` is the approved plan (milestones M0 to M12). `docs/M*-results.md` record what each finished milestone delivered, how it differed from the plan, and what was carried forward, so read the latest one before starting a milestone.
+Papertrail is a C++20 / Qt 6 Widgets desktop library manager and reader for academic publications, for Windows and Linux. It indexes files where they already are and stores metadata in SQLite. `docs/PLAN.md` is the approved plan (milestones M0 to M12, with M6.5 for collections coming before M7). `docs/M*-results.md` record what each finished milestone delivered, how it differed from the plan, and what was carried forward, so read the latest one before starting a milestone.
 
 ## Rules
 
@@ -60,7 +60,7 @@ cmake --preset linux-debug -B ~/papertrail-build
 ```
 
 ```bash
-cmake --build ~/papertrail-build
+cmake --build ~/papertrail-build -j 8
 ```
 
 ```bash
@@ -69,7 +69,7 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir ~/papertrail-build -LE perf --output-
 
 On Ubuntu, also pass `-DCMAKE_PREFIX_PATH=/opt/Qt/6.12.0/gcc_64` when configuring. Windows PowerShell splits `-D` arguments at dots when calling `wsl.exe`, so run this from a script or a Linux shell. Don't edit a script while a job is running it.
 
-Test on all three platforms before calling work finished. They behave differently: see the Arch crash under "Worker process".
+Build on one distro at a time, with the job limit above. Building on both at once, with no limit, hung the shared WSL VM until `wsl --shutdown`. Test on all three platforms before calling work finished. They behave differently: see the Arch crash under "Worker process".
 
 ### Performance tests
 
@@ -93,6 +93,7 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 
 - `papertrail-import --db X --cache Y [--worker W] [--max-jobs N] FOLDER...` runs an import without the GUI.
 - `gen-library` builds synthetic libraries.
+- `papertrail-lookup --doi X` (or `--isbn`, `--arxiv`, `--title`) asks the real services and prints what the app's parsers make of it. Use public records only, never identifiers or titles from the user's files.
 - `ui-preview --db X --cache Y --out DIR` saves pictures of the window, for checking how it looks. Use `QT_QPA_PLATFORM=offscreen`, which gives a poor fallback font but no window on the user's screen.
 - `-DPAPERTRAIL_BUILD_FORMAT_PROBE=ON` adds `format-probe`, which tests document formats against the engines.
 - `tests/make_import_samples.py OUTPUT_DIR` generates the documents in `tests/samples/`. They're committed as binary because tests depend on their exact bytes, so don't regenerate them all: write only a new one. The exception is `kf8_frankenstein.azw3`, a real Project Gutenberg book, because nothing here can make a KF8 file. `tests/KindleSamples.h` builds joint and DRM-marked Kindle files from it at test time.
@@ -107,7 +108,8 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 | `papertrail_core` | Qt Core, SQLite | Database, schema, models, queries, repositories, settings |
 | `papertrail_engine` | MuPDF, DjVuLibre | Opens and renders documents, and extracts their text |
 | `papertrail_import` | core | Scanning, the job queue, metadata extraction and classification, the worker client |
-| `papertrail_ui` | core, import, Qt Widgets | The library window |
+| `papertrail_metadata` | core, import, Qt Network | Online sources, matching, the lookup engine |
+| `papertrail_ui` | core, import, metadata, Qt Widgets | The library window |
 | `papertrail` | ui | The app |
 | `papertrail-worker` | engine, import | The only part of the app that opens documents |
 
@@ -144,6 +146,7 @@ The window's thread never waits on slow work, and each background thread opens i
 | `ImportThread` | Scans and the job queue. Its `cancelled` check also stops the worker mid-job, without counting against the file |
 | `BulkChanges` | Changes to many publications, in batches so other writers only wait briefly |
 | `CoverCache` pool | Decodes covers, newest request first |
+| `LookupThread` | Runs `LookupEngine` through the queued online lookups |
 
 Tests that show a window should fail on a `QMessageBox`, which would otherwise wait forever for a click: see `m_boxWatcher` in `test_reader.cpp`.
 
@@ -160,6 +163,20 @@ Tests that show a window should fail on a `QMessageBox`, which would otherwise w
 KF8 Kindle files (`.azw3`, and joint `.mobi` files) look like valid documents to MuPDF, which then shows a blank page. So `readablePath` in `ReaderHost.cpp` sends them through `convertKf8ToEpub`, which uses libmobi (`cmake/Mobi.cmake`) in the worker and keeps the EPUB in the cache folder, named by the file's content hash. Everything after that treats it as an EPUB.
 
 A reading place belongs to a format, not to a publication. Use `ReadingStateRepository::placeFor` and `setPlaceFor`.
+
+### Online lookups
+
+`src/metadata/Transport` is the only way anything reaches the network, and tests swap it. Offline mode, and a library where no mode has been chosen yet (`metadata.mode_chosen`), never queue a lookup. `test_metadata` checks this using the real network code against a server inside the test, so keep it that way. Only identifiers and titles are ever sent, and the User-Agent says nothing about the user. A contact email goes only to Crossref and OpenAlex, and only if the user enters one.
+
+Lookups are `job` rows of kind `lookup`, which belong to `LookupRepository` and not `ImportService`. `LookupEngine::decide` holds the table of what each mode does with a result. `plannedChanges` in `Matching.cpp` decides what a result may change: it leaves fields set by hand alone, only fills gaps in DOI, ISBN and abstract, and can never move anything to or from Preprint. Sources can only suggest that (`preprintHint`).
+
+Rate limits differ by source and by kind of request, and OpenAlex's anonymous searches run out at about 100 a day. A 429 blocks that source alone, and the queue only waits when no source could answer. A failure of the network or a source puts the job back without counting it as an attempt.
+
+### Removed folders
+
+Removing a folder (`FileRepository::hideRoot`) adds it to `removed_root` and keeps its file records, so adding the same path again (`restoreRoot`, then a scan) brings everything back. `roots()` only returns folders being indexed. Publications that are only in a removed folder, and articles inside them, go in `hidden_publication`, and `LibraryQuery` leaves those out of everything. Having no file doesn't mean hidden: a publication imported from another computer may be waiting for its file.
+
+A trigger on `publication_file` brings a hidden publication back whenever it gets a real file, so the same contents found in another folder reconnect by hash. It also drops the old location. Anything that lists what's waiting, or sends something online, has to leave hidden publications out too.
 
 ### Database and queries
 

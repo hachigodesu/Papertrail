@@ -118,7 +118,7 @@ Code rules that keep it distro-neutral:
 
 ### Data model
 
-- **Stable IDs:** publications, tags and annotations each carry a permanent UUID, so importing the same export twice never creates duplicates.
+- **Stable IDs:** publications, tags, collections and annotations each carry a permanent UUID, so importing the same export twice never creates duplicates.
 - **Publications can exist without a file.** Their metadata and tags are kept until a matching file turns up.
 - `library_root`: a named scan location with its absolute path. If it's unavailable, such as an unplugged drive, its entries show as *offline* rather than deleted, and a root can be repointed to a new path.
 - `file`: root, relative path, size, modified time, SHA-256, format, page count, has-text-layer flag and status (`ok`, `missing`, `offline`, `unreadable`).
@@ -137,6 +137,7 @@ Code rules that keep it distro-neutral:
 - **Child articles:** `publication.parent_id` plus `page_start` and `page_end`. An article points at its volume and opens at the right page.
 - `person` and `publication_person`: role (author, editor, translator, advisor) and position in the author list.
 - `tag` (with `parent_id` and colour) and `publication_tag`.
+- `collection` and `collection_publication`: a named grouping and the publications in it.
 - `metadata_provenance`: for each field, its source, confidence and previous value. This makes any automatic change reversible.
 - `annotation`: publication, content hash, location, type, colour, selected text and note. Using the hash means annotations survive a file being moved or renamed.
 - `reading_state`: last location, zoom and last opened.
@@ -175,6 +176,7 @@ The user sets a default in Settings and can override it for each import.
 
 - Publications, metadata and provenance
 - Tags and the tag hierarchy
+- Collections and what's in them
 - Child articles
 - Highlights and notes
 - Read status, ratings and reading positions
@@ -196,7 +198,7 @@ An import report shows how many publications were linked, proposed or left unmat
 
 **Import options:**
 
-- **Parts to bring in:** any of metadata, tags, annotations, reading state and settings.
+- **Parts to bring in:** any of metadata, tags, collections, annotations, reading state and settings.
 - **Merge** (the default):
   - Tags and annotations from both libraries are combined.
   - If the same field differs, the most recently edited publication wins, and the earlier value stays undoable through provenance.
@@ -253,6 +255,17 @@ An import report shows how many publications were linked, proposed or left unmat
 - Resumes where you left off.
 - Highlights, underlines and notes, with a side panel listing them. Notes can be exported to Markdown.
 
+### Collections
+
+A collection is a named grouping of publications, for something like a project, that opens in a view of its own without the rest of the library around it.
+
+- **Membership:** a publication can be in any number of collections. Adding one doesn't move or copy its file, and taking it out of a collection leaves it in the library.
+- **The view:** opens in its own tab beside the library, showing only that collection, with the same grid and list, filters, search and sort.
+- **Adding:** from the context menu and bulk actions, on any selection.
+- **Managing:** create, rename and delete. Deleting a collection only deletes the grouping, never its publications.
+- **Removed folders:** a publication hidden with its folder keeps its place in its collections, and is back in them if the folder returns.
+- **How they differ from tags:** tags describe what a publication is, and filter the whole library. A collection is a working set you open and work inside.
+
 ### Other screens
 
 First-run setup (start a new library or import an export), import progress, review queue, tag manager, library export and import with a match report, and settings. Dark mode follows the system.
@@ -272,6 +285,7 @@ Each milestone ends with something you can run.
 | **M4** | Reader for PDF and EPUB: rendering, navigation, table of contents, in-document search, resume | Double-clicking a publication opens it, including large textbooks |
 | **M5** | Other formats: DjVu, MOBI/AZW3, XPS, CBZ, FB2, using the M0 results | Every format renders and supplies a cover and, where it has any, text |
 | **M6** | Metadata lookup: providers, all three modes, review queue, provenance and undo | Each mode behaves as specified, and offline mode makes no network requests |
+| **M6.5** | Collections: create, rename and delete, add and remove publications, a view of their own with the usual filters and search | A project's publications can be gathered into a collection and worked with on their own, and nothing outside it shows in that view |
 | **M7** | Volumes: child articles, table-of-contents proposals, open at page, per-article tags | A journal volume can be split into searchable, citable articles |
 | **M8** | Full-text search: indexing, snippets, jump to match, "no text" flag | A phrase search across the library opens the right page |
 | **M9** | Highlights and notes: anchoring on fixed and reflowable formats, panel, Markdown export | Annotations survive restarts, file moves and EPUB font changes |
@@ -362,4 +376,4 @@ Papertrail/
 
 ## Roadmap after V1
 
-OCR for scanned documents, Zotero/Mendeley/BibTeX import, automatic article detection in volumes without a table of contents, full CSL citation styles, collections and saved searches, a browser connector, and exporting annotated PDF copies.
+OCR for scanned documents, Zotero/Mendeley/BibTeX import, automatic article detection in volumes without a table of contents, full CSL citation styles, saved searches, a browser connector, and exporting annotated PDF copies.

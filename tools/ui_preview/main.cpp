@@ -12,6 +12,7 @@
 #include "ui/LibrarySession.h"
 #include "ui/MainWindow.h"
 #include "ui/MetadataEditor.h"
+#include "ui/OnlineLookupDialog.h"
 #include "ui/PublicationListModel.h"
 
 #include <QApplication>
@@ -99,6 +100,11 @@ int main(int argc, char *argv[])
         editor.show();
         wait(300);
         editor.grab().save(out.filePath(QStringLiteral("editor.png")));
+    }
+
+    {
+        ui::OnlineLookupDialog dialog(QStringLiteral("Look up details for these files online?"), QStringLiteral("online_review"), QString(), true);
+        dialog.grab().save(out.filePath(QStringLiteral("lookup-dialog.png")));
     }
 
     // The reader, for anything whose title is given.

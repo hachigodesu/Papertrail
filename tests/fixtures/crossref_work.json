@@ -1,0 +1,78 @@
+{
+ "status": "ok",
+ "message-type": "work",
+ "message": {
+  "DOI": "10.1000/example.2020.7",
+  "type": "journal-article",
+  "title": [
+   "Fatigue of <i>Steel</i> Beams &amp; Columns"
+  ],
+  "subtitle": [
+   "A Long Study"
+  ],
+  "author": [
+   {
+    "given": "Ada",
+    "family": "Example",
+    "sequence": "first",
+    "affiliation": []
+   },
+   {
+    "given": "Omar",
+    "family": "Sample",
+    "sequence": "additional",
+    "affiliation": []
+   },
+   {
+    "name": "The Example Consortium",
+    "sequence": "additional",
+    "affiliation": []
+   }
+  ],
+  "container-title": [
+   "Journal of Made-up Results"
+  ],
+  "short-container-title": [
+   "J. Made-up Res."
+  ],
+  "volume": "42",
+  "issue": "3",
+  "page": "101-120",
+  "publisher": "Example Press",
+  "ISSN": [
+   "1234-5679",
+   "2345-6789"
+  ],
+  "issn-type": [
+   {
+    "value": "1234-5679",
+    "type": "print"
+   },
+   {
+    "value": "2345-6789",
+    "type": "electronic"
+   }
+  ],
+  "language": "en",
+  "URL": "https://doi.org/10.1000/example.2020.7",
+  "issued": {
+   "date-parts": [
+    [
+     2020,
+     9,
+     16
+    ]
+   ]
+  },
+  "published": {
+   "date-parts": [
+    [
+     2020,
+     9,
+     16
+    ]
+   ]
+  },
+  "abstract": "<jats:title>Abstract</jats:title>\n  <jats:p>A made-up abstract about steel.</jats:p>"
+ }
+}

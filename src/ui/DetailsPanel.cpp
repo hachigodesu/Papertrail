@@ -1,6 +1,7 @@
 #include "ui/DetailsPanel.h"
 
 #include "core/repo/PublicationMerge.h"
+#include "metadata/Matching.h"
 #include "ui/CoverCache.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
@@ -15,6 +16,8 @@
 #include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
@@ -221,6 +224,20 @@ void DetailsPanel::buildSinglePage()
     });
     column->addWidget(m_preprint);
 
+    m_preprintHint = plainLabel();
+    column->addWidget(m_preprintHint);
+
+    m_undoRow = new QWidget;
+    auto *undoLayout = new QHBoxLayout(m_undoRow);
+    undoLayout->setContentsMargins(0, 0, 0, 0);
+    m_undoLabel = plainLabel();
+    undoLayout->addWidget(m_undoLabel, 1);
+    auto *undo = new QPushButton(tr("Undo"));
+    undo->setToolTip(tr("Puts back the details from before this lookup."));
+    connect(undo, &QPushButton::clicked, this, &DetailsPanel::undoLookup);
+    undoLayout->addWidget(undo);
+    column->addWidget(m_undoRow);
+
     column->addWidget(sectionHeading(tr("Notes")));
     m_notes = new QPlainTextEdit;
     m_notes->setTabChangesFocus(true);
@@ -357,6 +374,15 @@ void DetailsPanel::reload()
         m_reviewReason->setText(reviewReason(m_session.publications(), p.id));
 
     m_preprint->setChecked(p.type == PublicationType::Preprint);
+
+    // It's a suggestion. Only ticking the box makes something a preprint.
+    const QString hintSource = QJsonDocument::fromJson(p.extraJson.toUtf8()).object().value(QStringLiteral("preprintHint")).toString();
+    m_preprintHint->setText(tr("%1 lists this as a preprint.").arg(metadata::providerLabel(hintSource)));
+    m_preprintHint->setVisible(!hintSource.isEmpty() && p.type != PublicationType::Preprint);
+
+    const QString undoSource = metadata::undoableSource(m_session.database(), p.id);
+    m_undoLabel->setText(tr("Details from %1.").arg(metadata::providerLabel(undoSource)));
+    m_undoRow->setVisible(!undoSource.isEmpty());
     m_readStatus->setCurrentIndex(m_readStatus->findData(int(p.readStatus)));
     m_rating->setCurrentIndex(m_rating->findData(p.rating.value_or(0)));
     if (m_notes->toPlainText() != p.notes)
@@ -573,6 +599,19 @@ void DetailsPanel::changePublication(const std::function<void(Publication &)> &c
     } catch (const std::exception &error) {
         QMessageBox::warning(this, tr("Saving"), tr("That change couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
         reload();
+    }
+}
+
+void DetailsPanel::undoLookup()
+{
+    if (!m_id)
+        return;
+    try {
+        metadata::undoLastLookup(m_session.database(), *m_id);
+        reload();
+        emit libraryEdited();
+    } catch (const std::exception &error) {
+        QMessageBox::warning(this, tr("Saving"), tr("That couldn't be undone: %1").arg(QString::fromUtf8(error.what())));
     }
 }
 

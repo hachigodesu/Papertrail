@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/x</id>
+  <title>arXiv Query: id_list=2101.00001</title>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <entry>
+    <id>http://arxiv.org/abs/2101.00001v2</id>
+    <title>Sampling Made
+      Simple</title>
+    <updated>2021-02-01T00:00:00Z</updated>
+    <summary>A made-up abstract about sampling.</summary>
+    <published>2021-01-03T17:57:34Z</published>
+    <author><name>Rosa Silva</name></author>
+    <author><name>Wen Li</name></author>
+  </entry>
+</feed>

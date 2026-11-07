@@ -2,6 +2,7 @@
 
 #include "core/db/Database.h"
 #include "core/model/Identifiers.h"
+#include "core/model/PublicationFields.h"
 
 #include <QDateTime>
 #include <QSet>
@@ -288,14 +289,6 @@ void PublicationRepository::update(Publication &publication)
 
 namespace {
 
-QString peopleText(const QList<PersonName> &people)
-{
-    QStringList names;
-    for (const PersonName &person : people)
-        names << person.display();
-    return names.join(QStringLiteral("; "));
-}
-
 QString numberText(const std::optional<int> &value)
 {
     return value ? QString::number(*value) : QString();
@@ -329,7 +322,7 @@ void PublicationRepository::fillGaps(Publication &into, const Publication &from)
         into.advisors = from.advisors;
 }
 
-void PublicationRepository::updateWithProvenance(Publication &publication, const QString &source)
+void PublicationRepository::updateWithProvenance(Publication &publication, const QString &source, qint64 recordedAt)
 {
     Transaction transaction(m_db);
     const std::optional<Publication> before = get(publication.id);
@@ -339,7 +332,7 @@ void PublicationRepository::updateWithProvenance(Publication &publication, const
 
     const auto record = [&](const char *field, const QString &oldValue, const QString &newValue) {
         if (oldValue != newValue && !(oldValue.isEmpty() && newValue.isEmpty())) {
-            recordProvenance(publication.id, {QString::fromLatin1(field), source, std::nullopt, oldValue, newValue, 0});
+            recordProvenance(publication.id, {QString::fromLatin1(field), source, std::nullopt, oldValue, newValue, recordedAt});
         }
     };
     record("type", toDbString(before->type), toDbString(publication.type));
@@ -353,10 +346,10 @@ void PublicationRepository::updateWithProvenance(Publication &publication, const
         if (qstrcmp(column.name, "rating") != 0)
             record(column.name, numberText((*before).*column.member), numberText(publication.*column.member));
     }
-    record("authors", peopleText(before->authors), peopleText(publication.authors));
-    record("editors", peopleText(before->editors), peopleText(publication.editors));
-    record("translators", peopleText(before->translators), peopleText(publication.translators));
-    record("advisors", peopleText(before->advisors), peopleText(publication.advisors));
+    record("authors", peopleToText(before->authors), peopleToText(publication.authors));
+    record("editors", peopleToText(before->editors), peopleToText(publication.editors));
+    record("translators", peopleToText(before->translators), peopleToText(publication.translators));
+    record("advisors", peopleToText(before->advisors), peopleToText(publication.advisors));
     transaction.commit();
 }
 

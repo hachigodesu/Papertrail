@@ -1,0 +1,24 @@
+{
+ "status": "ok",
+ "message": {
+  "DOI": "10.1101/2020.01.01.123456",
+  "type": "posted-content",
+  "subtype": "preprint",
+  "title": [
+   "Fatigue of Steel Beams"
+  ],
+  "author": [
+   {
+    "given": "Ada",
+    "family": "Example"
+   }
+  ],
+  "issued": {
+   "date-parts": [
+    [
+     2020
+    ]
+   ]
+  }
+ }
+}

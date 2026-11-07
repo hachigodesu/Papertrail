@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLocale>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -39,6 +40,16 @@ LibraryFoldersDialog::LibraryFoldersDialog(LibrarySession &session, QWidget *par
     m_note = new QLabel(tr("An import is running. Stop it to change or remove a folder."), this);
     m_note->hide();
     layout->addWidget(m_note);
+
+    auto *hiddenRow = new QHBoxLayout;
+    m_hiddenNote = new QLabel(this);
+    m_hiddenNote->setWordWrap(true);
+    m_forget = new QPushButton(tr("Delete their details..."), this);
+    m_forget->setToolTip(tr("Deletes their tags, notes and reading places from Papertrail. Your files aren't touched."));
+    hiddenRow->addWidget(m_hiddenNote, 1);
+    hiddenRow->addWidget(m_forget);
+    layout->addLayout(hiddenRow);
+    connect(m_forget, &QPushButton::clicked, this, &LibraryFoldersDialog::forgetRequested);
 
     auto *buttons = new QHBoxLayout;
     auto *add = new QPushButton(tr("Add folder..."), this);
@@ -87,6 +98,14 @@ void LibraryFoldersDialog::reload()
         if (root.id == selected)
             m_table->selectRow(row);
     }
+
+    const qint64 hidden = m_session.files().hiddenCount();
+    const QString count = hidden == 1 ? tr("1 publication") : tr("%1 publications").arg(QLocale().toString(hidden));
+    m_hiddenNote->setText(tr("Details of %1 from removed folders are being kept, out of sight. "
+                             "Adding a folder again brings back the ones it holds.")
+                              .arg(count));
+    m_hiddenNote->setVisible(hidden > 0);
+    m_forget->setVisible(hidden > 0);
     updateButtons();
 }
 
@@ -113,6 +132,7 @@ void LibraryFoldersDialog::updateButtons()
     m_rescan->setEnabled(hasRoot);
     m_change->setEnabled(hasRoot && !m_importRunning);
     m_remove->setEnabled(hasRoot && !m_importRunning);
+    m_forget->setEnabled(!m_importRunning);
 }
 
 } // namespace papertrail::ui

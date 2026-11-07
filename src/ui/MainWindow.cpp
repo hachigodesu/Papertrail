@@ -1,7 +1,9 @@
 #include "ui/MainWindow.h"
 
 #include "core/repo/FileRepository.h"
+#include "core/repo/LookupRepository.h"
 #include "core/repo/PublicationMerge.h"
+#include "metadata/Matching.h"
 #include "ui/BulkChanges.h"
 #include "ui/CoverCache.h"
 #include "ui/Delegates.h"
@@ -12,6 +14,9 @@
 #include "ui/Labels.h"
 #include "ui/LibraryFoldersDialog.h"
 #include "ui/LibrarySession.h"
+#include "ui/LookupThread.h"
+#include "ui/OnlineLookupDialog.h"
+#include "ui/ReviewTab.h"
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
 #include "ui/ReaderTab.h"
@@ -36,6 +41,7 @@
 #include <QLocale>
 #include <QMenu>
 #include <QMenuBar>
+#include <QApplication>
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
@@ -142,6 +148,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_import = new ImportThread(session.paths(), this);
     m_watcher = new FolderWatcher(this);
     m_bulk = new BulkChanges(session.paths().database, this);
+    m_lookup = new LookupThread(session.paths(), this);
 
     const QString sortSetting = session.settings().value(QStringLiteral("library.sort_field")).toString();
     m_sortField = sortFieldFromSetting(sortSetting);
@@ -197,6 +204,8 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     connect(m_bulk, &BulkChanges::finished, this, [this](const QString &what, qint64 total) {
         statusBar()->showMessage(tr("%1: finished, %2.").arg(what, publicationCount(total)), 5000);
         m_details->reload();
+        if (m_foldersDialog)
+            m_foldersDialog->reload();
         refreshNow();
     });
     connect(m_bulk, &BulkChanges::failed, this, [this](const QString &what, const QString &error) {
@@ -207,11 +216,24 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_sidebarThread->start();
     m_import->start();
     m_bulk->start();
+    m_lookup->start();
+    {
+        const QString mode = lookupMode();
+        m_import->setLookupMode(mode == QLatin1StringView("offline") ? QString() : mode);
+    }
 
     applyFilters();
 
     // Started once the window is up, so a large library never delays its appearance.
     QTimer::singleShot(0, this, [this] {
+        // Whatever was left from last time. In offline mode, there's nothing to carry on with.
+        updateReviewButton();
+        guarded(tr("Reading the lookups"), [&] {
+            // What's already waiting has been left for later, so it's only the toolbar's to mention.
+            m_reviewCountSeen = LookupRepository(m_session.database()).waitingForReviewCount();
+            if (LookupRepository(m_session.database()).pendingCount() > 0)
+                m_lookup->kick();
+        });
         const QList<LibraryRoot> roots = m_session.files().roots();
         if (m_session.settings().value(QStringLiteral("library.rescan_on_startup")).toBool() && !roots.isEmpty())
             rescanAll();
@@ -240,6 +262,8 @@ void MainWindow::changeEvent(QEvent *event)
 {
     if (event->type() == QEvent::ActivationChange && isActiveWindow() && m_watcher)
         m_watcher->windowActivated();
+    if (event->type() == QEvent::WindowStateChange && m_lookup && !isMinimized())
+        offerReviewIfDue();
     QMainWindow::changeEvent(event);
 }
 
@@ -260,6 +284,12 @@ void MainWindow::buildToolbar()
     m_search->setClearButtonEnabled(true);
     connect(m_search, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
     row->addWidget(m_search, 1);
+
+    m_reviewButton = new QPushButton(container);
+    m_reviewButton->setToolTip(tr("Matches found online that are waiting for you to check them."));
+    m_reviewButton->hide();
+    connect(m_reviewButton, &QPushButton::clicked, this, &MainWindow::showReviewTab);
+    row->addWidget(m_reviewButton);
 
     auto *add = new QPushButton(tr("Add folder..."), container);
     connect(add, &QPushButton::clicked, this, &MainWindow::chooseFolderToAdd);
@@ -450,6 +480,10 @@ void MainWindow::buildCentre()
         }
     }
     connect(m_documentTabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeDocumentTab);
+    connect(m_documentTabs, &QTabWidget::currentChanged, this, [this](int index) {
+        if (index == 0 && m_lookup)
+            offerReviewIfDue();
+    });
     setCentralWidget(m_documentTabs);
     syncSortControls();
 }
@@ -475,6 +509,16 @@ void MainWindow::buildStatusBar()
         m_importBar->show();
         m_importStop->show();
     });
+
+    m_lookupLabel = new QLabel(this);
+    m_lookupLabel->setTextFormat(Qt::PlainText);
+    m_lookupStop = new QPushButton(tr("Stop lookups"), this);
+    m_lookupStop->setToolTip(tr("Stops looking up details. It carries on from the same place next time."));
+    connect(m_lookupStop, &QPushButton::clicked, m_lookup, &LookupThread::stopLookups);
+    statusBar()->addPermanentWidget(m_lookupLabel);
+    statusBar()->addPermanentWidget(m_lookupStop);
+    m_lookupLabel->hide();
+    m_lookupStop->hide();
 
     statusBar()->addPermanentWidget(m_importLabel);
     statusBar()->addPermanentWidget(m_importBar);
@@ -504,6 +548,9 @@ void MainWindow::buildMenus()
         m_session.settings().setValue(QStringLiteral("library.watch_folders"), on);
         m_watcher->setEnabled(on);
     });
+    file->addSeparator();
+    file->addAction(tr("&Online lookups..."), this, &MainWindow::showLookupSettings);
+    file->addAction(tr("Look up details for the whole library..."), this, &MainWindow::askAndLookUpLibrary);
     file->addSeparator();
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
@@ -557,6 +604,32 @@ void MainWindow::connectImport()
     connect(m_import, &ImportThread::rootScanned, this, &MainWindow::onRootScanned);
     connect(m_import, &ImportThread::finished, this, &MainWindow::onImportFinished);
     connect(m_import, &ImportThread::libraryChanged, this, &MainWindow::scheduleRefresh);
+    connect(m_import, &ImportThread::libraryChanged, this, [this] {
+        // New publications may have joined the queue. If there's none, this finds that and stops.
+        guarded(tr("Reading the lookups"), [&] {
+            if (LookupRepository(m_session.database()).pendingCount() > 0)
+                m_lookup->kick();
+        });
+    });
+
+    connect(m_lookup, &LookupThread::busyChanged, this, [this](bool busy) {
+        m_lookupLabel->setVisible(busy);
+        m_lookupStop->setVisible(busy);
+        if (busy)
+            m_lookupLabel->setText(tr("Looking up details..."));
+        else
+            offerReviewIfDue();
+    });
+    connect(m_lookup, &LookupThread::progress, this, &MainWindow::onLookupProgress);
+    connect(m_lookup, &LookupThread::publicationChanged, this, [this](qint64 id) {
+        scheduleRefresh();
+        if (m_details->currentId() == id)
+            m_details->reload();
+    });
+    connect(m_lookup, &LookupThread::reviewChanged, this, &MainWindow::updateReviewButton);
+    connect(m_lookup, &LookupThread::lookupsFinished, this, &MainWindow::onLookupsFinished);
+    connect(m_lookup, &LookupThread::problem, this,
+            [this](const QString &message) { statusBar()->showMessage(tr("%1 Trying again shortly.").arg(message), 15000); });
     connect(m_import, &ImportThread::failed, this, [this](const QString &message) {
         statusBar()->showMessage(tr("Import problem: %1").arg(message), 15000);
     });
@@ -1028,6 +1101,8 @@ void MainWindow::closeDocumentTab(int index)
         return; // The library stays.
     QWidget *tab = m_documentTabs->widget(index);
     m_documentTabs->removeTab(index);
+    if (tab == m_reviewTab)
+        m_reviewTab = nullptr;
     delete tab;
 }
 
@@ -1091,6 +1166,7 @@ void MainWindow::showContextMenu(const QPoint &position)
     for (const ReadStatus value : {ReadStatus::Unread, ReadStatus::Reading, ReadStatus::Read})
         status->addAction(readStatusLabel(value), this, [this, value] { setSelectedReadStatus(value); });
     menu.addAction(tr("Mark as checked"), this, &MainWindow::markSelectedChecked);
+    menu.addAction(tr("Look up details online"), this, &MainWindow::askAndLookUpSelected);
     if (count >= 2 && count <= kMaxToCombine) {
         menu.addSeparator();
         menu.addAction(tr("Combine into one publication..."), this, [this] {
@@ -1144,14 +1220,215 @@ void MainWindow::chooseFolderToAdd()
         start = m_session.settings().value(QStringLiteral("library.last_import_folder")).toString();
     });
     const QString folder = QFileDialog::getExistingDirectory(this, tr("Add a folder to the library"), start);
-    if (!folder.isEmpty())
-        addFolder(folder);
+    if (folder.isEmpty())
+        return;
+
+    // The first time, this sets how lookups work from now on. After that, it's only for this folder.
+    bool chosen = false;
+    guarded(tr("Reading settings"), [&] { chosen = m_session.settings().value(QStringLiteral("metadata.mode_chosen")).toBool(); });
+    OnlineLookupDialog dialog(tr("Adding %1.").arg(QDir::toNativeSeparators(folder)),
+                              chosen ? lookupMode() : QStringLiteral("online_review"), QString(), false, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    if (!chosen)
+        setLookupMode(dialog.mode(), QString());
+    addFolder(folder, dialog.mode());
 }
 
-void MainWindow::addFolder(const QString &path)
+QString MainWindow::lookupMode()
+{
+    QString mode = QStringLiteral("offline");
+    guarded(tr("Reading settings"), [&] {
+        if (m_session.settings().value(QStringLiteral("metadata.mode_chosen")).toBool())
+            mode = m_session.settings().value(QStringLiteral("metadata.mode")).toString();
+    });
+    return mode;
+}
+
+void MainWindow::setLookupMode(const QString &mode, const QString &email)
+{
+    guarded(tr("Saving the setting"), [&] {
+        SettingsStore &settings = m_session.settings();
+        settings.setValue(QStringLiteral("metadata.mode"), mode);
+        settings.setValue(QStringLiteral("metadata.mode_chosen"), true);
+        if (!email.isNull())
+            settings.setValue(QStringLiteral("metadata.crossref_email"), email);
+        m_import->setLookupMode(mode == QLatin1StringView("offline") ? QString() : mode);
+        if (mode == QLatin1StringView("offline")) {
+            m_lookup->stopLookups();
+            LookupRepository(m_session.database()).clearPending();
+        }
+    });
+}
+
+void MainWindow::showLookupSettings()
+{
+    QString email;
+    guarded(tr("Reading settings"), [&] { email = m_session.settings().value(QStringLiteral("metadata.crossref_email")).toString(); });
+    OnlineLookupDialog dialog(QString(), lookupMode(), email, true, this);
+    if (dialog.exec() == QDialog::Accepted)
+        setLookupMode(dialog.mode(), dialog.email().isNull() ? QStringLiteral("") : dialog.email());
+}
+
+bool MainWindow::makeSureLookupModeIsChosen()
+{
+    if (lookupMode() != QLatin1StringView("offline"))
+        return true;
+    OnlineLookupDialog dialog(tr("You're currently offline. Looking up details needs one of the online choices."),
+                              QStringLiteral("online_review"), QString(), false, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return false;
+    setLookupMode(dialog.mode(), QString());
+    return lookupMode() != QLatin1StringView("offline");
+}
+
+void MainWindow::lookUp(const QList<qint64> &ids)
+{
+    const QString mode = lookupMode();
+    if (mode == QLatin1StringView("offline") || ids.isEmpty())
+        return;
+    guarded(tr("Queueing the lookups"), [&] {
+        LookupRepository lookups(m_session.database());
+        Transaction transaction(m_session.database());
+        for (const qint64 id : ids)
+            lookups.resolveCandidates(id);
+        lookups.enqueue(ids, mode, true);
+        transaction.commit();
+        updateReviewButton();
+        m_lookup->kick();
+    });
+}
+
+void MainWindow::askAndLookUpLibrary()
+{
+    if (!makeSureLookupModeIsChosen())
+        return;
+    QList<qint64> ids;
+    guarded(tr("Reading the library"), [&] { ids = m_session.query().ids({}, {}); });
+    QMessageBox box(QMessageBox::Question, tr("Look up details"),
+                    tr("Look up details for all %1?\n\nThis goes at the pace each source allows, so a large library can "
+                       "take a while. It carries on in the background, and from the same place if it's stopped.")
+                        .arg(publicationCount(ids.size())),
+                    QMessageBox::Yes | QMessageBox::Cancel, this);
+    box.setTextFormat(Qt::PlainText);
+    if (box.exec() == QMessageBox::Yes)
+        lookUp(ids);
+}
+
+void MainWindow::askAndLookUpSelected()
+{
+    if (makeSureLookupModeIsChosen())
+        lookUp(selectedIds());
+}
+
+void MainWindow::showReviewTab()
+{
+    if (!m_reviewTab) {
+        m_reviewTab = new ReviewTab(m_session, m_documentTabs);
+        connect(m_reviewTab, &ReviewTab::libraryEdited, this, [this] {
+            updateReviewButton();
+            m_details->reload();
+            scheduleRefresh();
+        });
+        connect(m_reviewTab, &ReviewTab::openRequested, this, [this](qint64 id) { openOrChooseFormat(id); });
+        connect(m_reviewTab, &QObject::destroyed, this, [this] { m_reviewTab = nullptr; });
+        m_documentTabs->addTab(m_reviewTab, tr("To review"));
+    } else {
+        m_reviewTab->reload();
+    }
+    m_documentTabs->setCurrentWidget(m_reviewTab);
+    if (m_reviewOffer)
+        m_reviewOffer->close();
+}
+
+void MainWindow::updateReviewButton()
+{
+    guarded(tr("Reading the lookups"), [&] {
+        const qint64 count = LookupRepository(m_session.database()).waitingForReviewCount();
+        m_reviewButton->setText(tr("To review: %1").arg(QLocale().toString(count)));
+        m_reviewButton->setVisible(count > 0);
+        m_reviewCountSeen = qMin(m_reviewCountSeen, count);
+        if (m_reviewTab)
+            m_reviewTab->reload();
+        if (m_reviewOffer && count == 0)
+            m_reviewOffer->close();
+    });
+}
+
+// Comes up once everything has finished, so that a large import doesn't bring up one after another. It
+// doesn't block the window or take the keyboard, and it waits rather than interrupt someone reading.
+void MainWindow::offerReviewIfDue()
+{
+    guarded(tr("Reading the lookups"), [&] {
+        LookupRepository lookups(m_session.database());
+        const qint64 count = lookups.waitingForReviewCount();
+        if (count <= m_reviewCountSeen || m_reviewOffer)
+            return;
+        if (m_import->isBusy() || m_lookup->isBusy() || lookups.pendingCount() > 0)
+            return;
+        if (m_documentTabs->currentWidget() == m_reviewTab && m_reviewTab) {
+            m_reviewCountSeen = count; // They're already looking at it.
+            return;
+        }
+        if (m_documentTabs->currentIndex() != 0 || QApplication::activeModalWidget() || isMinimized())
+            return;
+
+        m_reviewCountSeen = count;
+        auto *box = new QMessageBox(QMessageBox::Question, tr("Details to review"),
+                                    tr("Online lookups found details for %1 that need checking.").arg(publicationCount(count)),
+                                    QMessageBox::NoButton, this);
+        box->setTextFormat(Qt::PlainText);
+        box->setInformativeText(tr("You can compare them now, or later using To review in the toolbar."));
+        box->setWindowModality(Qt::NonModal);
+        box->setAttribute(Qt::WA_DeleteOnClose);
+        box->setAttribute(Qt::WA_ShowWithoutActivating);
+        QPushButton *review = box->addButton(tr("Review now"), QMessageBox::AcceptRole);
+        review->setObjectName(QStringLiteral("reviewNow"));
+        QPushButton *later = box->addButton(tr("Later"), QMessageBox::RejectRole);
+        later->setObjectName(QStringLiteral("reviewLater"));
+        box->setDefaultButton(review);
+        box->setEscapeButton(later);
+        connect(review, &QPushButton::clicked, this, &MainWindow::showReviewTab);
+        m_reviewOffer = box;
+        box->show();
+    });
+}
+
+void MainWindow::onLookupProgress(qint64 done, qint64 remaining, const QString &source)
+{
+    const QString from = source.isEmpty() ? QString() : tr(", asking %1").arg(metadata::providerLabel(source));
+    m_lookupLabel->setText(tr("Looked up %1, with %2 to go%3").arg(QLocale().toString(done), QLocale().toString(remaining), from));
+}
+
+void MainWindow::onLookupsFinished(const metadata::LookupSummary &summary)
+{
+    refreshNow();
+    updateReviewButton();
+    if (m_details->currentId())
+        m_details->reload();
+    if (summary.stopped) {
+        statusBar()->showMessage(tr("Lookups stopped. They carry on from the same place next time."), 10000);
+        return;
+    }
+    if (summary.applied + summary.forReview + summary.notFound == 0)
+        return;
+    QStringList parts;
+    parts << tr("%1 filled in").arg(summary.applied);
+    if (summary.forReview > 0)
+        parts << tr("%1 to review").arg(summary.forReview);
+    if (summary.notFound > 0)
+        parts << tr("%1 not found").arg(summary.notFound);
+    statusBar()->showMessage(tr("Lookups finished: %1.").arg(parts.join(QStringLiteral(", "))), 15000);
+}
+
+void MainWindow::addFolder(const QString &path, const std::optional<QString> &lookupOverride)
 {
     guarded(tr("Adding the folder"), [&] {
         const QString folder = QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()));
+        if (lookupOverride) {
+            m_lookupOverride = lookupOverride;
+            m_import->setLookupMode(*lookupOverride == QLatin1StringView("offline") ? QString() : *lookupOverride);
+        }
         m_session.settings().setValue(QStringLiteral("library.last_import_folder"), folder);
         m_importStoppedByHand = false;
 
@@ -1159,6 +1436,15 @@ void MainWindow::addFolder(const QString &path)
             if (import::isPathInside(folder, root.path)) {
                 statusBar()->showMessage(tr("That folder is already in the library, so it's being scanned again."), 8000);
                 m_import->scanRoots({root.id});
+                return;
+            }
+        }
+        // A folder that was removed comes back with everything it had.
+        for (const LibraryRoot &root : m_session.files().removedRoots()) {
+            if (import::isPathInside(folder, root.path) && import::isPathInside(root.path, folder)) {
+                m_session.files().restoreRoot(root.id);
+                m_import->scanRoots({root.id});
+                afterFoldersChanged();
                 return;
             }
         }
@@ -1196,8 +1482,10 @@ void MainWindow::showFoldersDialog()
     });
     connect(&dialog, &LibraryFoldersDialog::changeLocationRequested, this, &MainWindow::changeRootLocation);
     connect(&dialog, &LibraryFoldersDialog::removeRequested, this, &MainWindow::removeRoot);
+    connect(&dialog, &LibraryFoldersDialog::forgetRequested, this, &MainWindow::confirmForgetHidden);
     dialog.exec();
     m_foldersDialog = nullptr;
+    offerReviewIfDue();
 }
 
 void MainWindow::changeRootLocation(qint64 rootId)
@@ -1223,20 +1511,134 @@ void MainWindow::removeRoot(qint64 rootId)
         const auto root = m_session.files().root(rootId);
         if (!root)
             return;
+        const FileRepository::RemovalImpact impact = m_session.files().removalImpact(rootId);
         QMessageBox box(QMessageBox::Question, tr("Remove folder"),
-                        tr("Stop indexing %1?\n\nNothing is deleted from your disk. Its publications stay in the library "
-                           "with their tags and notes, marked as having no file linked.")
-                            .arg(QDir::toNativeSeparators(root->path)),
-                        QMessageBox::Yes | QMessageBox::Cancel, m_foldersDialog ? static_cast<QWidget *>(m_foldersDialog) : this);
+                        tr("Stop indexing %1?\n\nNothing is deleted from your disk.").arg(QDir::toNativeSeparators(root->path)),
+                        QMessageBox::NoButton, m_foldersDialog ? static_cast<QWidget *>(m_foldersDialog) : this);
         box.setTextFormat(Qt::PlainText);
-        if (box.exec() != QMessageBox::Yes)
-            return;
-        m_watcher->removeRoot(rootId);
-        m_session.files().removeRoot(rootId);
-        if (m_foldersDialog)
-            m_foldersDialog->reload();
-        refreshNow();
+
+        QString details;
+        if (impact.leaving > 0) {
+            details = tr("%1 will leave the library.\n\n"
+                         "If you keep their details, they're hidden, and their tags, notes and reading places "
+                         "come back if you add this folder again.\n\n"
+                         "If you delete their details, those are gone for good.")
+                          .arg(publicationCount(impact.leaving));
+        }
+        if (impact.staying > 0) {
+            details += (details.isEmpty() ? QString() : QStringLiteral("\n\n"))
+                + tr("%1 also in another folder will stay.").arg(publicationCount(impact.staying));
+        }
+        box.setInformativeText(details);
+
+        QPushButton *remove = box.addButton(impact.leaving > 0 ? tr("Remove, keep details") : tr("Remove"), QMessageBox::AcceptRole);
+        remove->setObjectName(QStringLiteral("removeKeep"));
+        QPushButton *forget = nullptr;
+        if (impact.leaving > 0) {
+            forget = box.addButton(tr("Remove, delete details"), QMessageBox::DestructiveRole);
+            forget->setObjectName(QStringLiteral("removeForget"));
+        }
+        QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(cancel);
+        box.exec();
+
+        if (box.clickedButton() == remove)
+            removeRootKeepingDetails(rootId);
+        else if (forget && box.clickedButton() == forget)
+            removeRootAndDetails(rootId);
     });
+}
+
+void MainWindow::removeRootKeepingDetails(qint64 rootId)
+{
+    guarded(tr("Removing the folder"), [&] {
+        m_watcher->removeRoot(rootId);
+        m_session.files().hideRoot(rootId);
+        afterFoldersChanged();
+    });
+}
+
+void MainWindow::removeRootAndDetails(qint64 rootId)
+{
+    guarded(tr("Removing the folder"), [&] {
+        m_watcher->removeRoot(rootId);
+        m_session.files().hideRoot(rootId);
+        const QList<qint64> ids = m_session.files().hiddenIn(rootId);
+        letGoOfHidden(); // Readers and notes save as they close, so this has to come first.
+        m_session.files().removeRoot(rootId);
+        deletePublications(ids);
+        afterFoldersChanged();
+    });
+}
+
+void MainWindow::confirmForgetHidden()
+{
+    guarded(tr("Deleting details"), [&] {
+        const qint64 hidden = m_session.files().hiddenCount();
+        QMessageBox box(QMessageBox::Warning, tr("Delete details"),
+                        tr("Delete the details of %1 from removed folders?\n\nTheir tags, notes and reading places "
+                           "will be gone for good. Your files aren't touched.")
+                            .arg(publicationCount(hidden)),
+                        QMessageBox::NoButton, m_foldersDialog ? static_cast<QWidget *>(m_foldersDialog) : this);
+        box.setTextFormat(Qt::PlainText);
+        QPushButton *confirm = box.addButton(tr("Delete details"), QMessageBox::DestructiveRole);
+        QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(cancel);
+        box.exec();
+        if (box.clickedButton() == confirm)
+            forgetHiddenPublications();
+    });
+}
+
+void MainWindow::forgetHiddenPublications()
+{
+    guarded(tr("Deleting details"), [&] {
+        const QList<qint64> ids = m_session.files().hiddenPublications();
+        letGoOfHidden();
+        for (const LibraryRoot &root : m_session.files().removedRoots())
+            m_session.files().removeRoot(root.id);
+        deletePublications(ids);
+        afterFoldersChanged();
+    });
+}
+
+// They stay hidden until they've gone, so this can take as long as it needs.
+void MainWindow::deletePublications(const QList<qint64> &ids)
+{
+    if (ids.isEmpty())
+        return;
+    m_bulk->enqueue(tr("Deleting details"), ids, [](Database &db, const QList<qint64> &batch) {
+        PublicationRepository publications(db);
+        for (const qint64 id : batch)
+            publications.remove(id);
+    });
+}
+
+void MainWindow::letGoOfHidden()
+{
+    const QList<qint64> hidden = m_session.files().hiddenPublications();
+    const QSet<qint64> ids(hidden.cbegin(), hidden.cend());
+    for (int i = m_documentTabs->count() - 1; i > 0; --i) {
+        const auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
+        if (reader && ids.contains(reader->publicationId()))
+            closeDocumentTab(i);
+    }
+    if (const std::optional<qint64> shown = m_details->currentId(); shown && ids.contains(*shown)) {
+        m_selectedId.reset();
+        m_details->showNothing();
+    }
+}
+
+void MainWindow::afterFoldersChanged()
+{
+    letGoOfHidden();
+    if (m_foldersDialog)
+        m_foldersDialog->reload();
+    if (m_reviewTab)
+        m_reviewTab->reload();
+    updateReviewButton();
+    refreshNow();
+    updateStack();
 }
 
 void MainWindow::onImportBusyChanged(bool busy)
@@ -1254,6 +1656,8 @@ void MainWindow::onImportBusyChanged(bool busy)
     if (m_foldersDialog)
         m_foldersDialog->setImportRunning(busy);
     updateStack();
+    if (!busy)
+        offerReviewIfDue();
 }
 
 void MainWindow::onImportProgress(qint64 done, qint64 remaining, const QString &file)
@@ -1285,6 +1689,16 @@ void MainWindow::onRootScanned(qint64 rootId, const import::ScanReport &report, 
 void MainWindow::onImportFinished(const import::ImportReport &report)
 {
     refreshNow();
+    // A choice made for one folder only lasts as long as that folder's import.
+    if (m_lookupOverride) {
+        m_lookupOverride.reset();
+        const QString mode = lookupMode();
+        m_import->setLookupMode(mode == QLatin1StringView("offline") ? QString() : mode);
+    }
+    guarded(tr("Reading the lookups"), [&] {
+        if (LookupRepository(m_session.database()).pendingCount() > 0)
+            m_lookup->kick();
+    });
     if (report.stoppedEarly) {
         statusBar()->showMessage(tr("Import stopped. It carries on from the same place next time."), 10000);
         return;

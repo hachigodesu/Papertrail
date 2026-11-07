@@ -1,0 +1,29 @@
+{
+ "status": "ok",
+ "message": {
+  "DOI": "10.1000/example-book",
+  "type": "monograph",
+  "title": [
+   "Principles of Sample Engineering"
+  ],
+  "ISBN": [
+   "0306406152",
+   "9780306406157"
+  ],
+  "publisher": "Example Press",
+  "author": [
+   {
+    "given": "Ada",
+    "family": "Example"
+   }
+  ],
+  "issued": {
+   "date-parts": [
+    [
+     2018,
+     5
+    ]
+   ]
+  }
+ }
+}

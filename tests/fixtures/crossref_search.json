@@ -1,0 +1,70 @@
+{
+ "status": "ok",
+ "message": {
+  "total-results": 3,
+  "items": [
+   {
+    "DOI": "10.1000/near.miss",
+    "type": "book-chapter",
+    "title": [
+     "Steel"
+    ],
+    "author": [
+     {
+      "family": "Other"
+     }
+    ],
+    "issued": {
+     "date-parts": [
+      [
+       1999
+      ]
+     ]
+    }
+   },
+   {
+    "DOI": "10.1000/found.it",
+    "type": "journal-article",
+    "title": [
+     "Fatigue of Steel Beams in Practice"
+    ],
+    "author": [
+     {
+      "given": "Ada",
+      "family": "Example"
+     }
+    ],
+    "issued": {
+     "date-parts": [
+      [
+       2020
+      ]
+     ]
+    },
+    "container-title": [
+     "Journal of Made-up Results"
+    ]
+   },
+   {
+    "DOI": "10.1000/also.close",
+    "type": "journal-article",
+    "title": [
+     "Fatigue of Steel Beams in Bridges"
+    ],
+    "author": [
+     {
+      "given": "Omar",
+      "family": "Sample"
+     }
+    ],
+    "issued": {
+     "date-parts": [
+      [
+       2011
+      ]
+     ]
+    }
+   }
+  ]
+ }
+}

@@ -94,9 +94,13 @@ void addPrefix(Conditions &conditions, const QByteArray &column, const QString &
 
 // `ftsClause` is empty when there's no text to search for, or when the caller joins the FTS
 // table itself to rank by relevance.
-Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ftsClause)
+Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ftsClause, bool anyHidden)
 {
     Conditions c;
+    // Left out if there's nothing to hide, because some queries take a quicker route with no conditions.
+    if (anyHidden)
+        c.add("p.id NOT IN (SELECT publication_id FROM hidden_publication)");
+
     const ParsedSearch search = parseSearch(filter.searchText);
 
     if (!ftsClause.isEmpty())
@@ -223,12 +227,12 @@ struct ListQuery {
     QList<Binding> bindings;
 };
 
-ListQuery buildListQuery(const PublicationFilter &filter, const PublicationSort &sort, const QByteArray &ftsClause)
+ListQuery buildListQuery(const PublicationFilter &filter, const PublicationSort &sort, const QByteArray &ftsClause, bool anyHidden)
 {
     const QString ftsMatch = parseSearch(filter.searchText).ftsMatch;
     ListQuery query;
     if (sort.field == SortField::Relevance && !ftsMatch.isEmpty()) {
-        Conditions c = buildConditions(filter, QByteArray());
+        Conditions c = buildConditions(filter, QByteArray(), anyHidden);
         query.sql = " FROM publication_fts JOIN publication p ON p.id = publication_fts.rowid "
                     "WHERE publication_fts MATCH ?";
         query.bindings << ftsMatch;
@@ -238,7 +242,7 @@ ListQuery buildListQuery(const PublicationFilter &filter, const PublicationSort 
         // Column weights: title, abstract, authors, tags, container, publisher, identifiers.
         query.sql += " ORDER BY bm25(publication_fts, 10.0, 1.0, 5.0, 3.0, 2.0, 1.0, 8.0), p.id";
     } else {
-        Conditions c = buildConditions(filter, ftsClause);
+        Conditions c = buildConditions(filter, ftsClause, anyHidden);
         query.sql = " FROM publication p" + c.whereClause() + orderBy(sort);
         query.bindings = c.bindings;
     }
@@ -304,10 +308,19 @@ QByteArray LibraryQuery::searchClause(const PublicationFilter &filter)
     return m_searchCount > kWalkInOrderAbove ? "+p.id IN temp.search_match" : "p.id IN temp.search_match";
 }
 
+bool LibraryQuery::anyHidden()
+{
+    Statement &select = m_db.cached("SELECT EXISTS (SELECT 1 FROM hidden_publication)");
+    select.step();
+    const bool any = select.intAt(0) != 0;
+    select.reset();
+    return any;
+}
+
 qint64 LibraryQuery::count(const PublicationFilter &filter)
 {
     const QByteArray fts = searchClause(filter);
-    const Conditions c = buildConditions(filter, fts);
+    const Conditions c = buildConditions(filter, fts, anyHidden());
     if (!fts.isEmpty() && c.clauses.size() == 1)
         return m_searchCount;
 
@@ -320,7 +333,7 @@ qint64 LibraryQuery::count(const PublicationFilter &filter)
 QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, const PublicationSort &sort,
                                              qint64 offset, int limit)
 {
-    const ListQuery query = buildListQuery(filter, sort, searchClause(filter));
+    const ListQuery query = buildListQuery(filter, sort, searchClause(filter), anyHidden());
     auto select = m_db.prepare(
         "SELECT p.id, p.type, p.title, p.authors_display, p.year, p.container_title, p.read_status, "
         "p.needs_review, coalesce(p.parent_id, p.id)"
@@ -372,7 +385,7 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
 
 QList<qint64> LibraryQuery::ids(const PublicationFilter &filter, const PublicationSort &sort)
 {
-    const ListQuery query = buildListQuery(filter, sort, searchClause(filter));
+    const ListQuery query = buildListQuery(filter, sort, searchClause(filter), anyHidden());
     auto select = m_db.prepare("SELECT p.id" + query.sql);
     bindAll(*select, query.bindings);
     QList<qint64> ids;
@@ -383,7 +396,7 @@ QList<qint64> LibraryQuery::ids(const PublicationFilter &filter, const Publicati
 
 QList<FacetValue> LibraryQuery::facet(const PublicationFilter &filter, Facet facet, int limit)
 {
-    Conditions c = buildConditions(withoutOwnSelection(filter, facet), searchClause(filter));
+    Conditions c = buildConditions(withoutOwnSelection(filter, facet), searchClause(filter), anyHidden());
     QByteArray sql;
     switch (facet) {
     case Facet::Type: sql = columnFacetSql("p.type", c); break;
@@ -430,7 +443,7 @@ QList<TagCount> LibraryQuery::tagCounts(const PublicationFilter &filter)
 {
     PublicationFilter scoped = filter;
     scoped.tagIds.clear();
-    const Conditions c = buildConditions(scoped, searchClause(scoped));
+    const Conditions c = buildConditions(scoped, searchClause(scoped), anyHidden());
 
     // Read the tree first, then roll the matching publications up through it in memory. Each
     // publication counts once per tag, even if it has two tags under the same parent.
@@ -510,7 +523,7 @@ std::optional<std::pair<int, int>> LibraryQuery::yearRange(const PublicationFilt
     PublicationFilter scoped = filter;
     scoped.yearMin.reset();
     scoped.yearMax.reset();
-    const Conditions c = buildConditions(scoped, searchClause(scoped));
+    const Conditions c = buildConditions(scoped, searchClause(scoped), anyHidden());
     auto select = m_db.prepare("SELECT min(p.year), max(p.year) FROM publication p" + c.whereClause());
     bindAll(*select, c.bindings);
     select->step();

@@ -195,6 +195,37 @@ private slots:
             QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(", "))));
     }
 
+    void hiddenPublicationsDontSlowResults()
+    {
+        // A tenth of the library hidden, which is the slower path for these queries.
+        m_db->exec("INSERT INTO hidden_publication (publication_id) SELECT id FROM publication WHERE id % 10 = 0");
+        PublicationFilter articles;
+        articles.tabTypes = typesForTab(LibraryTab::JournalArticles);
+        PublicationFilter word;
+        word.searchText = QStringLiteral("analysis");
+
+        m_out << "With a tenth of the library hidden (target " << kResultTargetMs << " ms)\n";
+        QStringList failures;
+        const auto time = [&](const char *name, const PublicationFilter &filter) {
+            const double ms = medianMs([&] {
+                LibraryQuery query(*m_db);
+                query.page(filter, {}, 0, kPageSize);
+                query.count(filter);
+            });
+            report(name, ms, kResultTargetMs);
+            if (ms > kResultTargetMs)
+                failures << QString::fromUtf8(name);
+        };
+        time("everything, by title", {});
+        time("articles tab", articles);
+        time("search: common word", word);
+        m_out << '\n';
+        m_out.flush();
+        m_db->exec("DELETE FROM hidden_publication");
+        if (!reportOnly())
+            QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(", "))));
+    }
+
     void scrollingStaysFastDeepIntoTheList()
     {
         const PublicationSort sort{SortField::Title, true};

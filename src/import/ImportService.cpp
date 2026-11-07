@@ -2,6 +2,7 @@
 
 #include "core/db/Database.h"
 #include "core/model/Identifiers.h"
+#include "core/repo/LookupRepository.h"
 #include "core/repo/PublicationMerge.h"
 
 #include <QDateTime>
@@ -133,7 +134,7 @@ ImportService::ImportService(Database &db, const ImportOptions &options)
 {
     // Anything still marked as running was interrupted the last time the app stopped. That wasn't
     // the file's fault: the worker's own crashes are dealt with as they happen.
-    m_db.exec("UPDATE job SET status = 'pending', attempts = max(attempts - 1, 0) WHERE status = 'running'");
+    m_db.exec("UPDATE job SET status = 'pending', attempts = max(attempts - 1, 0) WHERE status = 'running' AND kind <> 'lookup'");
 }
 
 ImportService::~ImportService() = default;
@@ -158,7 +159,7 @@ void ImportService::enqueue(const char *kind, qint64 fileId)
 
 qint64 ImportService::pendingJobs()
 {
-    auto select = m_db.prepare("SELECT count(*) FROM job WHERE status = 'pending'");
+    auto select = m_db.prepare("SELECT count(*) FROM job WHERE status = 'pending' AND kind <> 'lookup'");
     select->step();
     return select->int64At(0);
 }
@@ -276,7 +277,7 @@ ScanReport ImportService::scan(qint64 rootId)
 bool ImportService::nextJob(Job &job)
 {
     Statement &select = m_db.cached(
-        "SELECT id, kind, payload, attempts FROM job WHERE status = 'pending' ORDER BY id LIMIT 1");
+        "SELECT id, kind, payload, attempts FROM job WHERE status = 'pending' AND kind <> 'lookup' ORDER BY id LIMIT 1");
     if (!select.step()) {
         select.reset();
         return false;
@@ -812,6 +813,11 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
 
     const qint64 id = m_publications.create(p);
     m_files.link(id, file.id, true);
+    if (m_options.lookupMode) {
+        const QString mode = m_options.lookupMode();
+        if (!mode.isEmpty())
+            LookupRepository(m_db).enqueue({id}, mode);
+    }
     m_publications.recordProvenance(id, {QStringLiteral("title"), titleSource, std::nullopt, QString(), p.title, 0});
     ++report.publicationsCreated;
     if (p.needsReview)

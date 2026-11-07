@@ -42,6 +42,16 @@ add_dependencies(test_reader papertrail-worker)
 add_test(NAME test_reader COMMAND test_reader)
 set_tests_properties(test_reader PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 600)
 
+qt_add_executable(test_metadata test_metadata.cpp)
+target_link_libraries(test_metadata PRIVATE papertrail_ui Qt6::Test Qt6::Network)
+target_compile_definitions(test_metadata PRIVATE
+    PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
+    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples"
+    PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_dependencies(test_metadata papertrail-worker)
+add_test(NAME test_metadata COMMAND test_metadata)
+set_tests_properties(test_metadata PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 600)
+
 # Times real queries on a 100,000-publication library. Takes minutes rather than seconds, so it's
 # labelled: `ctest -LE perf` skips it, and `ctest -L perf` runs only this.
 papertrail_core_test(test_query_perf papertrail_synthetic)

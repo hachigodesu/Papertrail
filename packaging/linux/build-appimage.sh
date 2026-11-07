@@ -48,4 +48,10 @@ linuxdeploy-x86_64.AppImage \
     --plugin qt \
     --output appimage
 
+# Online lookups can't work without this, and nothing else would notice it was missing.
+if ! ls "$work/AppDir/usr/plugins/tls/"*.so >/dev/null 2>&1; then
+    echo "FAILED: the AppImage has no TLS plugin" >&2
+    exit 1
+fi
+
 echo "Built: $LDAI_OUTPUT"

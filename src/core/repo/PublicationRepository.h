@@ -34,7 +34,8 @@ public:
     static void fillGaps(Publication &into, const Publication &from);
 
     // As update(), and also keeps each changed field's earlier value under `source`.
-    void updateWithProvenance(Publication &publication, const QString &source);
+    // `recordedAt` lets several changes count as one, for undoing them together.
+    void updateWithProvenance(Publication &publication, const QString &source, qint64 recordedAt = 0);
 
     // For many publications at once, without rewriting each one's people.
     void setReadStatus(const QList<qint64> &ids, ReadStatus status);

@@ -8,6 +8,7 @@
 #include "ui/ImportThread.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
+#include "ui/LibraryFoldersDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
@@ -21,6 +22,7 @@
 #include <QFile>
 #include <QFormLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QLineEdit>
 #include <QListView>
 #include <QMessageBox>
@@ -871,6 +873,157 @@ private slots:
         QCOMPARE(m_session->tags().tagsFor(id).size(), 1);
         QCOMPARE(m_session->query().flagCounts({}).noFile, 1);
         QVERIFY(QFile::exists(QDir(folder).filePath(QStringLiteral("article.pdf"))));
+    }
+
+    void removingAFolderTakesItsPublicationsOutOfTheLibrary()
+    {
+        const QString folder = copySamples({QStringLiteral("article.pdf")});
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        const qint64 id = m_window->model()->idAt(0).value();
+        m_session->tags().assign(id, m_session->tags().ensurePath(QStringLiteral("Keep")));
+        m_window->details()->showPublication(id);
+        const qint64 root = m_session->files().roots().first().id;
+
+        m_window->removeRootKeepingDetails(root);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 0, kLongWaitMs);
+        QCOMPARE(m_session->query().count({}), 0);
+        QCOMPARE(m_session->query().flagCounts({}).noFile, 0);
+        QVERIFY(m_session->files().roots().isEmpty());
+        QVERIFY(QFile::exists(QDir(folder).filePath(QStringLiteral("article.pdf"))));
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->details()->currentId().has_value(), kLongWaitMs);
+
+        // Adding it again brings back the same publication, tags and all.
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        QCOMPARE(m_window->model()->idAt(0).value(), id);
+        QCOMPARE(m_session->tags().tagsFor(id).size(), 1);
+        QCOMPARE(m_session->files().hiddenCount(), qint64(0));
+        QCOMPARE(m_session->files().roots().size(), 1);
+    }
+
+    void removingAFolderCanDeleteItsDetailsToo()
+    {
+        const QString folder = copySamples({QStringLiteral("article.pdf")});
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        const qint64 id = m_window->model()->idAt(0).value();
+        m_session->tags().assign(id, m_session->tags().ensurePath(QStringLiteral("Keep")));
+        QVERIFY(m_window->openPublication(id) != nullptr);
+        QCOMPARE(m_window->documentTabs()->count(), 2);
+
+        m_window->removeRootAndDetails(m_session->files().roots().first().id);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 0, kLongWaitMs);
+        QCOMPARE(m_window->documentTabs()->count(), 1); // Its reader closed first, and saved nothing.
+        QTRY_VERIFY_WITH_TIMEOUT(!m_session->publications().get(id).has_value(), kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->files().hiddenCount(), qint64(0), kLongWaitMs);
+        QVERIFY(m_session->files().removedRoots().isEmpty());
+        QVERIFY(QFile::exists(QDir(folder).filePath(QStringLiteral("article.pdf"))));
+
+        // The file's still there to be added again, as something new.
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        QVERIFY(m_session->tags().tagsFor(m_window->model()->idAt(0).value()).isEmpty());
+    }
+
+    void whatsBeenKeptCanBeDeletedLater()
+    {
+        const QString folder = copySamples({QStringLiteral("article.pdf")});
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        const qint64 id = m_window->model()->idAt(0).value();
+        m_window->removeRootKeepingDetails(m_session->files().roots().first().id);
+
+        LibraryFoldersDialog dialog(*m_session);
+        const auto hasNote = [&] {
+            for (const QLabel *label : dialog.findChildren<QLabel *>()) {
+                if (label->isVisibleTo(&dialog) && label->text().contains(QStringLiteral("1 publication from removed")))
+                    return true;
+            }
+            return false;
+        };
+        QVERIFY(hasNote());
+
+        m_window->forgetHiddenPublications();
+        QTRY_VERIFY_WITH_TIMEOUT(!m_session->publications().get(id).has_value(), kLongWaitMs);
+        QVERIFY(m_session->files().removedRoots().isEmpty());
+        dialog.reload();
+        QVERIFY(!hasNote());
+    }
+
+    void removingAFolderAsksWhatToDo_data()
+    {
+        QTest::addColumn<QString>("button");
+        QTest::addColumn<int>("rowsAfter");
+        QTest::addColumn<qint64>("hiddenAfter");
+        QTest::newRow("cancel") << QString() << 1 << qint64(0);
+        QTest::newRow("keep") << QStringLiteral("removeKeep") << 0 << qint64(1);
+        QTest::newRow("delete") << QStringLiteral("removeForget") << 0 << qint64(0);
+    }
+
+    void removingAFolderAsksWhatToDo()
+    {
+        QFETCH(QString, button);
+        QFETCH(int, rowsAfter);
+        QFETCH(qint64, hiddenAfter);
+        const QString folder = copySamples({QStringLiteral("article.pdf")});
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+
+        // This box is meant to be here, so the watcher isn't what closes it.
+        m_boxWatcher->stop();
+        bool sawChoice = false;
+        QTimer::singleShot(100, this, [&] {
+            auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            if (!box)
+                return;
+            sawChoice = box->findChild<QPushButton *>(QStringLiteral("removeKeep"))
+                && box->findChild<QPushButton *>(QStringLiteral("removeForget"));
+            // Cancelling has to be what happens if nothing's chosen with care.
+            QVERIFY(box->defaultButton() == box->button(QMessageBox::Cancel));
+            QAbstractButton *choice = button.isEmpty() ? static_cast<QAbstractButton *>(box->button(QMessageBox::Cancel))
+                                                       : box->findChild<QPushButton *>(button);
+            choice->click();
+        });
+        m_window->removeRoot(m_session->files().roots().first().id);
+        m_boxWatcher->start(100);
+
+        QVERIFY(sawChoice);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), rowsAfter, kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->files().hiddenCount(), hiddenAfter, kLongWaitMs);
+    }
+
+    void aFolderWithNothingToLoseIsntAskedAbout()
+    {
+        const QString folder = copySamples({});
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->files().roots().size(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+
+        m_boxWatcher->stop();
+        bool offeredToDelete = true;
+        QTimer::singleShot(100, this, [&] {
+            auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            if (!box)
+                return;
+            offeredToDelete = box->findChild<QPushButton *>(QStringLiteral("removeForget")) != nullptr;
+            box->findChild<QPushButton *>(QStringLiteral("removeKeep"))->click();
+        });
+        m_window->removeRoot(m_session->files().roots().first().id);
+        m_boxWatcher->start(100);
+        QVERIFY(!offeredToDelete);
+        QVERIFY(m_session->files().roots().isEmpty());
     }
 
     void onlyOneCopyCanHaveALibraryOpen()

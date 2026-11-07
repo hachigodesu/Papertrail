@@ -1,0 +1,32 @@
+{
+ "ISBN:9780306406157": {
+  "title": "Principles of Sample Engineering",
+  "subtitle": "A Primer",
+  "authors": [
+   {
+    "name": "Ada Example",
+    "url": "https://openlibrary.org/authors/x"
+   }
+  ],
+  "publishers": [
+   {
+    "name": "Example Press"
+   }
+  ],
+  "publish_places": [
+   {
+    "name": "Exampleville"
+   }
+  ],
+  "publish_date": "March 2018",
+  "number_of_pages": 300,
+  "identifiers": {
+   "isbn_13": [
+    "9780306406157"
+   ],
+   "isbn_10": [
+    "0306406152"
+   ]
+  }
+ }
+}

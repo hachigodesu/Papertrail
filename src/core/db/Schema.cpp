@@ -380,6 +380,67 @@ FROM file
 WHERE format IN ('azw3', 'mobi') AND sha256 IS NOT NULL AND page_count IS NULL AND status = 'ok';
 )sql";
 
+// Online lookups: what's been fetched, so that a source isn't asked the same thing twice, and what's
+// waiting for the user to decide on.
+const char *const kMigration7 = R"sql(
+CREATE TABLE IF NOT EXISTS lookup_cache (
+    key         TEXT PRIMARY KEY,
+    status      INTEGER NOT NULL,
+    body        TEXT NOT NULL,
+    fetched_at  INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS lookup_candidate (
+    id              INTEGER PRIMARY KEY,
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    provider        TEXT NOT NULL,
+    matched_by      TEXT NOT NULL,
+    score           REAL NOT NULL,
+    record          TEXT NOT NULL,
+    created_at      INTEGER NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS lookup_candidate_publication ON lookup_candidate(publication_id);
+)sql";
+
+// Removing a folder used to delete its file records, which left its publications showing with no file,
+// and with nothing to reconnect them if the folder came back. Now a removed folder keeps its records,
+// and its publications are hidden until the folder returns or the user deletes them.
+//
+// hidden_publication is a table of its own because the library's queries can then rule these out from
+// their indexes alone, without reading each publication. A publication with no file isn't necessarily
+// hidden: one imported from another computer may be waiting for its file to turn up.
+//
+// Before this, only removing a folder could leave a publication with no file, so those are hidden too.
+const char *const kMigration8 = R"sql(
+CREATE TABLE IF NOT EXISTS removed_root (
+    root_id     INTEGER PRIMARY KEY REFERENCES library_root(id) ON DELETE CASCADE,
+    removed_at  INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS hidden_publication (
+    publication_id  INTEGER PRIMARY KEY REFERENCES publication(id) ON DELETE CASCADE
+) STRICT;
+
+INSERT OR IGNORE INTO hidden_publication (publication_id)
+SELECT p.id FROM publication p
+WHERE coalesce(p.parent_id, p.id) NOT IN (SELECT publication_id FROM publication_file);
+
+-- A hidden publication that gets a real file is back in the library, however that came about. A copy
+-- it had in a removed folder is no longer of use, and the new file takes over if that was the main one.
+CREATE TRIGGER IF NOT EXISTS publication_file_reveals AFTER INSERT ON publication_file
+BEGIN
+    DELETE FROM hidden_publication
+    WHERE publication_id = NEW.publication_id
+       OR publication_id IN (SELECT id FROM publication WHERE parent_id = NEW.publication_id);
+    DELETE FROM file
+    WHERE root_id IN (SELECT root_id FROM removed_root)
+      AND id IN (SELECT file_id FROM publication_file WHERE publication_id = NEW.publication_id);
+    UPDATE publication_file SET is_primary = 1
+    WHERE publication_id = NEW.publication_id AND file_id = NEW.file_id
+      AND NOT EXISTS (SELECT 1 FROM publication_file o WHERE o.publication_id = NEW.publication_id AND o.is_primary = 1);
+END;
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -391,6 +452,8 @@ const std::vector<Migration> &libraryMigrations()
         {4, kMigration4},
         {5, kMigration5},
         {6, kMigration6},
+        {7, kMigration7},
+        {8, kMigration8},
     };
     return migrations;
 }

@@ -4,10 +4,13 @@
 #include "core/query/PublicationFilter.h"
 #include "core/repo/FileRepository.h"
 #include "import/ImportService.h"
+#include "metadata/LookupEngine.h"
 #include "ui/QueryThreads.h"
 
 #include <QHash>
 #include <QMainWindow>
+#include <QMessageBox>
+#include <QPointer>
 
 #include <functional>
 #include <optional>
@@ -40,7 +43,9 @@ class ImportThread;
 class LibraryFoldersDialog;
 class LibrarySession;
 class PublicationListModel;
+class LookupThread;
 class ReaderTab;
+class ReviewTab;
 
 // The library: tabs, search, filters, the grid or list of publications, and their details.
 class MainWindow : public QMainWindow {
@@ -53,8 +58,23 @@ public:
     enum class ViewMode { Grid, List };
 
     // Adds a folder to the library and imports it. A folder inside one already in the library
-    // just scans that one again.
-    void addFolder(const QString &path);
+    // just scans it again. `lookupMode` overrides how new publications get looked up for this import.
+    void addFolder(const QString &path, const std::optional<QString> &lookupMode = std::nullopt);
+
+    // What online lookups are set to: "offline" until someone has chosen otherwise.
+    QString lookupMode();
+
+    // Chooses how lookups work from now on. Going offline also drops anything still waiting.
+    void setLookupMode(const QString &mode, const QString &email);
+
+    // Queues lookups for these, and starts on them. Does nothing while offline.
+    void lookUp(const QList<qint64> &ids);
+
+    void showReviewTab();
+    ReviewTab *reviewTab() const { return m_reviewTab; }
+    LookupThread *lookupThread() const { return m_lookup; }
+    QPushButton *reviewButton() const { return m_reviewButton; }
+    QMessageBox *reviewOffer() const { return m_reviewOffer; }
 
     // Stops importing until something asks for it again by hand, or until the next start.
     void stopImport();
@@ -74,6 +94,14 @@ public:
 
     // Opens a publication's main file in a tab of its own, or goes to its tab if it already has one.
     ReaderTab *openPublication(qint64 id);
+
+    // Asks what to do with the folder's publications, then does it.
+    void removeRoot(qint64 rootId);
+
+    // What each choice for removing a folder does, once it's been made.
+    void removeRootKeepingDetails(qint64 rootId);
+    void removeRootAndDetails(qint64 rootId);
+    void forgetHiddenPublications();
 
     // The same, for one particular file. Each format of a publication can have a tab of its own.
     ReaderTab *openPublicationFile(qint64 id, qint64 fileId);
@@ -144,7 +172,11 @@ private:
     void chooseFolderToAdd();
     void rescanAll();
     void changeRootLocation(qint64 rootId);
-    void removeRoot(qint64 rootId);
+    void confirmForgetHidden();
+    void afterFoldersChanged();
+    void letGoOfHidden();
+    void offerReviewIfDue();
+    void deletePublications(const QList<qint64> &ids);
     void askForBulkTag();
     void editPublication(qint64 id);
     void openOrChooseFormat(qint64 id);
@@ -152,6 +184,13 @@ private:
     void showPublicationInFolder(qint64 id);
     std::optional<QString> firstFilePath(qint64 publicationId);
     void showAbout();
+    void showLookupSettings();
+    void askAndLookUpLibrary();
+    void askAndLookUpSelected();
+    bool makeSureLookupModeIsChosen();
+    void updateReviewButton();
+    void onLookupProgress(qint64 done, qint64 remaining, const QString &source);
+    void onLookupsFinished(const papertrail::metadata::LookupSummary &summary);
 
     void onImportBusyChanged(bool busy);
     void onImportProgress(qint64 done, qint64 remaining, const QString &file);
@@ -162,6 +201,14 @@ private:
 
     LibrarySession &m_session;
     ImportThread *m_import = nullptr;
+    LookupThread *m_lookup = nullptr;
+    ReviewTab *m_reviewTab = nullptr;
+    QPointer<QMessageBox> m_reviewOffer;
+    qint64 m_reviewCountSeen = 0; // Offers are only for what's been added since the last one.
+    QPushButton *m_reviewButton = nullptr;
+    QLabel *m_lookupLabel = nullptr;
+    QPushButton *m_lookupStop = nullptr;
+    std::optional<QString> m_lookupOverride;
     BulkChanges *m_bulk = nullptr;
     FolderWatcher *m_watcher = nullptr;
     CoverCache *m_covers = nullptr;

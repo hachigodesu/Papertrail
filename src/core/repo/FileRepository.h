@@ -38,7 +38,7 @@ public:
     explicit FileRepository(Database &db) : m_db(db) {}
 
     qint64 addRoot(const QString &name, const QString &path);
-    QList<LibraryRoot> roots();
+    QList<LibraryRoot> roots(); // The ones being indexed, so not any that have been removed.
     QHash<qint64, qint64> fileCountsByRoot();
 
     // Points a root at a new location. Its files keep their relative paths and links.
@@ -48,7 +48,27 @@ public:
     // Files with another problem keep that status.
     void setRootOnline(qint64 rootId, bool online);
 
-    // Removes a root and its file records. Publications stay, with no file linked.
+    // What removing a root would do to the library: publications that would leave it, and those that
+    // stay because they also have a file in another folder.
+    struct RemovalImpact {
+        qint64 leaving = 0;
+        qint64 staying = 0;
+    };
+    RemovalImpact removalImpact(qint64 rootId);
+
+    // Stops indexing a root, and hides what's only there. Its records are kept, so adding the folder
+    // again brings everything back. Anything also found elsewhere just loses this location.
+    void hideRoot(qint64 rootId);
+    void restoreRoot(qint64 rootId);
+    QList<LibraryRoot> removedRoots();
+
+    qint64 hiddenCount();
+    QList<qint64> hiddenPublications();
+    // Hidden publications from this root, along with any articles inside them. A hidden publication's
+    // files are all in one root, because removing a folder drops its copy of anything found elsewhere.
+    QList<qint64> hiddenIn(qint64 rootId);
+
+    // Forgets a root and its file records for good. Publications themselves stay.
     void removeRoot(qint64 rootId);
 
     // Inserts a file, or updates the existing record for the same root and relative path.

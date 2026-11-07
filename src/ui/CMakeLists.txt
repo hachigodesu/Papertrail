@@ -21,10 +21,14 @@ add_library(papertrail_ui STATIC
     LibraryFoldersDialog.h
     LibrarySession.cpp
     LibrarySession.h
+    LookupThread.cpp
+    LookupThread.h
     MainWindow.cpp
     MainWindow.h
     MetadataEditor.cpp
     MetadataEditor.h
+    OnlineLookupDialog.cpp
+    OnlineLookupDialog.h
     PageView.cpp
     PageView.h
     PublicationListModel.cpp
@@ -32,7 +36,9 @@ add_library(papertrail_ui STATIC
     QueryThreads.cpp
     QueryThreads.h
     ReaderTab.cpp
-    ReaderTab.h)
+    ReaderTab.h
+    ReviewTab.cpp
+    ReviewTab.h)
 
 target_include_directories(papertrail_ui PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(papertrail_ui PUBLIC papertrail_core papertrail_import Qt6::Widgets)
+target_link_libraries(papertrail_ui PUBLIC papertrail_core papertrail_import papertrail_metadata Qt6::Widgets)

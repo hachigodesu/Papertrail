@@ -69,6 +69,12 @@ void ImportThread::resumeQueue()
     m_wake.wakeAll();
 }
 
+void ImportThread::setLookupMode(const QString &mode)
+{
+    QMutexLocker lock(&m_lookupMutex);
+    m_lookupMode = mode;
+}
+
 void ImportThread::requestStop()
 {
     QMutexLocker lock(&m_mutex);
@@ -89,6 +95,10 @@ void ImportThread::run()
         options.cacheDirectory = m_paths.cacheDirectory;
         options.settleMs = m_paths.settleMs;
         options.cancelled = [this] { return m_stop.load(); };
+        options.lookupMode = [this] {
+            QMutexLocker lock(&m_lookupMutex);
+            return m_lookupMode;
+        };
         service = std::make_unique<ImportService>(*db, options);
         files = std::make_unique<FileRepository>(*db);
     } catch (const std::exception &error) {

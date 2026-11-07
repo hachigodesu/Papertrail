@@ -6,10 +6,14 @@
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/TagRepository.h"
 #include "core/settings/SettingsStore.h"
+#include "metadata/Providers.h"
+#include "metadata/Transport.h"
 
 #include <QLockFile>
 #include <QString>
 
+#include <functional>
+#include <functional>
 #include <memory>
 
 namespace papertrail::ui {
@@ -21,6 +25,10 @@ struct LibraryPaths {
 
     // Files changed more recently than this are left for a later scan. See ImportOptions.
     qint64 settleMs = 5000;
+
+    // Where online sources are, and what reaches them. Only tests change these.
+    metadata::ProviderUrls providerUrls;
+    std::function<std::unique_ptr<metadata::Transport>()> transportFactory;
 
     // The user's own library, using the standard folders for this platform.
     static LibraryPaths standard();

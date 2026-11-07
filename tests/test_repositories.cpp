@@ -1,6 +1,7 @@
 #include "core/db/Database.h"
 #include "core/db/Schema.h"
 #include "core/model/Identifiers.h"
+#include "core/query/LibraryQuery.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationMerge.h"
@@ -483,6 +484,221 @@ private slots:
         QCOMPARE(m_files->filesFor(id).size(), 0);
     }
 
+    void removingAFolderHidesItsPublicationsFromEveryQuery()
+    {
+        const qint64 gone = m_files->addRoot(QStringLiteral("Gone"), QStringLiteral("/gone"));
+        const qint64 kept = m_files->addRoot(QStringLiteral("Kept"), QStringLiteral("/kept"));
+        const qint64 hidden = publicationIn(gone, QStringLiteral("a.pdf"), QStringLiteral("Hiddenword Study"), 1999);
+        const qint64 shown = publicationIn(kept, QStringLiteral("b.pdf"), QStringLiteral("Other Study"), 2005);
+        const qint64 tag = m_tags->ensurePath(QStringLiteral("Shared"));
+        m_tags->assign(hidden, tag);
+        m_tags->assign(shown, tag);
+
+        LibraryQuery query(*m_db);
+        QCOMPARE(query.count({}), qint64(2));
+        m_files->hideRoot(gone);
+
+        QCOMPARE(query.count({}), qint64(1));
+        QCOMPARE(query.ids({}, {}), QList<qint64>{shown});
+        QCOMPARE(query.page({}, {}, 0, 10).size(), 1);
+        PublicationFilter search;
+        search.searchText = QStringLiteral("Hiddenword");
+        QCOMPARE(query.count(search), qint64(0));
+        QCOMPARE(query.page(search, {SortField::Relevance, true}, 0, 10).size(), 0);
+        QCOMPARE(query.yearRange({})->first, 2005);
+        QCOMPARE(query.flagCounts({}).noFile, qint64(0));
+        QCOMPARE(query.facet({}, Facet::Author).size(), 1);
+        QCOMPARE(query.facet({}, Facet::Format).first().count, qint64(1));
+        QCOMPARE(query.tagCounts({}).first().count, qint64(1));
+
+        // None of it has been lost.
+        QVERIFY(m_publications->get(hidden).has_value());
+        QCOMPARE(m_tags->tagsFor(hidden).size(), 1);
+        QCOMPARE(m_files->filesFor(hidden).size(), 1);
+        QCOMPARE(m_files->hiddenCount(), qint64(1));
+    }
+
+    void aRemovedFolderIsNoLongerOneOfTheLibrarysFolders()
+    {
+        const qint64 gone = m_files->addRoot(QStringLiteral("Gone"), QStringLiteral("/gone"));
+        m_files->addRoot(QStringLiteral("Kept"), QStringLiteral("/kept"));
+        m_files->hideRoot(gone);
+        QCOMPARE(m_files->roots().size(), 1);
+        QCOMPARE(m_files->roots().first().name, QStringLiteral("Kept"));
+        QCOMPARE(m_files->removedRoots().size(), 1);
+        QCOMPARE(m_files->removedRoots().first().id, gone);
+        QVERIFY(m_files->root(gone).has_value());
+
+        m_files->restoreRoot(gone);
+        QCOMPARE(m_files->roots().size(), 2);
+        QVERIFY(m_files->removedRoots().isEmpty());
+    }
+
+    void restoringAFolderBringsItsPublicationsBack()
+    {
+        const qint64 root = m_files->addRoot(QStringLiteral("R"), QStringLiteral("/r"));
+        const qint64 id = publicationIn(root, QStringLiteral("a.pdf"), QStringLiteral("Some Study"), 2000);
+        m_tags->assign(id, m_tags->ensurePath(QStringLiteral("Mine")));
+        m_files->hideRoot(root);
+        m_files->restoreRoot(root);
+
+        LibraryQuery query(*m_db);
+        QCOMPARE(query.ids({}, {}), QList<qint64>{id});
+        QCOMPARE(m_tags->tagsFor(id).size(), 1);
+        QCOMPARE(m_files->hiddenCount(), qint64(0));
+    }
+
+    void aPublicationAlsoInAnotherFolderStays()
+    {
+        const qint64 gone = m_files->addRoot(QStringLiteral("Gone"), QStringLiteral("/gone"));
+        const qint64 kept = m_files->addRoot(QStringLiteral("Kept"), QStringLiteral("/kept"));
+        const qint64 id = publicationIn(gone, QStringLiteral("a.pdf"), QStringLiteral("Some Study"), 2000);
+        const qint64 other = publicationIn(gone, QStringLiteral("b.pdf"), QStringLiteral("Only There"), 2001);
+        const qint64 otherCopy = fileIn(kept, QStringLiteral("a-copy.pdf"));
+        m_files->link(id, otherCopy, false);
+
+        const FileRepository::RemovalImpact impact = m_files->removalImpact(gone);
+        QCOMPARE(impact.leaving, qint64(1));
+        QCOMPARE(impact.staying, qint64(1));
+
+        m_files->hideRoot(gone);
+        LibraryQuery query(*m_db);
+        QCOMPARE(query.ids({}, {}), QList<qint64>{id});
+        QCOMPARE(m_files->hiddenPublications(), QList<qint64>{other});
+
+        // It only lists the location it can still be read from, and that's now the main one.
+        const QList<FileRecord> files = m_files->filesFor(id);
+        QCOMPARE(files.size(), 1);
+        QCOMPARE(files.first().id, otherCopy);
+        auto primary = m_db->prepare("SELECT is_primary FROM publication_file WHERE publication_id = ?");
+        primary->bind(1, id);
+        QVERIFY(primary->step());
+        QCOMPARE(primary->intAt(0), 1);
+    }
+
+    void aPublicationWithNoFileIsntNecessarilyHidden()
+    {
+        // One imported from another computer may be waiting for its file to turn up.
+        Publication p;
+        p.title = QStringLiteral("Waiting For A File");
+        const qint64 id = m_publications->create(p);
+        const qint64 root = m_files->addRoot(QStringLiteral("R"), QStringLiteral("/r"));
+        publicationIn(root, QStringLiteral("a.pdf"), QStringLiteral("Some Study"), 2000);
+        m_files->hideRoot(root);
+
+        LibraryQuery query(*m_db);
+        QCOMPARE(query.ids({}, {}), QList<qint64>{id});
+        QCOMPARE(query.flagCounts({}).noFile, qint64(1));
+    }
+
+    void gettingARealFileBringsAHiddenPublicationBack()
+    {
+        const qint64 gone = m_files->addRoot(QStringLiteral("Gone"), QStringLiteral("/gone"));
+        const qint64 kept = m_files->addRoot(QStringLiteral("Kept"), QStringLiteral("/kept"));
+        const qint64 id = publicationIn(gone, QStringLiteral("a.pdf"), QStringLiteral("Some Study"), 2000);
+        m_files->hideRoot(gone);
+
+        const qint64 found = fileIn(kept, QStringLiteral("elsewhere.pdf"));
+        m_files->link(id, found, false);
+
+        LibraryQuery query(*m_db);
+        QCOMPARE(query.ids({}, {}), QList<qint64>{id});
+        // The old location has gone, so nothing tries to open it, and the new one is the main one.
+        const QList<FileRecord> files = m_files->filesFor(id);
+        QCOMPARE(files.size(), 1);
+        QCOMPARE(files.first().id, found);
+        auto primary = m_db->prepare("SELECT is_primary FROM publication_file WHERE publication_id = ?");
+        primary->bind(1, id);
+        QVERIFY(primary->step());
+        QCOMPARE(primary->intAt(0), 1);
+    }
+
+    void articlesFollowTheirVolume()
+    {
+        const qint64 root = m_files->addRoot(QStringLiteral("R"), QStringLiteral("/r"));
+        const qint64 volume = publicationIn(root, QStringLiteral("v.pdf"), QStringLiteral("A Volume"), 2000);
+        Publication article;
+        article.title = QStringLiteral("An Article");
+        article.parentId = volume;
+        const qint64 articleId = m_publications->create(article);
+
+        LibraryQuery query(*m_db);
+        QCOMPARE(query.count({}), qint64(2));
+        m_files->hideRoot(root);
+        QCOMPARE(query.count({}), qint64(0));
+        QVERIFY(m_files->hiddenIn(root).contains(articleId));
+
+        m_files->restoreRoot(root);
+        QCOMPARE(query.count({}), qint64(2));
+
+        m_files->hideRoot(root);
+        const qint64 kept = m_files->addRoot(QStringLiteral("Kept"), QStringLiteral("/kept"));
+        m_files->link(volume, fileIn(kept, QStringLiteral("v2.pdf")), false);
+        QCOMPARE(query.count({}), qint64(2));
+    }
+
+    void waitingWorkForARemovedFolderIsDropped()
+    {
+        const qint64 gone = m_files->addRoot(QStringLiteral("Gone"), QStringLiteral("/gone"));
+        const qint64 kept = m_files->addRoot(QStringLiteral("Kept"), QStringLiteral("/kept"));
+        const qint64 goneFile = fileIn(gone, QStringLiteral("waiting.pdf"));
+        const qint64 keptFile = fileIn(kept, QStringLiteral("waiting.pdf"));
+        const qint64 hidden = publicationIn(gone, QStringLiteral("a.pdf"), QStringLiteral("Some Study"), 2000);
+        const qint64 shown = publicationIn(kept, QStringLiteral("b.pdf"), QStringLiteral("Other Study"), 2000);
+        addJob("fingerprint", QStringLiteral("{\"file\":%1}").arg(goneFile));
+        addJob("fingerprint", QStringLiteral("{\"file\":%1}").arg(keptFile));
+        addJob("lookup", QStringLiteral("{\"publication\":%1}").arg(hidden));
+        addJob("lookup", QStringLiteral("{\"publication\":%1}").arg(shown));
+
+        m_files->hideRoot(gone);
+
+        auto jobs = m_db->prepare("SELECT payload FROM job ORDER BY id");
+        QStringList left;
+        while (jobs->step())
+            left << jobs->textAt(0);
+        QCOMPARE(left, QStringList({QStringLiteral("{\"file\":%1}").arg(keptFile), QStringLiteral("{\"publication\":%1}").arg(shown)}));
+
+        // A file that never became a publication has nothing worth keeping.
+        QVERIFY(!m_files->get(goneFile).has_value());
+    }
+
+    void aHiddenPublicationBelongsToTheLastFolderItWasIn()
+    {
+        const qint64 first = m_files->addRoot(QStringLiteral("First"), QStringLiteral("/first"));
+        const qint64 second = m_files->addRoot(QStringLiteral("Second"), QStringLiteral("/second"));
+        const qint64 onlyFirst = publicationIn(first, QStringLiteral("a.pdf"), QStringLiteral("Only First"), 2000);
+        const qint64 onlySecond = publicationIn(second, QStringLiteral("c.pdf"), QStringLiteral("Only Second"), 2000);
+        const qint64 both = publicationIn(first, QStringLiteral("b.pdf"), QStringLiteral("In Both"), 2000);
+        m_files->link(both, fileIn(second, QStringLiteral("b.pdf")), false);
+
+        m_files->hideRoot(second); // It's still in the first folder, so it stays, and loses this copy.
+        QCOMPARE(m_files->hiddenPublications(), QList<qint64>{onlySecond});
+        m_files->hideRoot(first);
+        QCOMPARE(m_files->hiddenCount(), qint64(3));
+
+        QList<qint64> inFirst = m_files->hiddenIn(first);
+        std::sort(inFirst.begin(), inFirst.end());
+        QCOMPARE(inFirst, QList<qint64>({onlyFirst, both}));
+        QCOMPARE(m_files->hiddenIn(second), QList<qint64>{onlySecond});
+    }
+
+    void publicationsLeftWithNoFileByOlderVersionsAreHidden()
+    {
+        const qint64 root = m_files->addRoot(QStringLiteral("R"), QStringLiteral("/r"));
+        const qint64 fine = publicationIn(root, QStringLiteral("a.pdf"), QStringLiteral("Some Study"), 2000);
+        Publication left;
+        left.title = QStringLiteral("Left Behind");
+        const qint64 orphan = m_publications->create(left);
+
+        m_db->setUserVersion(7);
+        migrateLibrary(*m_db);
+
+        LibraryQuery query(*m_db);
+        QCOMPARE(query.ids({}, {}), QList<qint64>{fine});
+        QCOMPARE(m_files->hiddenPublications(), QList<qint64>{orphan});
+        QVERIFY(m_publications->get(orphan).has_value());
+    }
+
     void oneFileIsPrimary()
     {
         const qint64 root = m_files->addRoot(QStringLiteral("R"), QStringLiteral("/r"));
@@ -652,6 +868,34 @@ private slots:
     }
 
 private:
+    qint64 fileIn(qint64 root, const QString &name)
+    {
+        FileRecord file;
+        file.rootId = root;
+        file.relativePath = name;
+        file.format = QStringLiteral("pdf");
+        return m_files->upsert(file);
+    }
+
+    qint64 publicationIn(qint64 root, const QString &fileName, const QString &title, int year)
+    {
+        Publication p;
+        p.title = title;
+        p.year = year;
+        p.authors = {{QStringLiteral("Author ") + title.left(1), QString()}};
+        const qint64 id = m_publications->create(p);
+        m_files->link(id, fileIn(root, fileName), true);
+        return id;
+    }
+
+    void addJob(const char *kind, const QString &payload)
+    {
+        auto insert = m_db->prepare("INSERT INTO job (kind, payload, created_at, updated_at) VALUES (?, ?, 0, 0)");
+        insert->bind(1, kind);
+        insert->bind(2, payload);
+        insert->step();
+    }
+
     int count(const char *sql)
     {
         auto select = m_db->prepare(sql);

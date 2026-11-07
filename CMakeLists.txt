@@ -11,7 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(GNUInstallDirs)
 
-find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets Test)
+find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets Network Test)
 
 # Qt 6.12 is the last release that supports Windows 10, so Windows builds must
 # stay on it. Linux builds may use newer versions (Arch moves ahead of 6.12).
@@ -37,6 +37,7 @@ include(Mobi)
 add_subdirectory(src)
 add_subdirectory(tools/gen_library)
 add_subdirectory(tools/import_cli)
+add_subdirectory(tools/lookup_cli)
 add_subdirectory(tools/ui_preview)
 
 if(PAPERTRAIL_BUILD_FORMAT_PROBE)

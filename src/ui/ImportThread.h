@@ -31,6 +31,9 @@ public:
     void resumeQueue();
 
     void requestStop();
+
+    // How new publications get looked up online. Empty means they aren't, and nothing's sent anywhere.
+    void setLookupMode(const QString &mode);
     bool isBusy() const { return m_busy; }
 
 signals:
@@ -49,6 +52,8 @@ protected:
 
 private:
     LibraryPaths m_paths;
+    QMutex m_lookupMutex;
+    QString m_lookupMode;
     QMutex m_mutex;
     QWaitCondition m_wake;
     bool m_shuttingDown = false;

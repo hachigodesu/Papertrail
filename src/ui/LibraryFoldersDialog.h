@@ -27,6 +27,7 @@ signals:
     void rescanRequested(qint64 rootId);
     void changeLocationRequested(qint64 rootId);
     void removeRequested(qint64 rootId);
+    void forgetRequested();
 
 private:
     qint64 selectedRoot() const;
@@ -39,6 +40,8 @@ private:
     QPushButton *m_rescan = nullptr;
     QPushButton *m_change = nullptr;
     QPushButton *m_remove = nullptr;
+    QLabel *m_hiddenNote = nullptr;
+    QPushButton *m_forget = nullptr;
 };
 
 } // namespace papertrail::ui

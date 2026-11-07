@@ -1,0 +1,54 @@
+{
+ "id": "https://openalex.org/W1",
+ "doi": "https://doi.org/10.1000/example.2020.7",
+ "title": "Fatigue of Steel Beams",
+ "publication_year": 2020,
+ "publication_date": "2020-09-16",
+ "type": "article",
+ "language": "en",
+ "ids": {
+  "pmid": "https://pubmed.ncbi.nlm.nih.gov/32939066"
+ },
+ "biblio": {
+  "volume": "42",
+  "issue": "3",
+  "first_page": "101",
+  "last_page": "120"
+ },
+ "primary_location": {
+  "source": {
+   "display_name": "Journal of Made-up Results",
+   "issn_l": "1234-5679",
+   "type": "journal"
+  }
+ },
+ "authorships": [
+  {
+   "author": {
+    "display_name": "Ada Example"
+   }
+  },
+  {
+   "author": {
+    "display_name": "Omar Sample"
+   }
+  }
+ ],
+ "abstract_inverted_index": {
+  "A": [
+   0
+  ],
+  "made-up": [
+   1
+  ],
+  "abstract": [
+   2
+  ],
+  "about": [
+   3
+  ],
+  "steel.": [
+   4
+  ]
+ }
+}

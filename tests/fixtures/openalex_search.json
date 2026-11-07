@@ -1,0 +1,20 @@
+{
+ "meta": {
+  "count": 1
+ },
+ "results": [
+  {
+   "doi": "https://doi.org/10.1000/from.openalex",
+   "title": "An Unusual Report on Example Bridges",
+   "publication_year": 2014,
+   "type": "report",
+   "authorships": [
+    {
+     "author": {
+      "display_name": "Wen Li"
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -88,7 +88,18 @@ QHash<qint64, qint64> FileRepository::fileCountsByRoot()
 QList<LibraryRoot> FileRepository::roots()
 {
     QList<LibraryRoot> roots;
-    auto select = m_db.prepare("SELECT id, uuid, name, path FROM library_root ORDER BY name");
+    auto select = m_db.prepare(
+        "SELECT id, uuid, name, path FROM library_root WHERE id NOT IN (SELECT root_id FROM removed_root) ORDER BY name");
+    while (select->step())
+        roots << LibraryRoot{select->int64At(0), select->textAt(1), select->textAt(2), select->textAt(3)};
+    return roots;
+}
+
+QList<LibraryRoot> FileRepository::removedRoots()
+{
+    QList<LibraryRoot> roots;
+    auto select = m_db.prepare(
+        "SELECT id, uuid, name, path FROM library_root WHERE id IN (SELECT root_id FROM removed_root) ORDER BY name");
     while (select->step())
         roots << LibraryRoot{select->int64At(0), select->textAt(1), select->textAt(2), select->textAt(3)};
     return roots;
@@ -109,6 +120,117 @@ void FileRepository::setRootOnline(qint64 rootId, bool online)
     update->bind(2, rootId);
     update->bind(3, online ? QStringLiteral("offline") : QStringLiteral("ok"));
     update->step();
+}
+
+FileRepository::RemovalImpact FileRepository::removalImpact(qint64 rootId)
+{
+    auto select = m_db.prepare(
+        "WITH here AS (SELECT DISTINCT pf.publication_id AS id FROM publication_file pf "
+        "              JOIN file f ON f.id = pf.file_id WHERE f.root_id = ?1) "
+        "SELECT count(*), coalesce(sum(EXISTS (SELECT 1 FROM publication_file o JOIN file g ON g.id = o.file_id "
+        "    WHERE o.publication_id = here.id AND g.root_id <> ?1 "
+        "      AND g.root_id NOT IN (SELECT root_id FROM removed_root))), 0) "
+        "FROM here");
+    select->bind(1, rootId);
+    select->step();
+    const qint64 all = select->int64At(0);
+    const qint64 staying = select->int64At(1);
+    return {all - staying, staying};
+}
+
+void FileRepository::hideRoot(qint64 rootId)
+{
+    Transaction transaction(m_db);
+
+    // Work still waiting on these files would otherwise bring the folder back into the library.
+    auto jobs = m_db.prepare(
+        "DELETE FROM job WHERE CASE WHEN json_valid(payload) THEN json_extract(payload, '$.file') END "
+        "IN (SELECT id FROM file WHERE root_id = ?)");
+    jobs->bind(1, rootId);
+    jobs->step();
+
+    // A file that never became a publication has nothing to keep, and is simply found again next time.
+    auto unused = m_db.prepare(
+        "DELETE FROM file WHERE root_id = ? AND id NOT IN (SELECT file_id FROM publication_file)");
+    unused->bind(1, rootId);
+    unused->step();
+
+    auto mark = m_db.prepare("INSERT OR REPLACE INTO removed_root (root_id, removed_at) VALUES (?, ?)");
+    mark->bind(1, rootId);
+    mark->bind(2, QDateTime::currentMSecsSinceEpoch());
+    mark->step();
+
+    // Publications that are still in the library through another folder just lose this location.
+    auto elsewhere = m_db.prepare(
+        "DELETE FROM file WHERE root_id = ?1 AND id IN ("
+        "  SELECT pf.file_id FROM publication_file pf WHERE EXISTS ("
+        "    SELECT 1 FROM publication_file o JOIN file g ON g.id = o.file_id "
+        "    WHERE o.publication_id = pf.publication_id AND g.root_id NOT IN (SELECT root_id FROM removed_root)))");
+    elsewhere->bind(1, rootId);
+    elsewhere->step();
+    m_db.exec("UPDATE publication_file SET is_primary = 1 WHERE (publication_id, file_id) IN ("
+              "SELECT publication_id, min(file_id) FROM publication_file "
+              "GROUP BY publication_id HAVING max(is_primary) = 0)");
+
+    auto hide = m_db.prepare(
+        "WITH here AS (SELECT DISTINCT pf.publication_id AS id FROM publication_file pf "
+        "              JOIN file f ON f.id = pf.file_id WHERE f.root_id = ?) "
+        "INSERT OR IGNORE INTO hidden_publication (publication_id) "
+        "SELECT id FROM here UNION SELECT c.id FROM publication c JOIN here ON c.parent_id = here.id");
+    hide->bind(1, rootId);
+    hide->step();
+
+    // Nothing that's been hidden should be sent to anyone.
+    m_db.exec("DELETE FROM job WHERE kind = 'lookup' AND json_extract(payload, '$.publication') "
+              "IN (SELECT publication_id FROM hidden_publication)");
+    transaction.commit();
+}
+
+void FileRepository::restoreRoot(qint64 rootId)
+{
+    Transaction transaction(m_db);
+    auto unmark = m_db.prepare("DELETE FROM removed_root WHERE root_id = ?");
+    unmark->bind(1, rootId);
+    unmark->step();
+
+    auto reveal = m_db.prepare(
+        "WITH here AS (SELECT DISTINCT pf.publication_id AS id FROM publication_file pf "
+        "              JOIN file f ON f.id = pf.file_id WHERE f.root_id = ?) "
+        "DELETE FROM hidden_publication WHERE publication_id IN ("
+        "SELECT id FROM here UNION SELECT c.id FROM publication c JOIN here ON c.parent_id = here.id)");
+    reveal->bind(1, rootId);
+    reveal->step();
+    transaction.commit();
+}
+
+qint64 FileRepository::hiddenCount()
+{
+    auto select = m_db.prepare("SELECT count(*) FROM hidden_publication");
+    select->step();
+    return select->int64At(0);
+}
+
+QList<qint64> FileRepository::hiddenPublications()
+{
+    QList<qint64> ids;
+    auto select = m_db.prepare("SELECT publication_id FROM hidden_publication");
+    while (select->step())
+        ids << select->int64At(0);
+    return ids;
+}
+
+QList<qint64> FileRepository::hiddenIn(qint64 rootId)
+{
+    auto select = m_db.prepare(
+        "WITH here AS (SELECT DISTINCT pf.publication_id AS id FROM publication_file pf "
+        "              JOIN file f ON f.id = pf.file_id WHERE f.root_id = ? "
+        "                AND pf.publication_id IN (SELECT publication_id FROM hidden_publication)) "
+        "SELECT id FROM here UNION SELECT c.id FROM publication c JOIN here ON c.parent_id = here.id");
+    select->bind(1, rootId);
+    QList<qint64> ids;
+    while (select->step())
+        ids << select->int64At(0);
+    return ids;
 }
 
 void FileRepository::removeRoot(qint64 rootId)

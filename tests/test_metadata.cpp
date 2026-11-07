@@ -1,0 +1,1396 @@
+// Tests of online lookups. Nothing here leaves this computer: answers are recorded, in the shapes the
+// real sources use with made-up contents, and the one real network path talks to a server in this test.
+
+#include "core/db/Database.h"
+#include "core/db/Schema.h"
+#include "core/model/PublicationFields.h"
+#include "core/repo/FileRepository.h"
+#include "core/repo/LookupRepository.h"
+#include "import/ImportService.h"
+#include "metadata/LookupEngine.h"
+#include "metadata/Matching.h"
+#include "metadata/Providers.h"
+#include "metadata/Transport.h"
+#include "ui/DetailsPanel.h"
+#include "ui/ImportThread.h"
+#include "ui/LibrarySession.h"
+#include "ui/LookupThread.h"
+#include "ui/MainWindow.h"
+#include "ui/OnlineLookupDialog.h"
+#include "ui/ReviewTab.h"
+
+#include <QApplication>
+#include <QCheckBox>
+#include <QFile>
+#include <QJsonDocument>
+#include <QLabel>
+#include <QListWidget>
+#include <QMessageBox>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QPushButton>
+#include <QSignalSpy>
+#include <QTabWidget>
+#include <QTableWidget>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QTemporaryDir>
+#include <QTimer>
+#include <QtTest>
+
+#include <atomic>
+#include <memory>
+
+using namespace papertrail;
+using namespace papertrail::core;
+using namespace papertrail::metadata;
+using namespace papertrail::ui;
+
+namespace {
+
+constexpr int kWaitMs = 30000;
+
+QByteArray fixture(const char *name)
+{
+    QFile file(QDir(QStringLiteral(PAPERTRAIL_TEST_FIXTURES)).filePath(QString::fromLatin1(name)));
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+QString sample(const QString &name)
+{
+    return QDir(QStringLiteral(PAPERTRAIL_TEST_SAMPLES)).filePath(name);
+}
+
+// Answers from a list, and keeps a record of everything it was asked. It can be shared across threads.
+struct FakeState {
+    QMutex mutex;
+    QList<QPair<QString, TransportReply>> answers; // First whose text is in the URL.
+    QStringList asked;
+    QList<qint64> times;
+    QList<TransportReply> oneOff; // Used first, then the list above.
+
+    void answer(const QString &urlPart, const QByteArray &body, int status = 200)
+    {
+        TransportReply reply;
+        reply.status = status;
+        reply.body = body;
+        answers << qMakePair(urlPart, reply);
+    }
+
+    int count()
+    {
+        QMutexLocker lock(&mutex);
+        return int(asked.size());
+    }
+};
+
+class FakeTransport : public Transport {
+public:
+    explicit FakeTransport(std::shared_ptr<FakeState> state) : m_state(std::move(state)) {}
+
+    void get(const QUrl &url, const Callback &callback) override
+    {
+        TransportReply reply;
+        reply.status = 404;
+        {
+            QMutexLocker lock(&m_state->mutex);
+            const QString text = url.toString(QUrl::FullyEncoded);
+            m_state->asked << text;
+            m_state->times << QDateTime::currentMSecsSinceEpoch();
+            if (!m_state->oneOff.isEmpty()) {
+                reply = m_state->oneOff.takeFirst();
+            } else {
+                for (const auto &answer : m_state->answers) {
+                    if (text.contains(answer.first)) {
+                        reply = answer.second;
+                        break;
+                    }
+                }
+            }
+        }
+        QTimer::singleShot(0, [callback, reply] { callback(reply); });
+    }
+
+private:
+    std::shared_ptr<FakeState> m_state;
+};
+
+// A real HTTP server on this computer, for the one test of the real network path.
+class LocalServer : public QTcpServer {
+public:
+    QByteArray response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    std::atomic_int connections = 0;
+    QStringList requests;
+
+protected:
+    void incomingConnection(qintptr handle) override
+    {
+        ++connections;
+        auto *socket = new QTcpSocket(this);
+        socket->setSocketDescriptor(handle);
+        connect(socket, &QTcpSocket::readyRead, socket, [this, socket] {
+            requests << QString::fromLatin1(socket->readAll());
+            socket->write(response);
+            socket->disconnectFromHost();
+        });
+        connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+    }
+};
+
+} // namespace
+
+class MetadataTest : public QObject {
+    Q_OBJECT
+
+private slots:
+    void init()
+    {
+        m_dir = std::make_unique<QTemporaryDir>();
+        m_db = std::make_unique<Database>(m_dir->filePath(QStringLiteral("library.db")));
+        migrateLibrary(*m_db);
+        m_publications = std::make_unique<PublicationRepository>(*m_db);
+        m_lookups = std::make_unique<LookupRepository>(*m_db);
+        m_fake = std::make_shared<FakeState>();
+        m_transport = std::make_unique<FakeTransport>(m_fake);
+        m_engine = std::make_unique<LookupEngine>(*m_db, *m_transport);
+        m_engine->setRetryDelays(10, 20);
+
+        m_unexpectedBoxes.clear();
+        m_boxWatcher = std::make_unique<QTimer>();
+        connect(m_boxWatcher.get(), &QTimer::timeout, this, [this] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                m_unexpectedBoxes << box->text();
+                box->close();
+            }
+        });
+        m_boxWatcher->start(100);
+    }
+
+    void cleanup()
+    {
+        m_boxWatcher.reset();
+        QVERIFY2(m_unexpectedBoxes.isEmpty(), qPrintable(m_unexpectedBoxes.join(QStringLiteral("; "))));
+        m_window.reset();
+        m_session.reset();
+        m_engine.reset();
+        m_transport.reset();
+        m_lookups.reset();
+        m_publications.reset();
+        m_db.reset();
+        m_dir.reset();
+    }
+
+    // ---- What the sources' answers mean ----
+
+    void readsACrossrefWork()
+    {
+        const auto record = parseCrossrefWork(fixture("crossref_work.json"));
+        QVERIFY(record.has_value());
+        const Publication &p = record->publication;
+        QCOMPARE(p.title, QStringLiteral("Fatigue of Steel Beams & Columns")); // No markup, and no codes.
+        QCOMPARE(p.subtitle, QStringLiteral("A Long Study"));
+        QCOMPARE(p.doi, QStringLiteral("10.1000/example.2020.7"));
+        QCOMPARE(p.authors.size(), 3);
+        QCOMPARE(p.authors.at(0).family, QStringLiteral("Example"));
+        QCOMPARE(p.authors.at(0).given, QStringLiteral("Ada"));
+        QCOMPARE(p.authors.at(2).family, QStringLiteral("The Example Consortium"));
+        QCOMPARE(p.containerTitle, QStringLiteral("Journal of Made-up Results"));
+        QCOMPARE(p.volume, QStringLiteral("42"));
+        QCOMPARE(p.issue, QStringLiteral("3"));
+        QCOMPARE(p.pages, QStringLiteral("101-120"));
+        QCOMPARE(p.publisher, QStringLiteral("Example Press"));
+        QCOMPARE(p.issn, QStringLiteral("1234-5679"));
+        QCOMPARE(p.eissn, QStringLiteral("2345-6789"));
+        QCOMPARE(p.year.value_or(0), 2020);
+        QCOMPARE(p.month.value_or(0), 9);
+        QCOMPARE(p.day.value_or(0), 16);
+        QCOMPARE(p.abstract, QStringLiteral("Abstract A made-up abstract about steel."));
+        QCOMPARE(record->type.value(), PublicationType::JournalArticle);
+        QVERIFY(!record->preprintHint);
+    }
+
+    void aPreprintIsOnlyEverAHint()
+    {
+        const auto record = parseCrossrefWork(fixture("crossref_preprint.json"));
+        QVERIFY(record.has_value());
+        QVERIFY(record->preprintHint);
+        QVERIFY(!record->type.has_value());
+    }
+
+    void readsBooksAndIsbns()
+    {
+        const auto crossref = parseCrossrefWork(fixture("crossref_book.json"));
+        QVERIFY(crossref.has_value());
+        QCOMPARE(crossref->type.value(), PublicationType::Book);
+        QCOMPARE(crossref->publication.isbn13, QStringLiteral("9780306406157"));
+        QCOMPARE(crossref->publication.isbn10, QStringLiteral("0306406152"));
+
+        const auto library = parseOpenLibrary(fixture("openlibrary.json"));
+        QVERIFY(library.has_value());
+        QCOMPARE(library->publication.title, QStringLiteral("Principles of Sample Engineering"));
+        QCOMPARE(library->publication.subtitle, QStringLiteral("A Primer"));
+        QCOMPARE(library->publication.authors.at(0).family, QStringLiteral("Example"));
+        QCOMPARE(library->publication.publisher, QStringLiteral("Example Press"));
+        QCOMPARE(library->publication.place, QStringLiteral("Exampleville"));
+        QCOMPARE(library->publication.year.value_or(0), 2018);
+    }
+
+    void readsOpenAlexAndItsListedAbstract()
+    {
+        const auto record = parseOpenAlexWork(fixture("openalex_work.json"));
+        QVERIFY(record.has_value());
+        const Publication &p = record->publication;
+        QCOMPARE(p.doi, QStringLiteral("10.1000/example.2020.7"));
+        QCOMPARE(p.abstract, QStringLiteral("A made-up abstract about steel."));
+        QCOMPARE(p.pages, QStringLiteral("101-120"));
+        QCOMPARE(p.pmid, QStringLiteral("32939066"));
+        QCOMPARE(p.containerTitle, QStringLiteral("Journal of Made-up Results"));
+        QCOMPARE(p.authors.at(1).family, QStringLiteral("Sample"));
+        QCOMPARE(record->type.value(), PublicationType::JournalArticle);
+    }
+
+    void readsArxiv()
+    {
+        const auto record = parseArxiv(fixture("arxiv.xml"));
+        QVERIFY(record.has_value());
+        QCOMPARE(record->publication.title, QStringLiteral("Sampling Made Simple"));
+        QCOMPARE(record->publication.arxivId, QStringLiteral("2101.00001"));
+        QCOMPARE(record->publication.authors.size(), 2);
+        QCOMPARE(record->publication.year.value_or(0), 2021);
+        QVERIFY(record->preprintHint);
+        QVERIFY(!parseArxiv(fixture("arxiv_empty.xml")).has_value());
+    }
+
+    void readsSearchResults()
+    {
+        QCOMPARE(parseCrossrefSearch(fixture("crossref_search.json")).size(), 3);
+        QCOMPARE(parseOpenAlexSearch(fixture("openalex_search.json")).size(), 1);
+    }
+
+    void aBadAnswerIsJustNoAnswer_data()
+    {
+        QTest::addColumn<QByteArray>("body");
+        QTest::newRow("empty") << QByteArray();
+        QTest::newRow("not JSON or XML") << QByteArray("<html>Service unavailable");
+        QTest::newRow("cut off") << fixture("crossref_work.json").left(100);
+        QTest::newRow("the wrong shape") << QByteArray("[1, 2, 3]");
+        QTest::newRow("no title") << QByteArray("{\"message\": {\"DOI\": \"10.1/x\"}}");
+        QTest::newRow("wrong types") << QByteArray("{\"message\": {\"title\": 7, \"author\": \"x\", \"issued\": []}}");
+    }
+
+    void aBadAnswerIsJustNoAnswer()
+    {
+        QFETCH(QByteArray, body);
+        QVERIFY(!parseCrossrefWork(body).has_value());
+        QVERIFY(parseCrossrefSearch(body).isEmpty());
+        QVERIFY(!parseOpenAlexWork(body).has_value() || parseOpenAlexWork(body)->publication.title.isEmpty());
+        QVERIFY(parseOpenAlexSearch(body).isEmpty());
+        QVERIFY(!parseArxiv(body).has_value());
+        QVERIFY(!parseOpenLibrary(body).has_value());
+    }
+
+    void aRecordSurvivesBeingStored()
+    {
+        const FoundRecord record = *parseCrossrefWork(fixture("crossref_work.json"));
+        const FoundRecord back = FoundRecord::fromJson(record.toJson());
+        QCOMPARE(back.publication.title, record.publication.title);
+        QCOMPARE(back.publication.authors, record.publication.authors);
+        QCOMPARE(back.publication.year, record.publication.year);
+        QCOMPARE(back.type, record.type);
+        QCOMPARE(back.provider, record.provider);
+    }
+
+    void identifiersCantChangeWhereARequestGoes()
+    {
+        const ProviderUrls urls;
+        const QUrl url = crossrefWorkUrl(urls, QStringLiteral("10.1000/a?b=c#d/../../evil"));
+        QCOMPARE(url.host(), QStringLiteral("api.crossref.org"));
+        QVERIFY(!url.hasFragment());
+        QVERIFY(!url.hasQuery());
+        QCOMPARE(openAlexWorkUrl(urls, QStringLiteral("10.1000/a?b#c")).host(), QStringLiteral("api.openalex.org"));
+        QVERIFY(!openAlexWorkUrl(urls, QStringLiteral("10.1000/a?b#c")).hasFragment());
+        QVERIFY(crossrefSearchUrl(urls, QStringLiteral("a&filter=x#y")).toString(QUrl::FullyEncoded).contains(QStringLiteral("a%26filter%3Dx%23y")));
+    }
+
+    // ---- Deciding what's a match ----
+
+    void comparesTitles()
+    {
+        QCOMPARE(titleSimilarity(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("fatigue of steel beams")), 1.0);
+        QCOMPARE(titleSimilarity(QStringLiteral("The Fatigue of Steel Beams"), QStringLiteral("Fatigue of Steel Beams")), 1.0);
+        QCOMPARE(titleSimilarity(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("Fatigue of Steel Beams: A Study")), 1.0);
+        QVERIFY(titleSimilarity(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("Cooking with Herbs")) < 0.2);
+        QVERIFY(titleSimilarity(QStringLiteral("Fatigue_of-Steel Beams"), QStringLiteral("Fatigue of Steel Beams")) > 0.99);
+        QCOMPARE(titleSimilarity(QString(), QStringLiteral("Anything")), 0.0);
+    }
+
+    void authorsAndYearsCountTowardsAMatch()
+    {
+        Publication mine;
+        mine.title = QStringLiteral("Fatigue of Steel Beams");
+        mine.year = 2020;
+        mine.authors = {{QStringLiteral("Example"), QStringLiteral("Ada")}};
+
+        FoundRecord same;
+        same.publication = mine;
+        FoundRecord otherAuthor = same;
+        otherAuthor.publication.authors = {{QStringLiteral("Other"), QString()}};
+        FoundRecord otherYear = same;
+        otherYear.publication.year = 1990;
+        FoundRecord otherTitle = same;
+        otherTitle.publication.title = QStringLiteral("Cooking with Herbs");
+
+        QCOMPARE(matchScore(mine, same), 1.0);
+        QVERIFY(matchScore(mine, otherAuthor) < matchScore(mine, same));
+        QVERIFY(matchScore(mine, otherYear) < matchScore(mine, same));
+        QVERIFY(matchScore(mine, otherTitle) < 0.5);
+    }
+
+    void anIdentifierNeedsATitleThatFits()
+    {
+        Publication mine;
+        mine.title = QStringLiteral("Cooking with Herbs");
+        FoundRecord found;
+        found.publication.title = QStringLiteral("Fatigue of Steel Beams");
+        QVERIFY(!titleAgrees(mine, {}, found));
+        // A poor title from a file's metadata isn't held against it, if the file name agrees.
+        QVERIFY(titleAgrees(mine, {QStringLiteral("Fatigue of Steel Beams.pdf")}, found));
+    }
+
+    void whatAResultChanges()
+    {
+        Publication mine;
+        mine.title = QStringLiteral("fatigue of beams");
+        mine.abstract = QStringLiteral("My own abstract.");
+        mine.doi = QStringLiteral("10.1000/mine");
+        mine.publisher = QStringLiteral("Wrong Press");
+        mine.containerTitle = QStringLiteral("Set By Hand");
+        mine.type = PublicationType::Other;
+
+        const FoundRecord found = *parseCrossrefWork(fixture("crossref_work.json"));
+        const QList<FieldChange> changes = plannedChanges(mine, found, {QStringLiteral("container_title")});
+        const auto changed = [&](const char *name) {
+            return std::any_of(changes.cbegin(), changes.cend(), [&](const FieldChange &c) { return c.field == QLatin1StringView(name); });
+        };
+        QVERIFY(changed("title"));
+        QVERIFY(changed("authors"));
+        QVERIFY(changed("year"));
+        QVERIFY(changed("publisher"));
+        QVERIFY(changed("type"));
+        QVERIFY(!changed("container_title")); // Set by hand.
+        QVERIFY(!changed("abstract"));        // Already has one.
+        QVERIFY(!changed("doi"));             // Identifiers aren't replaced.
+    }
+
+    void aTypeOnlyMovesBetweenGroups()
+    {
+        const auto typeChange = [](PublicationType mine, PublicationType found) {
+            Publication p;
+            p.type = mine;
+            FoundRecord record;
+            record.type = found;
+            const QList<FieldChange> changes = plannedChanges(p, record, {});
+            return std::any_of(changes.cbegin(), changes.cend(), [](const FieldChange &c) { return c.field == QLatin1StringView("type"); });
+        };
+        QVERIFY(typeChange(PublicationType::Other, PublicationType::JournalArticle));
+        QVERIFY(typeChange(PublicationType::Book, PublicationType::JournalArticle));
+        QVERIFY(!typeChange(PublicationType::Textbook, PublicationType::Book)); // A textbook is more exact.
+        QVERIFY(!typeChange(PublicationType::Thesis, PublicationType::Dissertation));
+        QVERIFY(!typeChange(PublicationType::Preprint, PublicationType::JournalArticle)); // Only the user decides.
+        QVERIFY(!typeChange(PublicationType::JournalArticle, PublicationType::Preprint));
+    }
+
+    // ---- The modes ----
+
+    void reviewModeAppliesAnExactMatchThatFits()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), true);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        const LookupSummary summary = run();
+
+        QCOMPARE(summary.applied, 1);
+        const Publication p = *m_publications->get(id);
+        QCOMPARE(p.title, QStringLiteral("Fatigue of Steel Beams & Columns"));
+        QCOMPARE(p.containerTitle, QStringLiteral("Journal of Made-up Results"));
+        QCOMPARE(p.type, PublicationType::JournalArticle);
+        QVERIFY(!p.needsReview); // The match settles any doubt.
+        QCOMPARE(m_publications->provenance(id, QStringLiteral("title")).first().source, QStringLiteral("crossref"));
+        QCOMPARE(m_publications->provenance(id, QStringLiteral("title")).first().previousValue, QStringLiteral("Fatigue of Steel Beams"));
+        QCOMPARE(m_lookups->waitingForReviewCount(), 0);
+    }
+
+    void reviewModeHoldsAnIdentifierWhoseTitleDoesntFit()
+    {
+        // A DOI read from a file could be one it cites.
+        const qint64 id = addPublication(QStringLiteral("Cooking with Herbs"), QStringLiteral("10.1000/example.2020.7"), false);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        const LookupSummary summary = run();
+
+        QCOMPARE(summary.forReview, 1);
+        QCOMPARE(summary.applied, 0);
+        QCOMPARE(m_publications->get(id)->title, QStringLiteral("Cooking with Herbs"));
+        QCOMPARE(m_lookups->waitingForReviewCount(), 1);
+        QCOMPARE(m_lookups->candidatesFor(id).first().matchedBy, QStringLiteral("doi"));
+    }
+
+    void automaticModeAppliesItAnywayButMarksIt()
+    {
+        const qint64 id = addPublication(QStringLiteral("Cooking with Herbs"), QStringLiteral("10.1000/example.2020.7"), false);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"));
+        QCOMPARE(run().applied, 1);
+        const Publication p = *m_publications->get(id);
+        QCOMPARE(p.title, QStringLiteral("Fatigue of Steel Beams & Columns"));
+        QVERIFY(p.needsReview);
+        QCOMPARE(m_lookups->waitingForReviewCount(), 0);
+    }
+
+    void reviewModeHoldsSearchResultsBestFirst()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams in Practice"), QString(), true);
+        addAuthor(id, QStringLiteral("Example"));
+        m_fake->answer(QStringLiteral("query.bibliographic"), fixture("crossref_search.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QCOMPARE(run().forReview, 1);
+
+        QCOMPARE(m_publications->get(id)->doi, QString());
+        const QList<LookupCandidate> candidates = m_lookups->candidatesFor(id);
+        QVERIFY(candidates.size() >= 2);
+        const FoundRecord best = FoundRecord::fromJson(QJsonDocument::fromJson(candidates.first().recordJson.toUtf8()).object());
+        QCOMPARE(best.publication.doi, QStringLiteral("10.1000/found.it"));
+        QVERIFY(candidates.first().score > candidates.at(1).score);
+    }
+
+    void automaticModeAppliesTheBestSearchResultAndMarksIt()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams in Practice"), QString(), false);
+        addAuthor(id, QStringLiteral("Example"));
+        m_fake->answer(QStringLiteral("query.bibliographic"), fixture("crossref_search.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"));
+        QCOMPARE(run().applied, 1);
+        const Publication p = *m_publications->get(id);
+        QCOMPARE(p.doi, QStringLiteral("10.1000/found.it"));
+        QVERIFY(p.needsReview);
+    }
+
+    void aPoorSearchResultIsntOfferedAtAll()
+    {
+        const qint64 id = addPublication(QStringLiteral("Something Else Entirely About Herbs"), QString(), false);
+        m_fake->answer(QStringLiteral("query.bibliographic"), fixture("crossref_search.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"));
+        const LookupSummary summary = run();
+        QCOMPARE(summary.applied, 0);
+        QCOMPARE(summary.notFound, 1);
+        QCOMPARE(m_publications->get(id)->doi, QString());
+    }
+
+    // ---- The sources in turn ----
+
+    void openAlexIsAskedWhenCrossrefDoesntKnow()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), QByteArray(), 404);
+        m_fake->answer(QStringLiteral("api.openalex.org/works/doi:"), fixture("openalex_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QCOMPARE(run().applied, 1);
+        QCOMPARE(m_publications->get(id)->pmid, QStringLiteral("32939066"));
+        QCOMPARE(m_publications->provenance(id, QStringLiteral("pmid")).first().source, QStringLiteral("openalex"));
+    }
+
+    void anArxivNumberAsksArxiv()
+    {
+        Publication p;
+        p.title = QStringLiteral("Sampling Made Simple");
+        p.arxivId = QStringLiteral("2101.00001v2");
+        const qint64 id = m_publications->create(p);
+        m_fake->answer(QStringLiteral("export.arxiv.org"), fixture("arxiv.xml"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QCOMPARE(run().applied, 1);
+        QVERIFY(m_fake->asked.first().contains(QStringLiteral("id_list=2101.00001")));
+        QVERIFY(!m_fake->asked.first().contains(QStringLiteral("v2")));
+
+        // It says it's a preprint, which is noted, and the type stays as it was.
+        const Publication after = *m_publications->get(id);
+        QVERIFY(after.extraJson.contains(QStringLiteral("preprintHint")));
+        QCOMPARE(after.type, PublicationType::Other);
+        QCOMPARE(after.authors.size(), 2);
+    }
+
+    void anIsbnAsksOpenLibrary()
+    {
+        Publication p;
+        p.title = QStringLiteral("Principles of Sample Engineering");
+        p.isbn13 = QStringLiteral("9780306406157");
+        const qint64 id = m_publications->create(p);
+        m_fake->answer(QStringLiteral("openlibrary.org"), fixture("openlibrary.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QCOMPARE(run().applied, 1);
+        QCOMPARE(m_publications->get(id)->publisher, QStringLiteral("Example Press"));
+        QVERIFY(!m_fake->asked.first().contains(QStringLiteral("api.crossref.org")));
+    }
+
+    void openAlexSearchIsOnlyAskedIfCrossrefDoesntFindIt()
+    {
+        // Its searches use up a daily allowance, so they're kept for when they're needed.
+        const qint64 found = addPublication(QStringLiteral("Fatigue of Steel Beams in Practice"), QString(), false);
+        addAuthor(found, QStringLiteral("Example"));
+        m_fake->answer(QStringLiteral("query.bibliographic"), fixture("crossref_search.json"));
+        m_fake->answer(QStringLiteral("api.openalex.org/works?search"), fixture("openalex_search.json"));
+        m_lookups->enqueue({found}, QStringLiteral("online_auto"));
+        run();
+        QVERIFY(!m_fake->asked.join(u' ').contains(QStringLiteral("api.openalex.org")));
+
+        const qint64 elsewhere = addPublication(QStringLiteral("An Unusual Report on Example Bridges"), QString(), false);
+        m_lookups->enqueue({elsewhere}, QStringLiteral("online_auto"));
+        run();
+        QCOMPARE(m_publications->get(elsewhere)->doi, QStringLiteral("10.1000/from.openalex"));
+    }
+
+    void aTitleTooShortToTellApartIsntSearchedFor()
+    {
+        const qint64 id = addPublication(QStringLiteral("Notes"), QString(), false);
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"));
+        QCOMPARE(run().notFound, 1);
+        QCOMPARE(m_fake->count(), 0);
+    }
+
+    // ---- Being a good guest ----
+
+    void onlyIdentifiersAndTitlesAreSent()
+    {
+        Publication p;
+        p.title = QStringLiteral("Fatigue of Steel Beams in Practice");
+        p.authors = {{QStringLiteral("Secretauthorname"), QString()}};
+        p.notes = QStringLiteral("Secretnotes");
+        const qint64 id = m_publications->create(p);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        run();
+
+        const QString all = m_fake->asked.join(u' ');
+        QVERIFY(!all.isEmpty());
+        QVERIFY(!all.contains(QStringLiteral("Secret"), Qt::CaseInsensitive));
+    }
+
+    void aContactEmailOnlyGoesIfGivenAndOnlyWhereAskedFor()
+    {
+        Publication p;
+        p.title = QStringLiteral("Sampling Made Simple");
+        p.doi = QStringLiteral("10.1000/a");
+        p.arxivId = QStringLiteral("2101.00001");
+        p.isbn13 = QStringLiteral("9780306406157");
+        const qint64 id = m_publications->create(p);
+
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        run();
+        QVERIFY(!m_fake->asked.join(u' ').contains(QStringLiteral("mailto")));
+        QVERIFY(m_fake->asked.size() >= 3);
+
+        m_fake->asked.clear();
+        m_db->exec("DELETE FROM lookup_cache");
+        m_engine->setContactEmail(QStringLiteral("someone@example.org"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        run();
+        for (const QString &url : std::as_const(m_fake->asked)) {
+            const bool asksForIt = url.contains(QStringLiteral("crossref")) || url.contains(QStringLiteral("openalex"));
+            QCOMPARE(url.contains(QStringLiteral("mailto=someone%40example.org")), asksForIt);
+        }
+    }
+
+    void requestsAreSpacedOut()
+    {
+        for (int i = 0; i < 4; ++i)
+            m_lookups->enqueue({addPublication(QStringLiteral("Title Number %1 Here").arg(i), QStringLiteral("10.1000/%1").arg(i), false)},
+                               QStringLiteral("online_review"));
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        run();
+        // Crossref's limit is 5 a second, and this keeps below it.
+        const QList<qint64> times = crossrefTimes();
+        QVERIFY(times.size() >= 4);
+        for (qsizetype i = 1; i < times.size(); ++i)
+            QVERIFY2(times.at(i) - times.at(i - 1) >= 190, qPrintable(QString::number(times.at(i) - times.at(i - 1))));
+    }
+
+    void aLowerLimitFromASourceIsFollowed()
+    {
+        for (int i = 0; i < 3; ++i)
+            m_lookups->enqueue({addPublication(QStringLiteral("Title Number %1 Here").arg(i), QStringLiteral("10.1000/%1").arg(i), false)},
+                               QStringLiteral("online_review"));
+        TransportReply reply;
+        reply.status = 200;
+        reply.body = fixture("crossref_work.json");
+        reply.rateLimitPerSecond = 1;
+        m_fake->answers << qMakePair(QStringLiteral("api.crossref.org/works/"), reply);
+        run();
+        const QList<qint64> times = crossrefTimes();
+        QVERIFY(times.size() >= 3);
+        QVERIFY2(times.at(2) - times.at(1) >= 1000, qPrintable(QString::number(times.at(2) - times.at(1))));
+    }
+
+    void searchesGoAtTheSlowerPaceCrossrefAllowsThem()
+    {
+        for (int i = 0; i < 3; ++i)
+            m_lookups->enqueue({addPublication(QStringLiteral("Search Title Number %1").arg(i), QString(), false)}, QStringLiteral("online_review"));
+        m_fake->answer(QStringLiteral("query.bibliographic"), "{\"message\": {\"items\": []}}");
+        run();
+        const QList<qint64> times = crossrefTimes();
+        QCOMPARE(times.size(), 3);
+        for (qsizetype i = 1; i < times.size(); ++i)
+            QVERIFY2(times.at(i) - times.at(i - 1) >= 1050, qPrintable(QString::number(times.at(i) - times.at(i - 1))));
+    }
+
+    void aSecondLookupDoesntAskAgain()
+    {
+        const qint64 first = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        const qint64 second = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({first, second}, QStringLiteral("online_review"));
+        QCOMPARE(run().applied, 2);
+        QCOMPARE(m_fake->count(), 1);
+    }
+
+    void notFoundIsRememberedUnlessAskedAgainByHand()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue"), QStringLiteral("10.1000/nothing"), false);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QCOMPARE(run().notFound, 1);
+        const int asked = m_fake->count();
+        QCOMPARE(asked, 2);
+
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        run();
+        QCOMPARE(m_fake->count(), asked);
+
+        m_lookups->enqueue({id}, QStringLiteral("online_review"), true);
+        run();
+        QCOMPARE(m_fake->count(), asked * 2);
+    }
+
+    // ---- When things go wrong ----
+
+    void aNetworkFailureKeepsTheJobAndTriesAgain()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        TransportReply failed;
+        failed.error = QStringLiteral("no route to host");
+        m_fake->oneOff << failed << failed;
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+
+        QSignalSpy problems(m_engine.get(), &LookupEngine::problem);
+        QCOMPARE(run().applied, 1);
+        QCOMPARE(problems.size(), 2);
+    }
+
+    void aServerProblemKeepsTheJobToo()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        TransportReply busy;
+        busy.status = 503;
+        m_fake->oneOff << busy;
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QCOMPARE(run().applied, 1);
+    }
+
+    void aSourceOutOfAllowanceDoesntHoldUpTheOthers()
+    {
+        // OpenAlex's search allowance has run out, and Crossref finds nothing for this one.
+        const qint64 first = addPublication(QStringLiteral("Something Nobody Has Heard Of"), QString(), false);
+        const qint64 second = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        TransportReply noResults;
+        noResults.status = 200;
+        noResults.body = "{\"message\": {\"items\": []}}";
+        TransportReply outOfAllowance;
+        outOfAllowance.status = 429;
+        outOfAllowance.retryAfterSeconds = 7200;
+        m_fake->answers << qMakePair(QStringLiteral("query.bibliographic"), noResults);
+        m_fake->answers << qMakePair(QStringLiteral("api.openalex.org/works?search"), outOfAllowance);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({first, second}, QStringLiteral("online_review"));
+        const LookupSummary summary = run();
+        QCOMPARE(summary.notFound, 1);
+        QCOMPARE(summary.applied, 1);
+        QCOMPARE(m_lookups->pendingCount(), 0);
+    }
+
+    void whenEveryoneIsOutOfAllowanceItWaits()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        TransportReply limited;
+        limited.status = 429;
+        limited.retryAfterSeconds = 7200;
+        m_fake->answers << qMakePair(QStringLiteral("doi"), limited);
+        m_fake->answers << qMakePair(QStringLiteral("works"), limited);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+
+        QSignalSpy problems(m_engine.get(), &LookupEngine::problem);
+        m_engine->start();
+        QVERIFY(problems.wait(kWaitMs));
+        // It isn't "not found": it's still waiting to be asked.
+        QCOMPARE(m_lookups->pendingCount(), 1);
+        m_engine->stop();
+    }
+
+    void stoppingKeepsWhatsLeft()
+    {
+        QList<qint64> ids;
+        for (int i = 0; i < 5; ++i)
+            ids << addPublication(QStringLiteral("Title Number %1 Here").arg(i), QStringLiteral("10.1000/%1").arg(i), false);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue(ids, QStringLiteral("online_review"));
+
+        QSignalSpy finished(m_engine.get(), &LookupEngine::finished);
+        QSignalSpy progress(m_engine.get(), &LookupEngine::progress);
+        m_engine->start();
+        QTRY_VERIFY_WITH_TIMEOUT(progress.size() >= 3, kWaitMs);
+        m_engine->stop();
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, kWaitMs);
+        QVERIFY(m_lookups->pendingCount() > 0);
+        QVERIFY(m_lookups->pendingCount() < 5);
+        QVERIFY(finished.first().at(0).value<LookupSummary>().stopped);
+
+        // And it picks up from there.
+        const qint64 left = m_lookups->pendingCount();
+        QCOMPARE(run().forReview, int(left));
+        QCOMPARE(m_lookups->pendingCount(), 0);
+    }
+
+    void closingTheAppMidLookupCarriesOnNextTime()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QVERIFY(m_lookups->nextJob().has_value()); // Claimed, and then the app went away.
+        QCOMPARE(run().applied, 1);
+        QCOMPARE(m_lookups->pendingCount(), 0);
+    }
+
+    void startingAnImportDoesntDisturbARunningLookup()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QString(), false);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QVERIFY(m_lookups->nextJob().has_value());
+
+        import::ImportOptions options;
+        options.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        options.cacheDirectory = m_dir->filePath(QStringLiteral("cache"));
+        import::ImportService service(*m_db, options);
+        QVERIFY(!m_lookups->nextJob().has_value());
+    }
+
+    void aPublicationThatsGoneIsSkipped()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/x"), false);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        m_publications->remove(id);
+        run();
+        QCOMPARE(m_fake->count(), 0);
+        QCOMPARE(m_lookups->pendingCount(), 0);
+    }
+
+    // ---- Provenance and undo ----
+
+    void undoPutsBackEverythingALookupChanged()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), true);
+        addAuthor(id, QStringLiteral("Hooke"));
+        const Publication before = *m_publications->get(id);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"));
+        run();
+        QVERIFY(m_publications->get(id)->title != before.title);
+        QCOMPARE(undoableSource(*m_db, id), kCrossref);
+
+        QVERIFY(undoLastLookup(*m_db, id) > 5);
+        const Publication after = *m_publications->get(id);
+        QCOMPARE(after.title, before.title);
+        QCOMPARE(after.authors, before.authors);
+        QCOMPARE(after.containerTitle, QString());
+        QCOMPARE(after.year, before.year);
+        QCOMPARE(after.month, before.month);
+        QCOMPARE(after.type, before.type);
+        QCOMPARE(after.doi, before.doi);
+
+        // There's nothing further to undo.
+        QCOMPARE(undoableSource(*m_db, id), QString());
+        QCOMPARE(undoLastLookup(*m_db, id), 0);
+    }
+
+    void undoLeavesWhatsBeenChangedByHandSince()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"));
+        run();
+        Publication p = *m_publications->get(id);
+        p.publisher = QStringLiteral("My Own Press");
+        m_publications->updateWithProvenance(p, QStringLiteral("manual"));
+
+        undoLastLookup(*m_db, id);
+        QCOMPARE(m_publications->get(id)->publisher, QStringLiteral("My Own Press"));
+        QCOMPARE(m_publications->get(id)->containerTitle, QString());
+    }
+
+    void aLookupLeavesWhatsSetByHandAlone()
+    {
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        Publication p = *m_publications->get(id);
+        p.title = QStringLiteral("Fatigue of Steel Beams, My Way");
+        p.type = PublicationType::Preprint;
+        m_publications->updateWithProvenance(p, QStringLiteral("manual"));
+
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"));
+        run();
+        const Publication after = *m_publications->get(id);
+        QCOMPARE(after.title, QStringLiteral("Fatigue of Steel Beams, My Way"));
+        QCOMPARE(after.type, PublicationType::Preprint);
+        QCOMPARE(after.containerTitle, QStringLiteral("Journal of Made-up Results"));
+    }
+
+    // ---- Removed folders ----
+
+    void whatsWaitingForReviewFollowsItsFolder()
+    {
+        FileRepository files(*m_db);
+        const qint64 root = files.addRoot(QStringLiteral("R"), QStringLiteral("/r"));
+        const qint64 id = addPublication(QStringLiteral("Cooking with Herbs"), QStringLiteral("10.1000/example.2020.7"), false);
+        FileRecord file;
+        file.rootId = root;
+        file.relativePath = QStringLiteral("a.pdf");
+        file.format = QStringLiteral("pdf");
+        files.link(id, files.upsert(file), true);
+
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        QCOMPARE(run().forReview, 1);
+        QCOMPARE(m_lookups->waitingForReviewCount(), 1);
+
+        files.hideRoot(root);
+        QCOMPARE(m_lookups->waitingForReviewCount(), 0);
+        QVERIFY(m_lookups->publicationsWaitingForReview().isEmpty());
+
+        files.restoreRoot(root);
+        QCOMPARE(m_lookups->waitingForReviewCount(), 1);
+    }
+
+    void nothingFromARemovedFolderIsLookedUp()
+    {
+        FileRepository files(*m_db);
+        const qint64 root = files.addRoot(QStringLiteral("R"), QStringLiteral("/r"));
+        const qint64 id = addPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"), false);
+        FileRecord file;
+        file.rootId = root;
+        file.relativePath = QStringLiteral("a.pdf");
+        file.format = QStringLiteral("pdf");
+        files.link(id, files.upsert(file), true);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+
+        files.hideRoot(root);
+        QCOMPARE(m_lookups->pendingCount(), 0);
+        run();
+        QCOMPARE(m_fake->count(), 0);
+    }
+
+    // ---- The real network path, on this computer only ----
+
+    void theRealTransportHandlesAnswers()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const QUrl url(QStringLiteral("http://127.0.0.1:%1/works/x").arg(server.serverPort()));
+        NetworkTransport transport;
+
+        const auto fetch = [&] {
+            TransportReply result;
+            QEventLoop loop;
+            transport.get(url, [&](const TransportReply &reply) {
+                result = reply;
+                loop.quit();
+            });
+            loop.exec();
+            return result;
+        };
+
+        server.response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-Rate-Limit-Limit: 3\r\nConnection: close\r\n\r\nhi";
+        TransportReply reply = fetch();
+        QCOMPARE(reply.status, 200);
+        QCOMPARE(reply.body, QByteArray("hi"));
+        QCOMPARE(reply.rateLimitPerSecond, 3);
+        QVERIFY(reply.error.isEmpty());
+        QVERIFY(server.requests.last().contains(QStringLiteral("Papertrail")));
+
+        server.response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        reply = fetch();
+        QCOMPARE(reply.status, 404);
+        QVERIFY(reply.error.isEmpty());
+
+        server.response = "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        reply = fetch();
+        QCOMPARE(reply.status, 429);
+        QCOMPARE(reply.retryAfterSeconds, 30);
+
+        // Nothing is listening here any more, which is a failure of the network and not an answer.
+        server.close();
+        reply = fetch();
+        QCOMPARE(reply.status, 0);
+        QVERIFY(!reply.error.isEmpty());
+    }
+
+    void anAnswerTooLargeIsRefused()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        server.response = "HTTP/1.1 200 OK\r\nContent-Length: 20000000\r\nConnection: close\r\n\r\n" + QByteArray(20000000, 'x');
+        NetworkTransport transport;
+        TransportReply result;
+        QEventLoop loop;
+        transport.get(QUrl(QStringLiteral("http://127.0.0.1:%1/").arg(server.serverPort())), [&](const TransportReply &reply) {
+            result = reply;
+            loop.quit();
+        });
+        QTimer::singleShot(kWaitMs, &loop, &QEventLoop::quit);
+        loop.exec();
+        QVERIFY(!result.error.isEmpty());
+        QVERIFY(result.body.isEmpty());
+    }
+
+    // ---- Importing ----
+
+    void importingOnlyQueuesLookupsIfAskedTo()
+    {
+        const QString folder = docsFolder({QStringLiteral("article.pdf")});
+        FileRepository files(*m_db);
+        const qint64 root = files.addRoot(QStringLiteral("Docs"), folder);
+
+        QString mode;
+        import::ImportOptions options;
+        options.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        options.cacheDirectory = m_dir->filePath(QStringLiteral("cache"));
+        options.lookupMode = [&mode] { return mode; };
+        import::ImportService service(*m_db, options);
+        service.scan(root);
+        service.processQueue();
+        QCOMPARE(m_lookups->pendingCount(), 0);
+
+        mode = QStringLiteral("online_review");
+        QVERIFY(QFile::copy(sample(QStringLiteral("thesis.pdf")), QDir(folder).filePath(QStringLiteral("thesis.pdf"))));
+        service.scan(root);
+        service.processQueue();
+        QCOMPARE(m_lookups->pendingCount(), 1);
+
+        // A waiting lookup isn't the import's to deal with.
+        QCOMPARE(service.pendingJobs(), 0);
+        service.processQueue();
+        QCOMPARE(m_lookups->pendingCount(), 1);
+    }
+
+    // ---- The window, and staying offline ----
+
+    void nothingIsSentBeforeAChoiceHasBeenMade()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        openWindow(&server);
+        QCOMPARE(m_window->lookupMode(), QStringLiteral("offline"));
+
+        m_window->addFolder(docsFolder({QStringLiteral("article.pdf"), QStringLiteral("book.epub"), QStringLiteral("xmp_article.pdf")}));
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->query().count({}), 3, kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kWaitMs);
+        QTest::qWait(500);
+
+        QCOMPARE(server.connections.load(), 0);
+        QCOMPARE(LookupRepository(m_session->database()).pendingCount(), 0);
+
+        // The same, if it's asked for by hand: it can't start without a choice.
+        m_window->lookUp(m_session->query().ids({}, {}));
+        QTest::qWait(300);
+        QCOMPARE(server.connections.load(), 0);
+    }
+
+    void offlineModeMakesNoRequestsAndOnlineDoes()
+    {
+        // The same steps, real network code and all. The second half is what shows the first means something.
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        openWindow(&server);
+        m_window->setLookupMode(QStringLiteral("offline"), QString());
+
+        m_window->addFolder(docsFolder({QStringLiteral("article.pdf")}));
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->query().count({}), 1, kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kWaitMs);
+        m_window->lookUp(m_session->query().ids({}, {}));
+        QTest::qWait(500);
+        QCOMPARE(server.connections.load(), 0);
+
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        m_window->lookUp(m_session->query().ids({}, {}));
+        QTRY_VERIFY_WITH_TIMEOUT(server.connections.load() > 0, kWaitMs);
+    }
+
+    void goingOfflineDropsWhatsWaiting()
+    {
+        LocalServer server; // It never answers usefully, so jobs are still queued or in progress.
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        openWindow(&server);
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        QList<qint64> ids;
+        for (int i = 0; i < 30; ++i)
+            ids << addSessionPublication(QStringLiteral("Title Number %1 Here").arg(i), QStringLiteral("10.1000/%1").arg(i));
+        m_window->lookUp(ids);
+        QTRY_VERIFY_WITH_TIMEOUT(server.connections.load() > 0, kWaitMs);
+
+        m_window->setLookupMode(QStringLiteral("offline"), QString());
+        QCOMPARE(LookupRepository(m_session->database()).pendingCount(), 0);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->lookupThread()->isBusy(), kWaitMs);
+        const int connections = server.connections.load();
+        QTest::qWait(600);
+        QCOMPARE(server.connections.load(), connections);
+    }
+
+    void aChoiceForOneFolderOnlyLastsForThatFolder()
+    {
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+
+        // Online by default, but this one folder stays offline.
+        const QString folder = docsFolder({QStringLiteral("article.pdf")});
+        m_window->addFolder(folder, QStringLiteral("offline"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->query().count({}), 1, kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kWaitMs);
+        QTest::qWait(300);
+        QCOMPARE(m_fake->count(), 0);
+
+        // Back to the default after it.
+        QVERIFY(QFile::copy(sample(QStringLiteral("xmp_article.pdf")), QDir(folder).filePath(QStringLiteral("xmp_article.pdf"))));
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->query().count({}), 2, kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(m_fake->count() > 0, kWaitMs);
+    }
+
+    void aChoiceToLookUpOneFolderWorksWhileOffline()
+    {
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("offline"), QString());
+        m_window->addFolder(docsFolder({QStringLiteral("xmp_article.pdf")}), QStringLiteral("online_review"));
+        QTRY_VERIFY_WITH_TIMEOUT(m_fake->count() > 0, kWaitMs);
+    }
+
+    void theLookupChoiceGivesBackWhatWasChosen()
+    {
+        OnlineLookupDialog dialog(QStringLiteral("Heading"), QStringLiteral("offline"), QString(), true);
+        QCOMPARE(dialog.mode(), QStringLiteral("offline"));
+        QCOMPARE(dialog.email(), QString());
+        for (const QString &mode : {QStringLiteral("online_review"), QStringLiteral("online_auto"), QStringLiteral("offline")}) {
+            dialog.setMode(mode);
+            QCOMPARE(dialog.mode(), mode);
+        }
+    }
+
+    void reviewingAMatchFromTheWindow()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        const qint64 keep = addSessionPublication(QStringLiteral("Cooking with Herbs"), QStringLiteral("10.1000/example.2020.7"));
+        const qint64 drop = addSessionPublication(QStringLiteral("Growing Some Herbs"), QStringLiteral("10.1000/example.2020.8"));
+        m_window->lookUp({keep, drop});
+
+        QTRY_COMPARE_WITH_TIMEOUT(LookupRepository(m_session->database()).waitingForReviewCount(), 2, kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewButton()->isVisibleTo(m_window.get()), kWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->reviewButton()->text(), QStringLiteral("To review: 2"), kWaitMs);
+
+        m_window->showReviewTab();
+        ReviewTab *review = m_window->reviewTab();
+        QVERIFY(review != nullptr);
+        QCOMPARE(review->list()->count(), 2);
+        QCOMPARE(review->currentPublication(), keep);
+
+        // Both versions are there, side by side.
+        QTableWidget *table = review->comparison();
+        QVERIFY(table->rowCount() > 3);
+        bool sawTitle = false;
+        for (int row = 0; row < table->rowCount(); ++row) {
+            if (table->item(row, 0)->text() == QStringLiteral("Title")) {
+                sawTitle = true;
+                QCOMPARE(table->item(row, 1)->text(), QStringLiteral("Cooking with Herbs"));
+                QCOMPARE(table->item(row, 2)->text(), QStringLiteral("Fatigue of Steel Beams & Columns"));
+            }
+        }
+        QVERIFY(sawTitle);
+        QCOMPARE(table->item(1, 0)->text(), QStringLiteral("Title"));
+        QVERIFY2(table->item(3, 0)->text().startsWith(QStringLiteral("Author")), qPrintable(table->item(3, 0)->text()));
+        // A short title fits on one line, once the table has its real width.
+        QTRY_VERIFY_WITH_TIMEOUT(table->rowHeight(1) < table->fontMetrics().height() * 2 + 12, kWaitMs);
+
+        // For looking at by eye, if asked for.
+        const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES");
+        if (!pictures.isEmpty())
+            m_window->grab().save(QDir(pictures).filePath(QStringLiteral("review.png")));
+
+        review->acceptCurrent();
+        QCOMPARE(m_session->publications().get(keep)->title, QStringLiteral("Fatigue of Steel Beams & Columns"));
+        QCOMPARE(review->list()->count(), 1);
+        QCOMPARE(m_window->reviewButton()->text(), QStringLiteral("To review: 1"));
+
+        review->rejectCurrent();
+        QCOMPARE(m_session->publications().get(drop)->title, QStringLiteral("Growing Some Herbs"));
+        QCOMPARE(review->list()->count(), 0);
+        QVERIFY(!m_window->reviewButton()->isVisibleTo(m_window.get()));
+    }
+
+    void aPopUpOffersTheReviewWhenLookupsFinish()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        m_window->lookUp({addSessionPublication(QStringLiteral("Cooking with Herbs"), QStringLiteral("10.1000/a")),
+                          addSessionPublication(QStringLiteral("Growing Some Herbs"), QStringLiteral("10.1000/b"))});
+
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() != nullptr, kWaitMs);
+        QMessageBox *offer = m_window->reviewOffer();
+        QVERIFY(offer->text().contains(QStringLiteral("2 publications")));
+        QCOMPARE(offer->textFormat(), Qt::PlainText);
+        QVERIFY(!offer->isModal()); // The library can still be used with it up.
+        QCOMPARE(m_window->documentTabs()->currentIndex(), 0);
+
+        offer->findChild<QPushButton *>(QStringLiteral("reviewNow"))->click();
+        QVERIFY(m_window->documentTabs()->currentWidget() == m_window->reviewTab());
+        QCOMPARE(m_window->reviewTab()->list()->count(), 2);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() == nullptr, kWaitMs);
+    }
+
+    void choosingLaterLeavesItAloneUntilThereIsMore()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        m_window->lookUp({addSessionPublication(QStringLiteral("Cooking with Herbs"), QStringLiteral("10.1000/a"))});
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() != nullptr, kWaitMs);
+        QVERIFY(m_window->reviewOffer()->text().contains(QStringLiteral("1 publication")));
+
+        m_window->reviewOffer()->findChild<QPushButton *>(QStringLiteral("reviewLater"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() == nullptr, kWaitMs);
+        QCOMPARE(m_window->documentTabs()->currentIndex(), 0);
+        QVERIFY(m_window->reviewTab() == nullptr);
+        QCOMPARE(m_window->reviewButton()->text(), QStringLiteral("To review: 1"));
+
+        // A lookup that adds nothing new doesn't bring it up again.
+        m_window->lookUp({addSessionPublication(QStringLiteral("Nothing Known About This"), QString())});
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->lookupThread()->isBusy() && m_fake->count() >= 3, kWaitMs);
+        QTest::qWait(300);
+        QVERIFY(m_window->reviewOffer() == nullptr);
+
+        // One that does, does.
+        m_window->lookUp({addSessionPublication(QStringLiteral("Growing Some Herbs"), QStringLiteral("10.1000/b"))});
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() != nullptr, kWaitMs);
+        QVERIFY(m_window->reviewOffer()->text().contains(QStringLiteral("2 publications")));
+    }
+
+    void thePopUpWaitsForAnImportToFinish()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        // Its DOI will bring back a record with another title, so that waits for review.
+        m_window->addFolder(docsFolder({QStringLiteral("xmp_article.pdf"), QStringLiteral("article.pdf")}));
+
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() != nullptr, kWaitMs);
+        QVERIFY(!m_window->importThread()->isBusy());
+        QVERIFY(!m_window->lookupThread()->isBusy());
+        QCOMPARE(LookupRepository(m_session->database()).pendingCount(), 0);
+    }
+
+    void thePopUpDoesntInterruptReading()
+    {
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("offline"), QString());
+        m_window->addFolder(docsFolder({QStringLiteral("article.pdf")}));
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->query().count({}), 1, kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kWaitMs);
+        QVERIFY(m_window->openPublication(m_session->query().ids({}, {}).first()) != nullptr);
+        QVERIFY(m_window->documentTabs()->currentIndex() != 0);
+
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        m_window->lookUp({addSessionPublication(QStringLiteral("Cooking with Herbs"), QStringLiteral("10.1000/a"))});
+        QTRY_COMPARE_WITH_TIMEOUT(LookupRepository(m_session->database()).waitingForReviewCount(), qint64(1), kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->lookupThread()->isBusy(), kWaitMs);
+        QTest::qWait(300);
+        QVERIFY(m_window->reviewOffer() == nullptr);
+
+        m_window->documentTabs()->setCurrentIndex(0);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() != nullptr, kWaitMs);
+    }
+
+    void thereIsNoPopUpWhenNothingNeedsChecking()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        const qint64 id = addSessionPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1000/example.2020.7"));
+        m_window->lookUp({id});
+        QTRY_VERIFY_WITH_TIMEOUT(!m_session->publications().get(id)->authors.isEmpty(), kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->lookupThread()->isBusy(), kWaitMs);
+        QTest::qWait(300);
+        QVERIFY(m_window->reviewOffer() == nullptr);
+    }
+
+    void thereIsNoPopUpWhenLookupsAreStopped()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        QList<qint64> ids;
+        for (int i = 0; i < 30; ++i)
+            ids << addSessionPublication(QStringLiteral("Cooking with Herbs %1").arg(i), QStringLiteral("10.1000/%1").arg(i));
+        m_window->lookUp(ids);
+        QTRY_VERIFY_WITH_TIMEOUT(LookupRepository(m_session->database()).waitingForReviewCount() > 0, kWaitMs);
+        m_window->lookupThread()->stopLookups();
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->lookupThread()->isBusy(), kWaitMs);
+        QVERIFY(LookupRepository(m_session->database()).pendingCount() > 0);
+        QTest::qWait(300);
+        QVERIFY(m_window->reviewOffer() == nullptr);
+    }
+
+    void whatWasLeftForLaterIsntBroughtUpOnOpening()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        m_window->lookUp({addSessionPublication(QStringLiteral("Cooking with Herbs"), QStringLiteral("10.1000/a"))});
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() != nullptr, kWaitMs);
+
+        m_window.reset();
+        m_session.reset();
+        openFakeWindow();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewButton()->isVisibleTo(m_window.get()), kWaitMs);
+        QTest::qWait(300);
+        QVERIFY(m_window->reviewOffer() == nullptr);
+    }
+
+    void theDetailsOfferUndoAndAPreprintHint()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_preprint.json"));
+        openFakeWindow();
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        const qint64 id = addSessionPublication(QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("10.1101/2020.01.01.123456"));
+        m_window->details()->showPublication(id);
+        QVERIFY(!m_window->details()->undoRow()->isVisibleTo(m_window->details()));
+        m_window->lookUp({id});
+        QTRY_VERIFY_WITH_TIMEOUT(!m_session->publications().get(id)->authors.isEmpty(), kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->details()->undoRow()->isVisibleTo(m_window->details()), kWaitMs);
+
+        // Mentioned, and not acted on. Marking something a preprint is the user's to do.
+        QVERIFY(m_window->details()->preprintHint()->isVisibleTo(m_window->details()));
+        QCOMPARE(m_window->details()->preprintHint()->textFormat(), Qt::PlainText);
+        QVERIFY(!m_window->details()->preprintBox()->isChecked());
+        QVERIFY(m_session->publications().get(id)->type != PublicationType::Preprint);
+
+        m_window->details()->undoLookup();
+        QVERIFY(m_session->publications().get(id)->authors.isEmpty());
+        QVERIFY(!m_window->details()->undoRow()->isVisibleTo(m_window->details()));
+        QVERIFY(!m_window->details()->preprintHint()->isVisibleTo(m_window->details()));
+    }
+
+private:
+    qint64 addPublication(const QString &title, const QString &doi, bool needsReview)
+    {
+        Publication p;
+        p.title = title;
+        p.doi = doi;
+        p.needsReview = needsReview;
+        return m_publications->create(p);
+    }
+
+    void addAuthor(qint64 id, const QString &family)
+    {
+        Publication p = *m_publications->get(id);
+        p.authors = {{family, QString()}};
+        m_publications->update(p);
+    }
+
+    qint64 addSessionPublication(const QString &title, const QString &doi)
+    {
+        Publication p;
+        p.title = title;
+        p.doi = doi;
+        return m_session->publications().create(p);
+    }
+
+    LookupSummary run()
+    {
+        QSignalSpy finished(m_engine.get(), &LookupEngine::finished);
+        m_engine->start();
+        if (!finished.wait(kWaitMs))
+            qWarning("the lookups didn't finish");
+        return finished.isEmpty() ? LookupSummary{} : finished.first().at(0).value<LookupSummary>();
+    }
+
+    QList<qint64> crossrefTimes() const
+    {
+        QList<qint64> times;
+        for (qsizetype i = 0; i < m_fake->asked.size(); ++i) {
+            if (m_fake->asked.at(i).contains(QStringLiteral("api.crossref.org")))
+                times << m_fake->times.at(i);
+        }
+        return times;
+    }
+
+    QString docsFolder(const QStringList &names)
+    {
+        const QString folder = QDir::cleanPath(m_dir->filePath(QStringLiteral("docs")));
+        QDir().mkpath(folder);
+        for (const QString &name : names)
+            QFile::copy(sample(name), QDir(folder).filePath(name));
+        return folder;
+    }
+
+    void prepareSession(const ProviderUrls &urls, const std::shared_ptr<FakeState> &fake)
+    {
+        LibraryPaths paths;
+        paths.database = m_dir->filePath(QStringLiteral("window.db"));
+        paths.cacheDirectory = m_dir->filePath(QStringLiteral("cache"));
+        paths.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        paths.settleMs = 0;
+        paths.providerUrls = urls;
+        if (fake)
+            paths.transportFactory = [fake] { return std::make_unique<FakeTransport>(fake); };
+        m_session = std::make_unique<LibrarySession>(paths);
+        m_session->settings().setValue(QStringLiteral("library.rescan_on_startup"), false);
+        m_window = std::make_unique<MainWindow>(*m_session);
+        m_window->resize(1200, 800);
+        m_window->show();
+    }
+
+    // With the real network code, and every source pointed at a server in this test.
+    void openWindow(LocalServer *server)
+    {
+        ProviderUrls urls;
+        const QString here = QStringLiteral("http://127.0.0.1:%1").arg(server->serverPort());
+        urls.crossref = urls.openAlex = urls.arxiv = urls.openLibrary = here;
+        prepareSession(urls, nullptr);
+    }
+
+    void openFakeWindow()
+    {
+        prepareSession(ProviderUrls{}, m_fake);
+    }
+
+    std::unique_ptr<QTemporaryDir> m_dir;
+    std::unique_ptr<Database> m_db;
+    std::unique_ptr<PublicationRepository> m_publications;
+    std::unique_ptr<LookupRepository> m_lookups;
+    std::shared_ptr<FakeState> m_fake;
+    std::unique_ptr<FakeTransport> m_transport;
+    std::unique_ptr<LookupEngine> m_engine;
+    std::unique_ptr<LibrarySession> m_session;
+    std::unique_ptr<MainWindow> m_window;
+    std::unique_ptr<QTimer> m_boxWatcher;
+    QStringList m_unexpectedBoxes;
+};
+
+QTEST_MAIN(MetadataTest)
+#include "test_metadata.moc"

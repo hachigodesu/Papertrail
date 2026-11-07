@@ -7,7 +7,11 @@
 
 A desktop library manager and reader for university students and researchers, for Windows and Linux. Papertrail indexes your journal articles, textbooks, theses, reports and standards where they already are, and never modifies your files.
 
-**Status:** early development. You can browse, filter, tag and edit your library, and read PDF, EPUB, DjVu, MOBI, AZW3, XPS, CBZ and FB2 files in the built-in reader. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
+**Status:** early development. You can browse, filter, tag and edit your library, read PDF, EPUB, DjVu, MOBI, AZW3, XPS, CBZ and FB2 files in the built-in reader, and fill in details from online sources. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
+
+## Online lookups
+
+Papertrail stays offline until you choose otherwise. If you turn lookups on, it sends a file's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library. It never sends your files, notes or tags. Any lookup can be undone, and on Linux lookups need OpenSSL 3.
 
 ## Building
 

@@ -517,6 +517,61 @@ private slots:
         QCOMPARE(files.at(1).pageCount, files.at(0).pageCount);
     }
 
+    void addingARemovedFolderAgainBringsItAllBack()
+    {
+        copySample("article.pdf");
+        const qint64 id = importOne().id;
+        Publication edited = *m_publications->get(id);
+        edited.title = QStringLiteral("My Corrected Title");
+        m_publications->update(edited);
+
+        m_files->hideRoot(m_root);
+        QVERIFY(m_files->roots().isEmpty());
+        QCOMPARE(m_files->hiddenCount(), qint64(1));
+
+        m_files->restoreRoot(m_root);
+        const ScanReport scan = m_service->scan(m_root);
+        QCOMPARE(scan.newFiles, 0);
+        const ImportReport report = m_service->processQueue();
+        QCOMPARE(report.publicationsCreated, 0);
+        QCOMPARE(m_publications->get(id)->title, QStringLiteral("My Corrected Title"));
+        QCOMPARE(m_files->hiddenCount(), qint64(0));
+    }
+
+    void aRemovedFolderMovedElsewhereIsRecognisedByItsContents()
+    {
+        copySample("article.pdf");
+        const qint64 id = importOne().id;
+        Publication edited = *m_publications->get(id);
+        edited.title = QStringLiteral("My Corrected Title");
+        m_publications->update(edited);
+        m_files->hideRoot(m_root);
+
+        const QString elsewhere = m_dir->filePath(QStringLiteral("elsewhere"));
+        QDir().mkpath(elsewhere);
+        QVERIFY(QFile::copy(docPath("article.pdf"), QDir(elsewhere).filePath(QStringLiteral("renamed.pdf"))));
+        const qint64 newRoot = m_files->addRoot(QStringLiteral("Elsewhere"), elsewhere);
+        m_service->scan(newRoot);
+        const ImportReport report = m_service->processQueue();
+
+        QCOMPARE(report.publicationsCreated, 0);
+        QCOMPARE(m_publications->get(id)->title, QStringLiteral("My Corrected Title"));
+        QCOMPARE(m_files->hiddenCount(), qint64(0));
+        const QList<FileRecord> files = m_files->filesFor(id);
+        QCOMPARE(files.size(), 1);
+        QCOMPARE(files.first().rootId, newRoot);
+    }
+
+    void aRemovedFolderDoesntGetScannedThroughWaitingWork()
+    {
+        copySample("article.pdf");
+        QCOMPARE(m_service->scan(m_root).newFiles, 1);
+        QCOMPARE(m_service->pendingJobs(), 1);
+        m_files->hideRoot(m_root);
+        QCOMPARE(m_service->pendingJobs(), 0);
+        QCOMPARE(m_service->processQueue().publicationsCreated, 0);
+    }
+
     void movedFilesKeepTheirPublicationAndEdits()
     {
         copySample("article.pdf", "old-place.pdf");
