@@ -10,6 +10,7 @@
 #include "core/db/Database.h"
 #include "core/db/Schema.h"
 #include "core/query/LibraryQuery.h"
+#include "core/repo/CollectionRepository.h"
 #include "core/repo/TagRepository.h"
 
 #include <QElapsedTimer>
@@ -191,6 +192,39 @@ private slots:
         }
         m_out << '\n';
         m_out.flush();
+        if (!reportOnly())
+            QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(", "))));
+    }
+
+    void aCollectionMeetsTheTarget()
+    {
+        CollectionRepository collections(*m_db);
+        const qint64 id = collections.create(QStringLiteral("Performance test"));
+        m_db->exec("INSERT INTO collection_publication (collection_id, publication_id, added_at) "
+                   "SELECT (SELECT max(id) FROM collection), id, 0 FROM publication WHERE id % 20 = 0");
+        PublicationFilter filter;
+        filter.collectionIds = {id};
+        PublicationFilter word = filter;
+        word.searchText = QStringLiteral("analysis");
+
+        m_out << "With a collection of a twentieth of the library (target " << kResultTargetMs << " ms)\n";
+        QStringList failures;
+        const auto time = [&](const char *name, const PublicationFilter &f, const PublicationSort &sort) {
+            const double ms = medianMs([&] {
+                LibraryQuery query(*m_db);
+                query.page(f, sort, 0, kPageSize);
+                query.count(f);
+            });
+            report(name, ms, kResultTargetMs);
+            if (ms > kResultTargetMs)
+                failures << QString::fromUtf8(name);
+        };
+        time("collection, by title", filter, {});
+        time("collection, newest first", filter, {SortField::Year, false});
+        time("collection, search", word, {});
+        m_out << '\n';
+        m_out.flush();
+        collections.remove(id);
         if (!reportOnly())
             QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(", "))));
     }

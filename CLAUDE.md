@@ -172,6 +172,10 @@ Lookups are `job` rows of kind `lookup`, which belong to `LookupRepository` and 
 
 Rate limits differ by source and by kind of request, and OpenAlex's anonymous searches run out at about 100 a day. A 429 blocks that source alone, and the queue only waits when no source could answer. A failure of the network or a source puts the job back without counting it as an attempt.
 
+### Collections
+
+`CollectionRepository` holds named groupings. They're a filter like any other: `PublicationFilter::collectionIds` narrows every query, and `FilterSidebar` lists them with counts from `LibraryQuery::collectionCounts`.
+
 ### Removed folders
 
 Removing a folder (`FileRepository::hideRoot`) adds it to `removed_root` and keeps its file records, so adding the same path again (`restoreRoot`, then a scan) brings everything back. `roots()` only returns folders being indexed. Publications that are only in a removed folder, and articles inside them, go in `hidden_publication`, and `LibraryQuery` leaves those out of everything. Having no file doesn't mean hidden: a publication imported from another computer may be waiting for its file.

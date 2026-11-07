@@ -22,6 +22,8 @@
 #include <QFile>
 #include <QFormLayout>
 #include <QLabel>
+#include <QAction>
+#include <QMenu>
 #include <QPushButton>
 #include <QLineEdit>
 #include <QListView>
@@ -1026,6 +1028,238 @@ private slots:
         QVERIFY(m_session->files().roots().isEmpty());
     }
 
+    void choosingACollectionInTheSidebarShowsOnlyItsPublications()
+    {
+        addMany(5);
+        const qint64 id = m_session->collections().create(QStringLiteral("Project"));
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 5, kLongWaitMs);
+        QCOMPARE(m_window->documentTabs()->count(), 1); // No tabs of their own.
+
+        selectRows(1, 2);
+        QSignalSpy finished(m_window->bulkChanges(), &BulkChanges::finished);
+        m_window->addSelectedToCollection(id);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, kLongWaitMs);
+        QCOMPARE(m_session->collections().get(id)->count, qint64(2));
+
+        // It's listed with a count, above the tags.
+        QTRY_VERIFY_WITH_TIMEOUT(collectionItem(QStringLiteral("Project")) != nullptr, kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(collectionItem(QStringLiteral("Project"))->text(1), QStringLiteral("2"), kLongWaitMs);
+        QTreeWidget *tree = m_window->sidebar()->tree();
+        QCOMPARE(tree->indexOfTopLevelItem(m_window->sidebar()->sectionItem(FilterSidebar::Collections)), 0);
+
+        collectionItem(QStringLiteral("Project"))->setCheckState(0, Qt::Checked);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(title_(0), QStringLiteral("Paper 00001"), kLongWaitMs);
+        QVERIFY(m_window->sidebar()->hasSelection());
+        const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES");
+        if (!pictures.isEmpty()) { // For looking at by eye, if asked for.
+            m_window->resize(1200, 700);
+            QTest::qWait(300);
+            m_window->grab().save(QDir(pictures).filePath(QStringLiteral("collection.png")));
+        }
+
+        // It's a filter like the others, so it combines with search, and Clear undoes it.
+        m_window->searchBox()->setText(QStringLiteral("00002"));
+        m_window->applyFiltersNow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        m_window->searchBox()->clear();
+        m_window->applyFiltersNow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
+
+        m_window->sidebar()->clearSelection();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 5, kLongWaitMs);
+    }
+
+    void theMenuShowsWhatsAlreadyInACollection()
+    {
+        addMany(3);
+        const qint64 rd = m_session->collections().create(QStringLiteral("R&D"));
+        const qint64 other = m_session->collections().create(QStringLiteral("Other"));
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+        const QList<qint64> ids = allIds();
+        m_session->collections().add(rd, {ids.at(0)});
+
+        // One that's in a collection: ticked and can't be added again, and can be removed, with no filter.
+        selectRows(0, 0);
+        QMenu menu;
+        m_window->addCollectionActions(&menu);
+        QMenu *addTo = submenu(menu, QStringLiteral("Add to collection"));
+        QMenu *removeFrom = submenu(menu, QStringLiteral("Remove from collection"));
+        QVERIFY(addTo != nullptr);
+        QVERIFY(removeFrom != nullptr);
+
+        QAction *in = action(*addTo, QStringLiteral("R&&D"));
+        QVERIFY(in != nullptr);
+        QVERIFY(in->isChecked());
+        QVERIFY(!in->isEnabled());
+        QAction *notIn = action(*addTo, QStringLiteral("Other"));
+        QVERIFY(!notIn->isChecked());
+        QVERIFY(notIn->isEnabled());
+        QVERIFY(action(*addTo, QStringLiteral("New collection...")) != nullptr);
+        QCOMPARE(removeFrom->actions().size(), 1);
+
+        QSignalSpy finished(m_window->bulkChanges(), &BulkChanges::finished);
+        action(*removeFrom, QStringLiteral("R&&D"))->trigger();
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, kLongWaitMs);
+        QVERIFY(!m_session->collections().contains(rd, ids.at(0)));
+        QCOMPARE(rows(), 3); // It wasn't filtered, and nothing has left the library.
+
+        // One that's in none has nothing to remove from.
+        QMenu none;
+        m_window->addCollectionActions(&none);
+        QVERIFY(submenu(none, QStringLiteral("Remove from collection")) == nullptr);
+        QVERIFY(!action(*submenu(none, QStringLiteral("Add to collection")), QStringLiteral("R&&D"))->isChecked());
+
+        // Several, with some in it: it says so, and can still add the rest or remove those.
+        m_session->collections().add(other, {ids.at(0)});
+        selectRows(0, 1);
+        QMenu several;
+        m_window->addCollectionActions(&several);
+        QAction *partly = action(*submenu(several, QStringLiteral("Add to collection")), QStringLiteral("Other (1 of 2 already in it)"));
+        QVERIFY(partly != nullptr);
+        QVERIFY(partly->isEnabled());
+        QVERIFY(!partly->isChecked());
+        QVERIFY(action(*submenu(several, QStringLiteral("Remove from collection")), QStringLiteral("Other (1 of 2 in it)")) != nullptr);
+        partly->trigger();
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 2, kLongWaitMs);
+        QCOMPARE(m_session->collections().get(other)->count, qint64(2));
+
+        // A large selection isn't worked out, and every collection is offered both ways.
+        addMany(1100, 1000);
+        m_window->applyFiltersNow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1103, kLongWaitMs);
+        m_window->gridView()->selectAll();
+        QCOMPARE(m_window->selectedCount(), 1103);
+        QMenu large;
+        m_window->addCollectionActions(&large);
+        QCOMPARE(submenu(large, QStringLiteral("Remove from collection"))->actions().size(), 2);
+    }
+
+    void theSidebarSaysWhereCollectionsWillAppear()
+    {
+        openWindow();
+        QTreeWidgetItem *section = m_window->sidebar()->sectionItem(FilterSidebar::Collections);
+        QTRY_COMPARE_WITH_TIMEOUT(section->childCount(), 1, kLongWaitMs);
+        QVERIFY(section->child(0)->text(0).contains(QStringLiteral("appear here")));
+        QVERIFY(!section->isHidden());
+    }
+
+    void removingFromACollectionLeavesItInTheLibrary()
+    {
+        addMany(3);
+        const qint64 id = m_session->collections().create(QStringLiteral("Project"));
+        m_session->collections().add(id, allIds());
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(collectionItem(QStringLiteral("Project")) != nullptr, kLongWaitMs);
+        collectionItem(QStringLiteral("Project"))->setCheckState(0, Qt::Checked);
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->model()->filter().collectionIds.size(), 1, kLongWaitMs);
+
+        selectRows(0, 0);
+        QSignalSpy finished(m_window->bulkChanges(), &BulkChanges::finished);
+        m_window->removeSelectedFromCollection(id);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
+
+        m_window->sidebar()->clearSelection();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+    }
+
+    void anEmptyCollectionSaysHowToAddToIt()
+    {
+        addMany(2);
+        m_session->collections().create(QStringLiteral("Project"));
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(collectionItem(QStringLiteral("Project")) != nullptr, kLongWaitMs);
+        collectionItem(QStringLiteral("Project"))->setCheckState(0, Qt::Checked);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 0, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->viewStack()->currentWidget() != m_window->gridView()
+                                     && m_window->viewStack()->currentWidget() != m_window->listView(), kLongWaitMs);
+        bool mentioned = false;
+        for (const QLabel *label : m_window->viewStack()->currentWidget()->findChildren<QLabel *>())
+            mentioned = mentioned || label->text().contains(QStringLiteral("Add to collection"));
+        QVERIFY(mentioned);
+    }
+
+    void deletingACollectionAsksFirstAndLeavesItsPublications()
+    {
+        addMany(2);
+        const qint64 id = m_session->collections().create(QStringLiteral("Project"));
+        m_session->collections().add(id, {allIds().first()});
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(collectionItem(QStringLiteral("Project")) != nullptr, kLongWaitMs);
+        collectionItem(QStringLiteral("Project"))->setCheckState(0, Qt::Checked);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+
+        m_boxWatcher->stop();
+        bool cancelWasDefault = false;
+        QTimer::singleShot(100, this, [&] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                cancelWasDefault = box->defaultButton() == box->button(QMessageBox::Cancel);
+                box->button(QMessageBox::Cancel)->click();
+            }
+        });
+        m_window->sidebar()->deleteCollection(id);
+        QVERIFY(cancelWasDefault);
+        QVERIFY(m_session->collections().get(id).has_value());
+
+        QTimer::singleShot(100, this, [] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                box->button(QMessageBox::Yes)->click();
+        });
+        m_window->sidebar()->deleteCollection(id);
+        m_boxWatcher->start(100);
+
+        QVERIFY(!m_session->collections().get(id).has_value());
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs); // The filter's gone, and they're still there.
+        QVERIFY(!m_window->sidebar()->hasSelection());
+        QTRY_VERIFY_WITH_TIMEOUT(collectionItem(QStringLiteral("Project")) == nullptr, kLongWaitMs);
+    }
+
+    void aPublicationFromARemovedFolderLeavesItsCollectionUntilItReturns()
+    {
+        const QString folder = copySamples({QStringLiteral("article.pdf")});
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        const qint64 id = m_session->collections().create(QStringLiteral("Project"));
+        m_session->collections().add(id, {allIds().first()});
+        m_window->applyFiltersNow();
+        QTRY_VERIFY_WITH_TIMEOUT(collectionItem(QStringLiteral("Project")) != nullptr, kLongWaitMs);
+        collectionItem(QStringLiteral("Project"))->setCheckState(0, Qt::Checked);
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->model()->filter().collectionIds.size(), 1, kLongWaitMs);
+
+        m_window->removeRootKeepingDetails(m_session->files().roots().first().id);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 0, kLongWaitMs);
+        QCOMPARE(m_session->collections().get(id)->count, qint64(0));
+
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        QCOMPARE(m_session->collections().get(id)->count, qint64(1));
+    }
+
+    void theDetailsSayWhichCollectionsSomethingIsIn()
+    {
+        const qint64 publication = addPublication(QStringLiteral("A Paper"), PublicationType::JournalArticle);
+        const qint64 id = m_session->collections().create(QStringLiteral("R&D <b>Project</b>"));
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        m_window->details()->showPublication(publication);
+        QVERIFY(!m_window->details()->collectionsLabel()->isVisibleTo(m_window->details()));
+
+        m_session->collections().add(id, {publication});
+        m_window->details()->reload();
+        QVERIFY(m_window->details()->collectionsLabel()->isVisibleTo(m_window->details()));
+        QCOMPARE(m_window->details()->collectionsLabel()->textFormat(), Qt::PlainText);
+        QVERIFY(m_window->details()->collectionsLabel()->text().contains(QStringLiteral("R&D <b>Project</b>")));
+    }
+
     void onlyOneCopyCanHaveALibraryOpen()
     {
         bool refused = false;
@@ -1047,6 +1281,43 @@ private slots:
 
 private:
     int rows() const { return m_window->model()->rowCount(); }
+
+    QList<qint64> allIds() { return m_session->query().ids({}, {}); }
+
+    void selectRows(int first, int last)
+    {
+        const auto *model = m_window->model();
+        m_window->gridView()->selectionModel()->select(QItemSelection(model->index(first, 0), model->index(last, 0)),
+                                                       QItemSelectionModel::ClearAndSelect);
+    }
+
+    static QMenu *submenu(const QMenu &menu, const QString &title)
+    {
+        for (QAction *item : menu.actions()) {
+            if (item->menu() && item->text() == title)
+                return item->menu();
+        }
+        return nullptr;
+    }
+
+    static QAction *action(const QMenu &menu, const QString &text)
+    {
+        for (QAction *item : menu.actions()) {
+            if (item->text() == text)
+                return item;
+        }
+        return nullptr;
+    }
+
+    QTreeWidgetItem *collectionItem(const QString &name) const
+    {
+        QTreeWidgetItem *section = m_window->sidebar()->sectionItem(FilterSidebar::Collections);
+        for (int i = 0; i < section->childCount(); ++i) {
+            if (section->child(i)->text(0) == name)
+                return section->child(i);
+        }
+        return nullptr;
+    }
 
     QString title(int row) const
     {

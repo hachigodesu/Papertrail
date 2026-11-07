@@ -21,6 +21,7 @@ class QComboBox;
 class QItemSelectionModel;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QListView;
 class QProgressBar;
 class QPushButton;
@@ -112,6 +113,13 @@ public:
     // Makes everything selected into one publication.
     void combineSelected();
 
+    // Changes for everything selected, in the background like the others.
+    void addSelectedToCollection(qint64 id);
+    void removeSelectedFromCollection(qint64 id);
+
+    // Adds what can be done with collections to a menu, going by what's selected and what's in them.
+    void addCollectionActions(QMenu *menu);
+
     // Shows the library again, or a document's tab.
     QTabWidget *documentTabs() const { return m_documentTabs; }
     void closeDocumentTab(int index);
@@ -178,6 +186,7 @@ private:
     void offerReviewIfDue();
     void deletePublications(const QList<qint64> &ids);
     void askForBulkTag();
+    void askToAddSelectedToNewCollection();
     void editPublication(qint64 id);
     void openOrChooseFormat(qint64 id);
     void openPublicationElsewhere(qint64 id);

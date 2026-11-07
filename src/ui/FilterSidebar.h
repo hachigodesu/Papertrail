@@ -16,6 +16,7 @@ class QTreeWidget;
 class QTreeWidgetItem;
 
 namespace papertrail::core {
+class CollectionRepository;
 class TagRepository;
 }
 
@@ -30,6 +31,7 @@ public:
     enum Section {
         Tags,
         Status,
+        Collections,
         Authors,
         Journals,
         Publishers,
@@ -41,11 +43,17 @@ public:
         SectionCount,
     };
 
-    explicit FilterSidebar(core::TagRepository &tags, QWidget *parent = nullptr);
+    FilterSidebar(core::TagRepository &tags, core::CollectionRepository &collections, QWidget *parent = nullptr);
 
     void applyTo(core::PublicationFilter &filter) const;
     bool hasSelection() const;
     void clearSelection();
+    bool onlyCollectionsChosen() const;
+
+    // These ask what they need to, then say that collections have changed.
+    void newCollection();
+    void renameCollection(qint64 id);
+    void deleteCollection(qint64 id);
 
     // Replaces the counts, and keeps whatever's currently chosen.
     void setData(const papertrail::ui::SidebarData &data);
@@ -61,11 +69,13 @@ public:
 signals:
     void filterChanged();
     void tagsChanged();
+    void collectionsChanged();
 
 private:
     void buildSections();
     void updateFacet(Section section, const QList<core::FacetValue> &values);
     void updateTags(const QList<core::TagCount> &tags);
+    void updateCollections(const QList<core::FacetValue> &collections);
     void updateFlag(const QString &key, const QString &label, qint64 count);
     void setCount(QTreeWidgetItem *item, qint64 count);
     void onItemChanged(QTreeWidgetItem *item);
@@ -78,6 +88,7 @@ private:
     void updateClearButton();
 
     core::TagRepository &m_tags;
+    core::CollectionRepository &m_collections;
     QTreeWidget *m_tree = nullptr;
     QLineEdit *m_yearFrom = nullptr;
     QLineEdit *m_yearTo = nullptr;

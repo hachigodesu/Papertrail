@@ -83,6 +83,8 @@ void mergePublications(Database &db, qint64 keepId, qint64 otherId, const QStrin
     };
     move("INSERT OR IGNORE INTO publication_tag (publication_id, tag_id) "
          "SELECT ?1, tag_id FROM publication_tag WHERE publication_id = ?2");
+    move("INSERT OR IGNORE INTO collection_publication (collection_id, publication_id, added_at) "
+         "SELECT collection_id, ?1, added_at FROM collection_publication WHERE publication_id = ?2");
     move("UPDATE annotation SET publication_id = ?1 WHERE publication_id = ?2");
     move("UPDATE metadata_provenance SET publication_id = ?1 WHERE publication_id = ?2");
     move("UPDATE publication SET parent_id = ?1 WHERE parent_id = ?2");
@@ -121,6 +123,12 @@ qint64 separateFormat(Database &db, qint64 publicationId, const QString &format)
 
     for (const Tag &tag : tags.tagsFor(publicationId))
         tags.assign(newId, tag.id);
+    auto inCollections = db.prepare(
+        "INSERT OR IGNORE INTO collection_publication (collection_id, publication_id, added_at) "
+        "SELECT collection_id, ?1, added_at FROM collection_publication WHERE publication_id = ?2");
+    inCollections->bind(1, newId);
+    inCollections->bind(2, publicationId);
+    inCollections->step();
 
     bool primary = true;
     for (const FileRecord &file : moving) {

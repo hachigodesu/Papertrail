@@ -106,6 +106,11 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
     if (!ftsClause.isEmpty())
         c.add(ftsClause);
 
+    if (!filter.collectionIds.isEmpty()) {
+        c.addInIds("p.id IN (SELECT publication_id FROM collection_publication WHERE collection_id IN", ")",
+                   filter.collectionIds);
+    }
+
     c.addIn("p.type", typeStrings(filter.tabTypes));
     c.addIn("p.type", typeStrings(filter.types));
     c.addIn("p.type", typeStrings(search.types));
@@ -489,6 +494,25 @@ QList<TagCount> LibraryQuery::tagCounts(const PublicationFilter &filter)
     for (TagCount &tag : tags)
         tag.count = counts.value(tag.tagId);
     return tags;
+}
+
+QList<FacetValue> LibraryQuery::collectionCounts(const PublicationFilter &filter)
+{
+    PublicationFilter others = filter;
+    others.collectionIds.clear();
+    const Conditions c = buildConditions(others, searchClause(others), anyHidden());
+    const QByteArray scope = c.clauses.isEmpty()
+        ? QByteArray()
+        : " AND m.publication_id IN (SELECT p.id FROM publication p" + c.whereClause() + ")";
+    auto select = m_db.prepare("SELECT c.id, c.name, count(m.publication_id) FROM collection c "
+                               "LEFT JOIN collection_publication m ON m.collection_id = c.id" + scope
+                               + " GROUP BY c.id ORDER BY c.name");
+    bindAll(*select, c.bindings);
+
+    QList<FacetValue> values;
+    while (select->step())
+        values << FacetValue{select->textAt(0), select->textAt(1), select->int64At(2)};
+    return values;
 }
 
 FlagCounts LibraryQuery::flagCounts(const PublicationFilter &filter)

@@ -62,6 +62,10 @@ public:
     // A facet's counts ignore its own selection, so choosing one author still shows the others.
     QList<FacetValue> facet(const PublicationFilter &filter, Facet facet, int limit = 50);
     QList<TagCount> tagCounts(const PublicationFilter &filter);
+
+    // Every collection, including any with nothing matching, as its name sorts. Like a facet, this
+    // ignores which collections are chosen.
+    QList<FacetValue> collectionCounts(const PublicationFilter &filter);
     FlagCounts flagCounts(const PublicationFilter &filter);
     std::optional<std::pair<int, int>> yearRange(const PublicationFilter &filter);
 

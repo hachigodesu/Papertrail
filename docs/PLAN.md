@@ -259,14 +259,14 @@ An import report shows how many publications were linked, proposed or left unmat
 
 ### Collections
 
-A collection is a named grouping of publications, for something like a project, that opens in a view of its own without the rest of the library around it.
+A collection is a named grouping of publications, for something like a project. Collections are listed in the filter sidebar, and choosing one narrows the library to it, without the clutter of everything else.
 
 - **Membership:** a publication can be in any number of collections. Adding one doesn't move or copy its file, and taking it out of a collection leaves it in the library.
-- **The view:** opens in its own tab beside the library, showing only that collection, with the same grid and list, filters, search and sort.
-- **Adding:** from the context menu and bulk actions, on any selection.
-- **Managing:** create, rename and delete. Deleting a collection only deletes the grouping, never its publications.
+- **The view:** a section of the sidebar, with live counts like the other filters. It combines with the type tabs, search and other filters, and choosing several shows what's in any of them.
+- **Adding:** from the context menu, on any selection.
+- **Managing:** create, rename and delete, from the sidebar's context menu. Deleting a collection only deletes the grouping, never its publications.
 - **Removed folders:** a publication hidden with its folder keeps its place in its collections, and is back in them if the folder returns.
-- **How they differ from tags:** tags describe what a publication is, and filter the whole library. A collection is a working set you open and work inside.
+- **How they differ from tags:** tags describe what a publication is. A collection is a working set for something you're doing, such as a project.
 
 ### Article summaries
 
@@ -340,14 +340,14 @@ Each milestone ends with something you can run.
 | **M4** | Reader for PDF and EPUB: rendering, navigation, table of contents, in-document search, resume | Double-clicking a publication opens it, including large textbooks |
 | **M5** | Other formats: DjVu, MOBI/AZW3, XPS, CBZ, FB2, using the M0 results | Every format renders and supplies a cover and, where it has any, text |
 | **M6** | Metadata lookup: providers, all three modes, review queue, provenance and undo | Each mode behaves as specified, and offline mode makes no network requests |
-| **M6.5** | Collections: create, rename and delete, add and remove publications, a view of their own with the usual filters and search | A project's publications can be gathered into a collection and worked with on their own, and nothing outside it shows in that view |
+| **M6.5** | Collections: create, rename and delete, add and remove publications, and a sidebar section to narrow the library to them | A project's publications can be gathered into a collection and worked with on their own, and nothing outside it shows while it's chosen |
 | **M7** | Volumes: child articles, table-of-contents proposals, open at page, per-article tags | A journal volume can be split into searchable, citable articles |
 | **M8** | Full-text search: indexing, snippets, jump to match, "no text" flag | A phrase search across the library opens the right page |
 | **M9** | Highlights and notes: anchoring on fixed and reflowable formats, panel, Markdown export | Annotations survive restarts, file moves and EPUB font changes |
 | **M9.5** | Article summaries: API key handling, model and effort choice, cost estimates, summaries from identifying information, accept or discard, and sending the paper as a last resort | A paper can be summarized from its identifiers alone, with the cost shown beforehand and the sources shown afterwards. Nothing is sent without confirmation, and without a key the app makes no requests to Anthropic |
 | **M10** | Citations: BibTeX, RIS, CSL-JSON export, and copying a formatted citation or reference list in Harvard, APA, IEEE or Chicago | Output imports cleanly into BibTeX and Zotero, and each style matches test fixtures for every publication type |
 | **M11** | Library export and import: bundle format, content matching, merge and replace, settings transfer, match report | A library exported from one computer restores all tags, notes and settings on another, with its files in a completely different folder structure |
-| **M12** | Release: first-run flow, Windows installer and portable zip, Linux AppImage, Flatpak and AUR package, performance and crash hardening, docs, making the repository public | Clean installs work on fresh Windows, Arch and Ubuntu machines, and the Linux packages pass the distro checks |
+| **M12** | Release: first-run flow, Windows installer and portable zip, Linux AppImage, Flatpak and AUR package, performance and crash hardening, by-hand testing on a real Linux desktop, docs, making the repository public | Clean installs work on fresh Windows, Arch and Ubuntu machines, and the Linux packages pass the distro checks |
 
 ### Performance targets at 100,000 publications
 

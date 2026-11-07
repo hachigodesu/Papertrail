@@ -1,5 +1,6 @@
 #include "ui/FilterSidebar.h"
 
+#include "core/repo/CollectionRepository.h"
 #include "core/repo/TagRepository.h"
 #include "ui/Labels.h"
 
@@ -133,8 +134,8 @@ QIcon colourSwatch(const QString &colour)
 
 } // namespace
 
-FilterSidebar::FilterSidebar(TagRepository &tags, QWidget *parent)
-    : QWidget(parent), m_tags(tags)
+FilterSidebar::FilterSidebar(TagRepository &tags, CollectionRepository &collections, QWidget *parent)
+    : QWidget(parent), m_tags(tags), m_collections(collections)
 {
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(6, 6, 6, 6);
@@ -208,6 +209,7 @@ void FilterSidebar::buildSections()
         item->setFont(0, bold);
         m_sections[section] = item;
     };
+    add(Collections, tr("Collections"));
     add(Tags, tr("Tags"));
     add(Status, tr("Needs attention"));
     add(Authors, tr("Author"));
@@ -218,6 +220,7 @@ void FilterSidebar::buildSections()
     add(Languages, tr("Language"));
     add(Formats, tr("Format"));
     add(ReadStatuses, tr("Read status"));
+    m_sections[Collections]->setExpanded(true);
     m_sections[Tags]->setExpanded(true);
     m_sections[Status]->setExpanded(true);
 }
@@ -233,6 +236,7 @@ void FilterSidebar::applyTo(PublicationFilter &filter) const
     };
 
     filter.tagIds = ids(Tags);
+    filter.collectionIds = ids(Collections);
     filter.authorIds = ids(Authors);
     filter.journals = strings(Journals);
     filter.publishers = strings(Publishers);
@@ -265,6 +269,15 @@ bool FilterSidebar::hasSelection() const
             return true;
     }
     return !m_yearFrom->text().isEmpty() || !m_yearTo->text().isEmpty();
+}
+
+bool FilterSidebar::onlyCollectionsChosen() const
+{
+    for (int section = 0; section < SectionCount; ++section) {
+        if (section != Collections && !m_chosen[section].isEmpty())
+            return false;
+    }
+    return !m_chosen[Collections].isEmpty() && m_yearFrom->text().isEmpty() && m_yearTo->text().isEmpty();
 }
 
 void FilterSidebar::clearSelection()
@@ -362,6 +375,18 @@ void FilterSidebar::setData(const SidebarData &data)
         }
         updateTags(data.tags);
 
+        QSet<QString> collections;
+        for (const FacetValue &collection : data.collections)
+            collections.insert(collection.key);
+        for (const QString &key : QSet<QString>(m_chosen[Collections])) {
+            if (!collections.contains(key)) {
+                m_chosen[Collections].remove(key);
+                m_chosenLabels[Collections].remove(key);
+                tagsRemoved = true;
+            }
+        }
+        updateCollections(data.collections);
+
         updateFlag(kFlagReview, tr("Needs checking"), data.flags.needsReview);
         updateFlag(kFlagNoText, tr("No text"), data.flags.noText);
         updateFlag(kFlagNoFile, tr("No file linked"), data.flags.noFile);
@@ -428,13 +453,26 @@ void FilterSidebar::updateFacet(Section section, const QList<FacetValue> &values
     }
     qDeleteAll(existing);
 
-    if (values.size() >= kFacetLimit) {
+    if (section != Collections && values.size() >= kFacetLimit) {
         auto *note = new QTreeWidgetItem(node, {tr("Most common shown. Search for others.")});
         note->setFlags(Qt::ItemIsEnabled);
         note->setData(0, kSectionRole, kNoSection);
         note->setForeground(0, palette().color(QPalette::PlaceholderText));
     }
     node->setHidden(rows.isEmpty());
+}
+
+void FilterSidebar::updateCollections(const QList<FacetValue> &collections)
+{
+    updateFacet(Collections, collections);
+    QTreeWidgetItem *node = m_sections[Collections];
+    if (node->childCount() == 0) {
+        auto *hint = new QTreeWidgetItem(node, {tr("Collections you add appear here.")});
+        hint->setFlags(Qt::ItemIsEnabled);
+        hint->setData(0, kSectionRole, kNoSection);
+        hint->setForeground(0, palette().color(QPalette::PlaceholderText));
+    }
+    node->setHidden(false); // It's how anyone finds out about them.
 }
 
 void FilterSidebar::updateTags(const QList<TagCount> &tags)
@@ -523,6 +561,20 @@ void FilterSidebar::showContextMenu(const QPoint &position)
     QTreeWidgetItem *item = m_tree->itemAt(position);
     if (!item)
         return;
+    const bool isCollection = item->data(0, kSectionRole).toInt() == Collections;
+    if (item == m_sections[Collections] || isCollection || (item->parent() == m_sections[Collections])) {
+        QMenu menu(this);
+        menu.addAction(tr("New collection..."), this, &FilterSidebar::newCollection);
+        if (isCollection) {
+            const qint64 id = item->data(0, kKeyRole).toLongLong();
+            menu.addSeparator();
+            menu.addAction(tr("Rename..."), this, [this, id] { renameCollection(id); });
+            menu.addAction(tr("Delete..."), this, [this, id] { deleteCollection(id); });
+        }
+        menu.exec(m_tree->viewport()->mapToGlobal(position));
+        return;
+    }
+
     const bool isTag = item->data(0, kSectionRole).toInt() == Tags;
     if (item != m_sections[Tags] && !isTag)
         return;
@@ -540,6 +592,60 @@ void FilterSidebar::showContextMenu(const QPoint &position)
         menu.addAction(tr("Delete..."), this, [this, id] { deleteTag(id); });
     }
     menu.exec(m_tree->viewport()->mapToGlobal(position));
+}
+
+void FilterSidebar::newCollection()
+{
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("New collection"), tr("Name:"), QLineEdit::Normal, QString(), &ok);
+    if (!ok || name.trimmed().isEmpty())
+        return;
+    try {
+        m_collections.create(name);
+        emit collectionsChanged();
+    } catch (const std::exception &error) {
+        QMessageBox::warning(this, tr("New collection"), tr("That collection couldn't be created: %1").arg(QString::fromUtf8(error.what())));
+    }
+}
+
+void FilterSidebar::renameCollection(qint64 id)
+{
+    const auto collection = m_collections.get(id);
+    if (!collection)
+        return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename collection"), tr("Name:"), QLineEdit::Normal, collection->name, &ok);
+    if (!ok || name.trimmed().isEmpty() || name.trimmed() == collection->name)
+        return;
+    try {
+        m_collections.rename(id, name);
+        emit collectionsChanged();
+    } catch (const std::exception &error) {
+        QMessageBox::warning(this, tr("Rename collection"), tr("That collection couldn't be renamed: %1").arg(QString::fromUtf8(error.what())));
+    }
+}
+
+void FilterSidebar::deleteCollection(qint64 id)
+{
+    const auto collection = m_collections.get(id);
+    if (!collection)
+        return;
+    QMessageBox box(QMessageBox::Question, tr("Delete collection"),
+                    tr("Delete the collection \"%1\"? The publications in it stay in the library.").arg(collection->name),
+                    QMessageBox::Yes | QMessageBox::Cancel, this);
+    box.setTextFormat(Qt::PlainText);
+    box.setDefaultButton(QMessageBox::Cancel);
+    if (box.exec() != QMessageBox::Yes)
+        return;
+    m_collections.remove(id);
+    const QString key = QString::number(id);
+    const bool wasChosen = m_chosen[Collections].remove(key);
+    m_chosenLabels[Collections].remove(key);
+    emit collectionsChanged();
+    if (wasChosen) {
+        updateClearButton();
+        emit filterChanged();
+    }
 }
 
 void FilterSidebar::newTag(std::optional<qint64> parent)

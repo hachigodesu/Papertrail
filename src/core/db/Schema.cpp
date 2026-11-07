@@ -441,6 +441,25 @@ BEGIN
 END;
 )sql";
 
+// Collections are groupings the user makes, such as for a project. A publication can be in any number.
+const char *const kMigration9 = R"sql(
+CREATE TABLE IF NOT EXISTS collection (
+    id          INTEGER PRIMARY KEY,
+    uuid        TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS collection_publication (
+    collection_id   INTEGER NOT NULL REFERENCES collection(id) ON DELETE CASCADE,
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    added_at        INTEGER NOT NULL,
+    PRIMARY KEY (collection_id, publication_id)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS collection_publication_publication ON collection_publication(publication_id, collection_id);
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -454,6 +473,7 @@ const std::vector<Migration> &libraryMigrations()
         {6, kMigration6},
         {7, kMigration7},
         {8, kMigration8},
+        {9, kMigration9},
     };
     return migrations;
 }

@@ -171,6 +171,7 @@ void SidebarQueryThread::run()
         if (query) {
             try {
                 data.tags = query->tagCounts(filter);
+                data.collections = query->collectionCounts(filter);
                 abandoned = hasNewerRequest();
                 if (!abandoned) {
                     data.flags = query->flagCounts(filter);

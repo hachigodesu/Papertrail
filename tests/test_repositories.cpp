@@ -4,6 +4,7 @@
 #include "core/query/LibraryQuery.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/FileRepository.h"
+#include "core/repo/CollectionRepository.h"
 #include "core/repo/PublicationMerge.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/ReadingStateRepository.h"
@@ -697,6 +698,143 @@ private slots:
         QCOMPARE(query.ids({}, {}), QList<qint64>{fine});
         QCOMPARE(m_files->hiddenPublications(), QList<qint64>{orphan});
         QVERIFY(m_publications->get(orphan).has_value());
+    }
+
+    void aCollectionHasAUniqueName()
+    {
+        CollectionRepository collections(*m_db);
+        const qint64 id = collections.create(QStringLiteral("  Project  "));
+        QCOMPARE(collections.get(id)->name, QStringLiteral("Project"));
+        QVERIFY(!collections.get(id)->uuid.isEmpty());
+
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, collections.create(QStringLiteral("project")));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, collections.create(QStringLiteral("   ")));
+
+        const qint64 other = collections.create(QStringLiteral("Other"));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, collections.rename(other, QStringLiteral("PROJECT")));
+        collections.rename(id, QStringLiteral("PROJECT")); // Only a change of case, to itself.
+        QCOMPARE(collections.get(id)->name, QStringLiteral("PROJECT"));
+
+        const QString uuid = collections.get(id)->uuid;
+        collections.rename(id, QStringLiteral("Renamed"));
+        QCOMPARE(collections.get(id)->uuid, uuid);
+    }
+
+    void aPublicationCanBeInSeveralCollections()
+    {
+        CollectionRepository collections(*m_db);
+        const qint64 first = collections.create(QStringLiteral("First"));
+        const qint64 second = collections.create(QStringLiteral("Second"));
+        Publication p;
+        p.title = QStringLiteral("Some Study");
+        const qint64 id = m_publications->create(p);
+
+        collections.add(first, {id});
+        collections.add(first, {id}); // Adding it again changes nothing.
+        collections.add(second, {id});
+        QCOMPARE(collections.get(first)->count, qint64(1));
+        QCOMPARE(collections.collectionsFor(id).size(), 2);
+        QCOMPARE(collections.all().first().name, QStringLiteral("First"));
+
+        collections.removeFrom(first, {id});
+        QVERIFY(!collections.contains(first, id));
+        QVERIFY(collections.contains(second, id));
+        QVERIFY(m_publications->get(id).has_value());
+    }
+
+    void itCanBeToldHowManyOfSomePublicationsACollectionHolds()
+    {
+        CollectionRepository collections(*m_db);
+        const qint64 first = collections.create(QStringLiteral("First"));
+        const qint64 second = collections.create(QStringLiteral("Second"));
+        const qint64 third = collections.create(QStringLiteral("Third"));
+        const auto add = [this] {
+            Publication p; // Creating one gives it an identity of its own, so each needs a new one.
+            p.title = QStringLiteral("Some Study");
+            return m_publications->create(p);
+        };
+        const qint64 a = add();
+        const qint64 b = add();
+        const qint64 other = add();
+        collections.add(first, {a, b});
+        collections.add(second, {a});
+        collections.add(third, {other});
+
+        const QHash<qint64, qint64> counts = collections.membershipCounts({a, b});
+        QCOMPARE(counts.value(first), qint64(2));
+        QCOMPARE(counts.value(second), qint64(1));
+        QVERIFY(!counts.contains(third));
+        QVERIFY(collections.membershipCounts({}).isEmpty());
+    }
+
+    void deletingACollectionLeavesItsPublications()
+    {
+        CollectionRepository collections(*m_db);
+        const qint64 id = collections.create(QStringLiteral("Project"));
+        Publication p;
+        p.title = QStringLiteral("Some Study");
+        const qint64 publication = m_publications->create(p);
+        collections.add(id, {publication});
+
+        collections.remove(id);
+        QVERIFY(!collections.get(id).has_value());
+        QVERIFY(m_publications->get(publication).has_value());
+        QVERIFY(collections.collectionsFor(publication).isEmpty());
+    }
+
+    void deletingAPublicationTakesItOutOfCollections()
+    {
+        CollectionRepository collections(*m_db);
+        const qint64 id = collections.create(QStringLiteral("Project"));
+        Publication p;
+        p.title = QStringLiteral("Some Study");
+        const qint64 publication = m_publications->create(p);
+        collections.add(id, {publication});
+        m_publications->remove(publication);
+        QCOMPARE(collections.get(id)->count, qint64(0));
+    }
+
+    void aHiddenPublicationKeepsItsPlaceInACollection()
+    {
+        CollectionRepository collections(*m_db);
+        const qint64 id = collections.create(QStringLiteral("Project"));
+        const qint64 root = m_files->addRoot(QStringLiteral("R"), QStringLiteral("/r"));
+        const qint64 publication = publicationIn(root, QStringLiteral("a.pdf"), QStringLiteral("Some Study"), 2000);
+        collections.add(id, {publication});
+
+        m_files->hideRoot(root);
+        QCOMPARE(collections.get(id)->count, qint64(0));
+        QVERIFY(collections.contains(id, publication));
+
+        m_files->restoreRoot(root);
+        QCOMPARE(collections.get(id)->count, qint64(1));
+    }
+
+    void collectionsFollowPublicationsThroughCombiningAndSeparating()
+    {
+        CollectionRepository collections(*m_db);
+        const qint64 kept = collections.create(QStringLiteral("Kept"));
+        const qint64 merged = collections.create(QStringLiteral("Merged"));
+        const qint64 root = m_files->addRoot(QStringLiteral("R"), QStringLiteral("/r"));
+        const qint64 keep = publicationIn(root, QStringLiteral("a.pdf"), QStringLiteral("Some Study"), 2000);
+        const qint64 other = publicationIn(root, QStringLiteral("b.pdf"), QStringLiteral("Some Study Again"), 2000);
+        collections.add(kept, {keep});
+        collections.add(merged, {other});
+
+        FileRecord epub;
+        epub.rootId = root;
+        epub.relativePath = QStringLiteral("a.epub");
+        epub.format = QStringLiteral("epub");
+        m_files->link(other, m_files->upsert(epub), false);
+
+        mergePublications(*m_db, keep, other, QStringLiteral("manual"));
+        QVERIFY(collections.contains(kept, keep));
+        QVERIFY(collections.contains(merged, keep));
+
+        const qint64 separated = separateFormat(*m_db, keep, QStringLiteral("epub"));
+        QVERIFY(collections.contains(kept, separated));
+        QVERIFY(collections.contains(merged, separated));
+        QVERIFY(collections.contains(kept, keep));
     }
 
     void oneFileIsPrimary()

@@ -18,6 +18,7 @@ struct PublicationFilter {
     QList<PublicationType> types;
 
     QList<qint64> tagIds; // A tag also matches everything beneath it.
+    QList<qint64> collectionIds;
     QList<qint64> authorIds;
     QStringList journals;
     QStringList publishers;

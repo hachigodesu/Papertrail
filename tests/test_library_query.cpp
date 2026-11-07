@@ -1,6 +1,7 @@
 #include "core/db/Database.h"
 #include "core/db/Schema.h"
 #include "core/query/LibraryQuery.h"
+#include "core/repo/CollectionRepository.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/TagRepository.h"
@@ -131,6 +132,73 @@ private slots:
 
         filter.formats = {QStringLiteral("pdf"), QStringLiteral("epub")};
         QCOMPARE(m_query->count(filter), qint64(2));
+    }
+
+    void aCollectionNarrowsEverythingToItsOwn()
+    {
+        const auto idOf = [this](const QString &title) {
+            for (const PublicationSummary &summary : m_query->page({}, {}, 0, 100)) {
+                if (summary.title == title)
+                    return summary.id;
+            }
+            return qint64(0);
+        };
+        CollectionRepository collections(*m_db);
+        const qint64 project = collections.create(QStringLiteral("Project"));
+        const qint64 emptyOne = collections.create(QStringLiteral("Empty"));
+        collections.add(project, {idOf(QStringLiteral("Ceramic Thesis")), idOf(QStringLiteral("Beam Fatigue"))});
+
+        PublicationFilter filter;
+        filter.collectionIds = {project};
+        QCOMPARE(titleSet(filter), (QSet<QString>{QStringLiteral("Ceramic Thesis"), QStringLiteral("Beam Fatigue")}));
+        QCOMPARE(m_query->count(filter), qint64(2));
+        QCOMPARE(m_query->ids(filter, {}).size(), 2);
+        QCOMPARE(m_query->flagCounts(filter).needsReview, qint64(1));
+        QCOMPARE(m_query->flagCounts(filter).missingOrOffline, qint64(1));
+
+        // Searching and the other filters only look inside it.
+        PublicationFilter search = filter;
+        search.searchText = QStringLiteral("Beam");
+        QCOMPARE(titleSet(search), (QSet<QString>{QStringLiteral("Beam Fatigue")}));
+        QVERIFY(m_query->count({}) > 2);
+
+        search.searchText = QStringLiteral("Bridges"); // Elsewhere in the library.
+        QCOMPARE(m_query->count(search), qint64(0));
+        QCOMPARE(m_query->page(search, {SortField::Relevance, true}, 0, 10).size(), 0);
+
+        PublicationFilter none;
+        none.collectionIds = {emptyOne};
+        QCOMPARE(m_query->count(none), qint64(0));
+        QVERIFY(!m_query->yearRange(none).has_value());
+        QVERIFY(m_query->facet(none, Facet::Author).isEmpty());
+        for (const TagCount &tag : m_query->tagCounts(none))
+            QCOMPARE(tag.count, qint64(0));
+
+        // Choosing several shows what's in any of them, as with other filters.
+        const qint64 second = collections.create(QStringLiteral("Second"));
+        collections.add(second, {idOf(QStringLiteral("Neural Bridges"))});
+        filter.collectionIds = {project, second};
+        QCOMPARE(m_query->count(filter), qint64(3));
+
+        // The sidebar's counts list them all, follow other filters, and ignore which are chosen.
+        const auto countFor = [](const QList<FacetValue> &values, const QString &name) {
+            for (const FacetValue &value : values) {
+                if (value.label == name)
+                    return value.count;
+            }
+            return qint64(-1);
+        };
+        QList<FacetValue> counts = m_query->collectionCounts(filter);
+        QCOMPARE(counts.size(), 3);
+        QCOMPARE(counts.first().label, QStringLiteral("Empty"));
+        QCOMPARE(countFor(counts, QStringLiteral("Project")), qint64(2));
+        QCOMPARE(countFor(counts, QStringLiteral("Empty")), qint64(0));
+
+        PublicationFilter beams;
+        beams.searchText = QStringLiteral("Beam");
+        counts = m_query->collectionCounts(beams);
+        QCOMPARE(countFor(counts, QStringLiteral("Project")), qint64(1));
+        QCOMPARE(countFor(counts, QStringLiteral("Second")), qint64(0));
     }
 
     void flagsSelectProblemRecords()

@@ -72,6 +72,7 @@ struct SidebarData {
     quint64 generation = 0;
     QHash<int, QList<core::FacetValue>> facets; // By core::Facet.
     QList<core::TagCount> tags;
+    QList<core::FacetValue> collections;
     core::FlagCounts flags;
     std::optional<std::pair<int, int>> years;
     QString error;

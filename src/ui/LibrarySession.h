@@ -4,6 +4,7 @@
 #include "core/query/LibraryQuery.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
+#include "core/repo/CollectionRepository.h"
 #include "core/repo/TagRepository.h"
 #include "core/settings/SettingsStore.h"
 #include "metadata/Providers.h"
@@ -52,6 +53,7 @@ public:
     core::Database &database() { return *m_db; }
     core::PublicationRepository &publications() { return *m_publications; }
     core::TagRepository &tags() { return *m_tags; }
+    core::CollectionRepository &collections() { return *m_collections; }
     core::FileRepository &files() { return *m_files; }
     core::SettingsStore &settings() { return *m_settings; }
     core::LibraryQuery &query() { return *m_query; }
@@ -62,6 +64,7 @@ private:
     std::unique_ptr<core::Database> m_db;
     std::unique_ptr<core::PublicationRepository> m_publications;
     std::unique_ptr<core::TagRepository> m_tags;
+    std::unique_ptr<core::CollectionRepository> m_collections;
     std::unique_ptr<core::FileRepository> m_files;
     std::unique_ptr<core::SettingsStore> m_settings;
     std::unique_ptr<core::LibraryQuery> m_query;

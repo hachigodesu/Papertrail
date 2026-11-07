@@ -52,6 +52,7 @@ public:
     QFormLayout *facts() const { return m_facts; }
     QComboBox *readStatusBox() const { return m_readStatus; }
     QCheckBox *preprintBox() const { return m_preprint; }
+    QLabel *collectionsLabel() const { return m_collections; }
     QLabel *preprintHint() const { return m_preprintHint; }
     QWidget *undoRow() const { return m_undoRow; }
     void undoLookup();
@@ -99,6 +100,7 @@ private:
     QVBoxLayout *m_tagRows = nullptr;
     QLineEdit *m_tagEdit = nullptr;
     QCheckBox *m_preprint = nullptr;
+    QLabel *m_collections = nullptr;
     QLabel *m_preprintHint = nullptr;
     QWidget *m_undoRow = nullptr;
     QLabel *m_undoLabel = nullptr;

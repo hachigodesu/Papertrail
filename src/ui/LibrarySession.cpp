@@ -41,6 +41,7 @@ LibrarySession::LibrarySession(const LibraryPaths &paths)
     core::migrateLibrary(*m_db);
     m_publications = std::make_unique<core::PublicationRepository>(*m_db);
     m_tags = std::make_unique<core::TagRepository>(*m_db);
+    m_collections = std::make_unique<core::CollectionRepository>(*m_db);
     m_files = std::make_unique<core::FileRepository>(*m_db);
     m_settings = std::make_unique<core::SettingsStore>(*m_db);
     m_query = std::make_unique<core::LibraryQuery>(*m_db);

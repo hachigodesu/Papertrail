@@ -68,6 +68,14 @@ using namespace core;
 
 namespace {
 
+constexpr qint64 kMostToCheckCollectionsFor = 1000;
+
+// In a menu, & marks a keyboard shortcut, and a name's own has to be doubled to appear.
+QString escapedForMenu(QString name)
+{
+    return name.replace(u'&', QStringLiteral("&&"));
+}
+
 constexpr int kMaxRechecks = 20; // A file locked for this long isn't simply still being copied.
 constexpr qint64 kMaxToCombine = 20; // More than this at once is much more likely to be a slip.
 
@@ -354,9 +362,13 @@ void MainWindow::buildCentre()
     m_splitter = new QSplitter(Qt::Horizontal, central);
     column->addWidget(m_splitter, 1);
 
-    m_sidebar = new FilterSidebar(m_session.tags(), m_splitter);
+    m_sidebar = new FilterSidebar(m_session.tags(), m_session.collections(), m_splitter);
     connect(m_sidebar, &FilterSidebar::filterChanged, this, &MainWindow::applyFilters);
     connect(m_sidebar, &FilterSidebar::tagsChanged, this, &MainWindow::refreshNow);
+    connect(m_sidebar, &FilterSidebar::collectionsChanged, this, [this] {
+        refreshNow();
+        m_details->reload();
+    });
     m_splitter->addWidget(m_sidebar);
 
     m_stack = new QStackedWidget(m_splitter);
@@ -832,7 +844,12 @@ void MainWindow::updateStack()
         m_stack->setCurrentWidget(activeView());
         return;
     }
-    if (m_session.files().roots().isEmpty()) {
+    if (m_sidebar->onlyCollectionsChosen() && m_search->text().isEmpty() && m_tabs->currentIndex() == 0) {
+        m_message->setText(tr("Nothing has been added to this yet.\n\nSelect some publications in the library, "
+                              "right-click them and choose Add to collection."));
+        m_messageButton->setText(tr("Clear search and filters"));
+        m_messageButton->show();
+    } else if (m_session.files().roots().isEmpty()) {
         m_message->setText(tr("Your library is empty.\n\nAdd a folder of papers and books. "
                               "They stay where they are, and Papertrail never changes them."));
         m_messageButton->setText(tr("Add folder..."));
@@ -1167,6 +1184,8 @@ void MainWindow::showContextMenu(const QPoint &position)
         status->addAction(readStatusLabel(value), this, [this, value] { setSelectedReadStatus(value); });
     menu.addAction(tr("Mark as checked"), this, &MainWindow::markSelectedChecked);
     menu.addAction(tr("Look up details online"), this, &MainWindow::askAndLookUpSelected);
+    menu.addSeparator();
+    addCollectionActions(&menu);
     if (count >= 2 && count <= kMaxToCombine) {
         menu.addSeparator();
         menu.addAction(tr("Combine into one publication..."), this, [this] {
@@ -1181,6 +1200,79 @@ void MainWindow::showContextMenu(const QPoint &position)
         });
     }
     menu.exec(view->viewport()->mapToGlobal(position));
+}
+
+void MainWindow::addCollectionActions(QMenu *menu)
+{
+    QMenu *addTo = menu->addMenu(tr("Add to collection"));
+    QMenu *removeFrom = nullptr;
+    guarded(tr("Reading the collections"), [&] {
+        // Working out what's in what means listing what's selected, which is too slow to do just to open
+        // a menu if that's a large part of a big library. Then, every collection is offered both ways.
+        const qint64 selected = selectedCount();
+        const bool known = selected <= kMostToCheckCollectionsFor;
+        const QHash<qint64, qint64> holding
+            = known ? m_session.collections().membershipCounts(selectedIds()) : QHash<qint64, qint64>();
+
+        for (const Collection &collection : m_session.collections().all()) {
+            const qint64 id = collection.id;
+            const QString name = escapedForMenu(collection.name);
+            const qint64 inIt = holding.value(id);
+            const bool partly = known && inIt > 0 && inIt < selected;
+            QAction *add = addTo->addAction(partly ? tr("%1 (%2 of %3 already in it)").arg(name).arg(inIt).arg(selected) : name, this,
+                                            [this, id] { addSelectedToCollection(id); });
+            if (known && inIt == selected) {
+                add->setCheckable(true);
+                add->setChecked(true);
+                add->setEnabled(false);
+            }
+            if (!known || inIt > 0) {
+                if (!removeFrom)
+                    removeFrom = menu->addMenu(tr("Remove from collection"));
+                removeFrom->addAction(partly ? tr("%1 (%2 of %3 in it)").arg(name).arg(inIt).arg(selected) : name, this,
+                                      [this, id] { removeSelectedFromCollection(id); });
+            }
+        }
+    });
+    if (!addTo->isEmpty())
+        addTo->addSeparator();
+    addTo->addAction(tr("New collection..."), this, &MainWindow::askToAddSelectedToNewCollection);
+}
+
+void MainWindow::addSelectedToCollection(qint64 id)
+{
+    guarded(tr("Adding to the collection"), [&] {
+        const std::optional<Collection> collection = m_session.collections().get(id);
+        if (!collection)
+            return;
+        m_bulk->enqueue(tr("Adding to %1").arg(collection->name), selectedIds(), [id](Database &db, const QList<qint64> &batch) {
+            CollectionRepository(db).add(id, batch);
+        });
+    });
+}
+
+void MainWindow::removeSelectedFromCollection(qint64 id)
+{
+    guarded(tr("Removing from the collection"), [&] {
+        const std::optional<Collection> collection = m_session.collections().get(id);
+        if (!collection)
+            return;
+        m_bulk->enqueue(tr("Removing from %1").arg(collection->name), selectedIds(), [id](Database &db, const QList<qint64> &batch) {
+            CollectionRepository(db).removeFrom(id, batch);
+        });
+    });
+}
+
+void MainWindow::askToAddSelectedToNewCollection()
+{
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("New collection"), tr("Name:"), QLineEdit::Normal, QString(), &ok);
+    if (!ok || name.trimmed().isEmpty())
+        return;
+    guarded(tr("Creating the collection"), [&] {
+        const qint64 id = m_session.collections().create(name);
+        addSelectedToCollection(id);
+    });
 }
 
 void MainWindow::combineSelected()

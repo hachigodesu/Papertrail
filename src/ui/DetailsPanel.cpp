@@ -198,6 +198,9 @@ void DetailsPanel::buildSinglePage()
     m_tagRows = new QVBoxLayout;
     m_tagRows->setSpacing(2);
     column->addLayout(m_tagRows);
+    m_collections = plainLabel();
+    m_collections->setWordWrap(true);
+    column->addWidget(m_collections);
     m_tagEdit = new QLineEdit;
     m_tagEdit->setPlaceholderText(tr("Add a tag, such as Engineering > FEM"));
     m_tagEdit->setAccessibleName(tr("Add a tag"));
@@ -453,6 +456,12 @@ void DetailsPanel::reload()
         m_tagRows->addLayout(row);
     }
     refreshTagCompleter(m_tagEdit);
+
+    QStringList collections;
+    for (const Collection &collection : m_session.collections().collectionsFor(p.id))
+        collections << collection.name;
+    m_collections->setText(tr("In collections: %1").arg(collections.join(QStringLiteral(", "))));
+    m_collections->setVisible(!collections.isEmpty());
 
     clearLayout(m_fileRows);
     const qint64 fileOwner = p.parentId.value_or(p.id);

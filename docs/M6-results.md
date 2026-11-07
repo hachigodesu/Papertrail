@@ -93,9 +93,9 @@ Deleting details leaves covers and converted books in the cache folder, as nothi
 - **Live, using public records:** Crossref, arXiv and Open Library were reached over secure connections on all three platforms, using `papertrail-lookup`. OpenAlex was checked on all three too. These tests don't run in CI, which never contacts the real services.
 - **AppImage:** it builds on Ubuntu, starts, and now fails to build if the secure-connection plugin is missing.
 - **By eye:** the review tab and the mode dialog, using offscreen pictures with a poor fallback font.
+- **By you:** lookups on your real library, on Windows, worked well.
 - **Not tested yet:**
-  - **Your real library.** This sends your files' identifiers and titles to the sources, so it needs you to choose an online mode. Real-world match quality, and how many matches end up in review, are still unknown.
-  - **By hand in the real window,** on Windows or on a Linux desktop.
+  - **On a Linux desktop by hand,** which is left until M12.
   - **A live lookup from inside the AppImage.** Its plugin was checked, but `papertrail-lookup` isn't bundled.
   - **A real rate limit from a source.** Those paths use recorded answers.
   - **A very large lookup run.** At these paces, 10,000 publications would take from under an hour to several hours, depending on how many need a search.
