@@ -66,6 +66,13 @@ public:
     };
     PageTexts pageTexts(const QString &path, const QString &convertedPath, int start, int count, int timeoutMs);
 
+    struct Cover {
+        WorkerFailure failure = WorkerFailure::None;
+        QString error;
+    };
+    // Writes a cover from one page, counting from 0, such as where an article starts.
+    Cover pageCover(const QString &path, const QString &convertedPath, int page, const QString &coverPath, int timeoutMs);
+
     // How many times the worker has been started, for tests and reports.
     int startCount() const { return m_startCount; }
 

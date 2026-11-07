@@ -240,7 +240,7 @@ private slots:
     void volumesHoldChildArticlesInPageOrder()
     {
         Publication volume;
-        volume.type = PublicationType::JournalVolume;
+        volume.type = PublicationType::JournalIssue;
         const qint64 volumeId = m_publications->create(volume);
 
         Publication later;

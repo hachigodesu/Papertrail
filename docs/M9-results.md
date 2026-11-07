@@ -23,6 +23,10 @@ You can now highlight and underline text and add notes in the reader. They're ke
 - **Articles:** a highlight made while reading an article belongs to that article, and also shows when reading the whole volume.
 - **Combining publications:** highlights carry over.
 
+## Changed after hand testing
+
+- **The Colour menu ticks a highlight's current colour,** on the page and in the **Notes** list, and each colour has a swatch beside its name.
+
 ## Decisions made while you were away
 
 - **A note is attached to selected text.** There are no free-floating notes on an empty part of a page, since the anchoring depends on text. The details panel's Notes box still covers notes on the whole publication.

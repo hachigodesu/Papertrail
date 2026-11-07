@@ -269,7 +269,7 @@ public:
         return {info.width * 72.0 / info.dpi, info.height * 72.0 / info.dpi};
     }
 
-    QString largestTextOnFirstPage() override { return {}; } // DjVu text has no font sizes.
+    QString largestTextOnPage(int) override { return {}; } // DjVu text has no font sizes.
     QMap<QString, QString> metadata() override { return {}; }
     QByteArray xmpPacket() override { return {}; }
     QByteArray epubPackageDocument() override { return {}; }

@@ -164,7 +164,15 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
         case TitleColumn: return row->title;
         case AuthorsColumn: return row->authors;
         case YearColumn: return row->year ? QVariant(*row->year) : QVariant();
-        case ContainerColumn: return row->containerTitle;
+        case ContainerColumn: {
+            // Issues of one journal share its name, so their numbers tell them apart.
+            if (row->type != PublicationType::JournalIssue)
+                return row->containerTitle;
+            const QString numbers = issueNumbering(row->volume, row->issue, row->month, std::nullopt);
+            if (numbers.isEmpty())
+                return row->containerTitle;
+            return row->containerTitle.isEmpty() ? numbers : row->containerTitle + QStringLiteral(", ") + numbers;
+        }
         case TypeColumn: return typeLabel(row->type);
         case FormatColumn: return row->formats.join(QStringLiteral(", ")).toUpper();
         case ReadColumn: return readStatusLabel(row->readStatus);
@@ -200,6 +208,9 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
     case FormatsRole: return row->formats.join(QStringLiteral(", ")).toUpper();
     case FileStatusRole: return row->fileStatus;
     case NeedsReviewRole: return row->needsReview;
+    case NumberingRole:
+        return row->type == PublicationType::JournalIssue ? issueNumbering(row->volume, row->issue, row->month, row->year)
+                                                          : QString();
     default: return {};
     }
 }

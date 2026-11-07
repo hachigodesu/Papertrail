@@ -147,6 +147,63 @@ def reader_pdf(path):
     path.write_bytes(bytes(out))
 
 
+def numbered_issue_pdf(path):
+    """A journal issue whose table of contents only numbers its entries, as some publishers' do. Each
+    article's title is the largest text on its first page."""
+    texts = [
+        [(24, "Journal of Imaginary Findings"), (11, "Volume 3, Issue 2")],
+        [(9, "Journal of Imaginary Findings, vol. 3, no. 2"), (18, "A Made-Up Study of Lattice"),
+         (18, "Vibrations in Pretend Crystals"), (11, "Ada Example and Ben Sample"),
+         (8, "Digital Object Identifier 10.5555/imaginary.2026.0002"), (11, "References"),
+         (8, "[1] A cited work, doi:10.5555/cited.0001")],
+        [(11, "The made-up study continues on this page.")],
+        [(18, "Another Invented Article on Fluid Flow"), (8, "doi: 10.5555/imaginary.2026.0004"),
+         (8, "Compare the earlier work at 10.5555/other.0009")],
+    ]
+    pages = [page_stream(lines) for lines in texts]
+    objects = {
+        1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 20 0 R >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    }
+    kids = []
+    for index, stream in enumerate(pages):
+        number = 4 + index * 2
+        kids.append(number)
+        objects[number] = (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents %d 0 R "
+                           b"/Resources << /Font << /F1 3 0 R >> >> >>" % (number + 1))
+        objects[number + 1] = b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream)
+    objects[2] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
+        b" ".join(b"%d 0 R" % kid for kid in kids), len(kids))
+
+    # The contents: 01 is the cover, 02 starts on the second page, and 03 on the fourth.
+    entries = [(b"01", kids[0]), (b"02", kids[1]), (b"03", kids[3])]
+    objects[20] = b"<< /Type /Outlines /First 21 0 R /Last %d 0 R /Count %d >>" % (20 + len(entries), len(entries))
+    for index, (title, page) in enumerate(entries):
+        number = 21 + index
+        links = b""
+        if index > 0:
+            links += b" /Prev %d 0 R" % (number - 1)
+        if index < len(entries) - 1:
+            links += b" /Next %d 0 R" % (number + 1)
+        objects[number] = b"<< /Title (%s) /Parent 20 0 R%s /Dest [%d 0 R /XYZ 0 842 0] >>" % (title, links, page)
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for number in sorted(objects):
+        offsets[number] = len(out)
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, objects[number])
+    xref = len(out)
+    size = max(objects) + 1
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % size
+    for number in range(1, size):
+        if number in offsets:
+            out += b"%010d 00000 n \n" % offsets[number]
+        else:
+            out += b"0000000000 00000 f \n"
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (size, xref)
+    path.write_bytes(bytes(out))
+
+
 def reader_epub(path, navigation):
     """A book long enough to fill several pages. `navigation` is "nav" for EPUB 3's table of contents
     only, or "ncx" for the older kind only."""
@@ -529,6 +586,7 @@ def main():
     with tempfile.TemporaryDirectory() as work:
         reader_djvu(out / "reader_doc.djvu", Path(work))
     reader_pdf(out / "reader_doc.pdf")
+    numbered_issue_pdf(out / "numbered_issue.pdf")
     reader_epub(out / "reader_nav.epub", "nav")
     reader_epub(out / "reader_ncx.epub", "ncx")
 

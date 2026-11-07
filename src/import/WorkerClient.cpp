@@ -114,6 +114,19 @@ WorkerClient::PageTexts WorkerClient::pageTexts(const QString &path, const QStri
     return texts;
 }
 
+WorkerClient::Cover WorkerClient::pageCover(const QString &path, const QString &convertedPath, int page,
+                                            const QString &coverPath, int timeoutMs)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("op"), QStringLiteral("cover"));
+    request.insert(QStringLiteral("path"), path);
+    request.insert(QStringLiteral("convertedPath"), convertedPath);
+    request.insert(QStringLiteral("page"), page);
+    request.insert(QStringLiteral("coverPath"), coverPath);
+    const Reply reply = call(request, timeoutMs);
+    return Cover{reply.failure, reply.error};
+}
+
 WorkerClient::Inspection WorkerClient::inspect(const QString &path, const QString &coverPath, const QString &convertedPath,
                                                int timeoutMs)
 {

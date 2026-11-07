@@ -32,6 +32,64 @@ private slots:
         QCOMPARE(findDoi(text), expected);
     }
 
+    void anArticlesDoiIsFoundOnItsFirstPage_data()
+    {
+        QTest::addColumn<QString>("text");
+        QTest::addColumn<QString>("expected");
+        QTest::newRow("printed") << "A Title\nDigital Object Identifier 10.5555/made.up.1\nIntroduction" << "10.5555/made.up.1";
+        QTest::newRow("twice") << "doi:10.5555/made.up.1\nhttps://doi.org/10.5555/MADE.UP.1" << "10.5555/made.up.1";
+        QTest::newRow("only in references") << "A Title\nReferences\n[1] doi:10.5555/cited.2" << "";
+        QTest::newRow("numbered references") << "10.5555/made.up.1\n7. References\n[1] 10.5555/cited.2" << "10.5555/made.up.1";
+        QTest::newRow("bibliography") << "10.5555/made.up.1\nBIBLIOGRAPHY\n10.5555/cited.2" << "10.5555/made.up.1";
+        QTest::newRow("a sentence about references") << "The references below\n10.5555/made.up.1" << "10.5555/made.up.1";
+        QTest::newRow("heading joined after") << "doi 10.5555/made.up.1 References\n[1] 10.5555/cited.2" << "10.5555/made.up.1";
+        QTest::newRow("heading joined before") << "10.5555/made.up.1\nREFERENCES [1] 10.5555/cited.2" << "10.5555/made.up.1";
+        QTest::newRow("two different") << "10.5555/made.up.1\nSee also 10.5555/other.3" << "";
+        QTest::newRow("none") << "A Title\nIntroduction" << "";
+    }
+
+    void anArticlesDoiIsFoundOnItsFirstPage()
+    {
+        QFETCH(QString, text);
+        QFETCH(QString, expected);
+        QCOMPARE(articleDoiOnPage(text), expected);
+    }
+
+    void anIssuesNumbersAreFound_data()
+    {
+        QTest::addColumn<QString>("text");
+        QTest::addColumn<QString>("volume");
+        QTest::addColumn<QString>("issue");
+        QTest::addColumn<int>("month");
+        QTest::addColumn<int>("year");
+        QTest::newRow("running header") << "5921\nMADE-UP TRANSACTIONS ON EXAMPLES, VOL. 7, NO. 11, NOVEMBER 2026\nA Title"
+                                        << "7" << "11" << 11 << 2026;
+        QTest::newRow("cover") << "A PUBLICATION OF THE EXAMPLE SOCIETY\nNOVEMBER 2026 VOLUME 7 NUMBER 11 EXMPL (ISSN 1234-5679)"
+                               << "7" << "11" << 11 << 2026;
+        QTest::newRow("abbreviated") << "Journal of Examples, Vol. 18, No. 5, Oct. 2026, pp. 1-4" << "18" << "5" << 10 << 2026;
+        QTest::newRow("issue, no date") << "Volume 3, Issue 2" << "3" << "2" << 0 << 0;
+        QTest::newRow("lower case") << "journal of examples, vol. 3, no. 2" << "3" << "2" << 0 << 0;
+        QTest::newRow("volume alone") << "Volume 3 of a series" << "" << "" << 0 << 0;
+        QTest::newRow("nothing") << "A Made-Up Study of Lattice Vibrations" << "" << "" << 0 << 0;
+    }
+
+    void anIssuesNumbersAreFound()
+    {
+        QFETCH(QString, text);
+        QFETCH(QString, volume);
+        QFETCH(QString, issue);
+        QFETCH(int, month);
+        QFETCH(int, year);
+        const std::optional<IssueNumbering> found = findIssueNumbering(text);
+        QCOMPARE(found.has_value(), !volume.isEmpty());
+        if (!found)
+            return;
+        QCOMPARE(found->volume, volume);
+        QCOMPARE(found->issue, issue);
+        QCOMPARE(found->month.value_or(0), month);
+        QCOMPARE(found->year.value_or(0), year);
+    }
+
     void isbnsMustHaveValidCheckDigits_data()
     {
         QTest::addColumn<QString>("text");
@@ -320,7 +378,7 @@ private slots:
         row("book", "pdf", 300, "A history", "", "9780306406157", "", "", T::Book, true);
         row("article with doi", "pdf", 12, "results", "10.1/a", "", "", "", T::JournalArticle, true);
         row("article guess", "pdf", 10, "Abstract: results", "", "", "", "", T::JournalArticle, false);
-        row("volume", "pdf", 500, "contents", "", "", "1234-5679", "", T::JournalVolume, false);
+        row("volume", "pdf", 500, "contents", "", "", "1234-5679", "", T::JournalIssue, false);
         row("epub", "epub", 0, "chapter", "", "", "", "", T::Book, false);
         row("long unknown", "pdf", 300, "chapter", "", "", "", "", T::Book, false);
         row("unknown", "pdf", 5, "notes", "", "", "", "", T::Other, false);

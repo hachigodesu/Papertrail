@@ -26,7 +26,8 @@ public:
     static QSize cardSize() { return {150, 200}; }
 
     // Returns a null pixmap if it isn't loaded yet, or if there's no cover. `coverReady` follows
-    // when one has loaded.
+    // when one has loaded. `sha256` can also be an article's key from core::articleCoverKey, and until
+    // that article's own cover has been made, its file's cover stands in.
     QPixmap cover(const QString &sha256);
 
     // The cover at full size, read straight away, for showing one larger.
@@ -35,8 +36,14 @@ public:
     // Covers found missing are checked for again, after an import has written more.
     void forgetMissing();
 
+    // An article's cover has been written, and can be loaded.
+    void coverMade(const QString &key);
+
 signals:
     void coverReady(const QString &sha256);
+
+    // An article's own cover doesn't exist yet. Asked once for each.
+    void articleCoverWanted(const QString &key);
 
 private:
     void startNext();
@@ -51,6 +58,7 @@ private:
     QStringList m_waiting;
     QSet<QString> m_running;
     QSet<QString> m_missing;
+    QSet<QString> m_wanted;
 };
 
 } // namespace papertrail::ui

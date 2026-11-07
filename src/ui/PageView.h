@@ -70,6 +70,13 @@ public:
 
     int pageCount() const { return int(m_sizes.size()); }
 
+    // Shows only pages `first` to `last`, counting from 0, such as one article in a volume. A negative
+    // `first` shows them all again. Pages outside aren't laid out, so they can't be scrolled to.
+    void setPageRange(int first, int last);
+    bool hasPageRange() const { return m_rangeFirst >= 0; }
+    int firstShownPage() const;
+    int lastShownPage() const;
+
     // The page taking up the middle of the view.
     int currentPage() const;
 
@@ -168,6 +175,8 @@ private:
     void trimCache();
     int rowForY(double y) const;
     int rowOfPage(int page) const;
+    int rowStart(int row) const; // The first page of a row.
+    int shownEnd() const; // One past the last page that can be shown.
     int pagesPerRow() const;
     double contentX() const;
     double contentY() const;
@@ -188,6 +197,8 @@ private:
     double m_contentWidth = 0;
     double m_contentHeight = 0;
     int m_shownRow = 0; // For the modes that show one row at a time.
+    int m_rangeFirst = -1; // See setPageRange.
+    int m_rangeLast = -1;
 
     LayoutMode m_layoutMode = LayoutMode::Continuous;
     ZoomMode m_zoomMode = ZoomMode::FitWidth;

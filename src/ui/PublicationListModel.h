@@ -30,6 +30,8 @@ public:
         FormatsRole, // "PDF, EPUB"
         FileStatusRole,
         NeedsReviewRole,
+        // For a journal issue, its numbers and date, such as "Vol. 7, No. 11, Nov 2026", to tell issues apart.
+        NumberingRole,
     };
 
     explicit PublicationListModel(const QString &databasePath, QObject *parent = nullptr);

@@ -9,6 +9,7 @@ You can now search inside documents across the whole library, see where the word
 - **Searching:** tick **Inside documents** beside the search box. Publications whose text matches now appear along with those whose details match. It's off by default, and the choice is remembered.
 - **Where it was found:** select a result, and **Found inside** in the details panel lists each page with the words around the match.
 - **Going there:** double-click a place. The document opens at that page with your words searched for.
+- **Searching while reading:** typing in the library's search box while a document is open goes back to the library, where the results are. (Added after hand testing.)
 - **Articles:** a match inside a volume also finds the article whose pages it's on, and an article only lists matches from its own pages.
 - **Indexing:** this happens by itself in the background once an import finishes, and when the app starts. The status bar shows how many are left, with **Stop indexing**. **File > Index document text** turns it off.
 - **No text:** once a whole file has been read, its "No text" flag is corrected, replacing the guess made from the first few pages.

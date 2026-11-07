@@ -99,8 +99,9 @@ public:
     // The text between two points on a page, as a reader would select it by dragging.
     virtual TextSelection selectText(int, const QPointF &, const QPointF &) { return {}; }
 
-    // The text on the first page set in the largest type, which is often the title.
-    virtual QString largestTextOnFirstPage() = 0;
+    // The text on a page set in the largest type. On a first page, or the page an article starts on,
+    // that's often the title.
+    virtual QString largestTextOnPage(int page) = 0;
 
     // Keys such as "info:Title", where the format has them.
     virtual QMap<QString, QString> metadata() = 0;

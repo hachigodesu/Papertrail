@@ -5,7 +5,7 @@ namespace papertrail::core {
 const QList<PublicationType> &allPublicationTypes()
 {
     static const QList<PublicationType> types = {
-        PublicationType::JournalVolume, PublicationType::JournalArticle,
+        PublicationType::JournalIssue, PublicationType::JournalArticle,
         PublicationType::ConferenceProceedings, PublicationType::ConferencePaper,
         PublicationType::Textbook, PublicationType::Book, PublicationType::BookChapter,
         PublicationType::Thesis, PublicationType::Dissertation, PublicationType::TechnicalReport,
@@ -14,10 +14,31 @@ const QList<PublicationType> &allPublicationTypes()
     return types;
 }
 
+QString articleCoverKey(const QString &sha256, int firstPage)
+{
+    if (sha256.isEmpty() || firstPage < 1)
+        return sha256;
+    return sha256 + u'#' + QString::number(firstPage);
+}
+
+QString coverKeyHash(const QString &key)
+{
+    const qsizetype mark = key.indexOf(u'#');
+    return mark < 0 ? key : key.left(mark);
+}
+
+int coverKeyPage(const QString &key)
+{
+    const qsizetype mark = key.indexOf(u'#');
+    return mark < 0 ? 0 : key.mid(mark + 1).toInt();
+}
+
 QString toDbString(PublicationType type)
 {
     switch (type) {
-    case PublicationType::JournalVolume: return QStringLiteral("journal_volume");
+    // Stored under its first name, since the type check in the schema can't be changed without rebuilding
+    // the table. A volume holds several issues, so it's called an issue everywhere else.
+    case PublicationType::JournalIssue: return QStringLiteral("journal_volume");
     case PublicationType::JournalArticle: return QStringLiteral("journal_article");
     case PublicationType::ConferenceProceedings: return QStringLiteral("conference_proceedings");
     case PublicationType::ConferencePaper: return QStringLiteral("conference_paper");
@@ -48,8 +69,8 @@ QList<PublicationType> typesForTab(LibraryTab tab)
     switch (tab) {
     case LibraryTab::All:
         return {};
-    case LibraryTab::JournalVolumes:
-        return {PublicationType::JournalVolume};
+    case LibraryTab::JournalIssues:
+        return {PublicationType::JournalIssue};
     case LibraryTab::JournalArticles:
         return {PublicationType::JournalArticle};
     case LibraryTab::Preprints:

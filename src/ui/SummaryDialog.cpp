@@ -441,7 +441,7 @@ SummaryDialog::PaperPlan SummaryDialog::planPaper()
             return plan;
         }
         if (plan.file.hasTextLayer && !*plan.file.hasTextLayer) {
-            plan.cantSendBecause = tr("This article's volume has no text to send, and sending all of it would cost far more than this one article.");
+            plan.cantSendBecause = tr("The file this article is in has no text to send, and sending all of it would cost far more than this one article.");
             return plan;
         }
         plan.isPdf = false;

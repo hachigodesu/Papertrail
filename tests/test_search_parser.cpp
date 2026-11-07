@@ -120,7 +120,10 @@ private slots:
         QCOMPARE(parseSearch(QStringLiteral("type:thesis")).types, QList<PublicationType>{PublicationType::Thesis});
         QCOMPARE(parseSearch(QStringLiteral("type:\"journal article\"")).types, QList<PublicationType>{PublicationType::JournalArticle});
         QCOMPARE(parseSearch(QStringLiteral("type:journal")).types,
-                 (QList<PublicationType>{PublicationType::JournalVolume, PublicationType::JournalArticle}));
+                 (QList<PublicationType>{PublicationType::JournalIssue, PublicationType::JournalArticle}));
+        // An issue is stored under its old name, but searched for by its current one.
+        QCOMPARE(parseSearch(QStringLiteral("type:issue")).types, QList<PublicationType>{PublicationType::JournalIssue});
+        QCOMPARE(parseSearch(QStringLiteral("type:\"journal issue\"")).types, QList<PublicationType>{PublicationType::JournalIssue});
         QCOMPARE(parseSearch(QStringLiteral("type:nonsense")).ftsMatch, QStringLiteral("\"nonsense\"*"));
     }
 

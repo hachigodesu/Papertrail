@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -337,6 +338,19 @@ private slots:
         reader->setAnnotationColour(annotation, annotationColours().at(2));
         QCOMPARE(reader->pageView()->marksOn(1).first().colour, QColor(annotationColours().at(2)));
 
+        // Its colour menu ticks the colour it has now, and only that one.
+        QMenu menu;
+        QMenu *colours = reader->addColourMenu(&menu, annotation);
+        QCOMPARE(colours->actions().size(), annotationColours().size());
+        for (qsizetype i = 0; i < colours->actions().size(); ++i) {
+            QVERIFY(colours->actions().at(i)->isCheckable());
+            QCOMPARE(colours->actions().at(i)->isChecked(), i == 2);
+        }
+        colours->actions().at(1)->trigger();
+        QCOMPARE(annotations.get(annotation)->colour.toLower(), annotationColours().at(1).toLower());
+        QMenu again;
+        QVERIFY(reader->addColourMenu(&again, annotation)->actions().at(1)->isChecked());
+
         // For looking at by eye, if asked for.
         const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES");
         if (!pictures.isEmpty()) {
@@ -384,7 +398,7 @@ private slots:
     {
         const qint64 volume = importSample(QStringLiteral("reader_doc.pdf"));
         Publication record = *m_session->publications().get(volume);
-        record.type = PublicationType::JournalVolume;
+        record.type = PublicationType::JournalIssue;
         m_session->publications().update(record);
         ArticleDraft draft;
         draft.title = QStringLiteral("An Article");

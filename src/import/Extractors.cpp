@@ -298,6 +298,89 @@ QString findDoi(const QString &text)
     return core::normaliseDoi(doi);
 }
 
+QString articleDoiOnPage(const QString &pageText)
+{
+    QString text = pageText;
+    // A heading such as "References" or "7. Bibliography". Text extraction often joins it to the line before
+    // or after, so it counts at either end of a line.
+    static const QRegularExpression references(
+        QStringLiteral("^\\s*(?:\\d+\\.?\\s*)?(?:references|bibliography)\\b|\\b(?:references|bibliography)\\s*$"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+    const QRegularExpressionMatch heading = references.match(text);
+    if (heading.hasMatch())
+        text.truncate(heading.capturedStart());
+
+    static const QRegularExpression pattern(QStringLiteral("\\b10\\.\\d{4,9}/[^\\s\"<>]+"));
+    QString found;
+    for (auto it = pattern.globalMatch(text); it.hasNext();) {
+        const QString doi = findDoi(it.next().captured(0));
+        if (doi.isEmpty() || doi == found)
+            continue;
+        if (!found.isEmpty())
+            return {};
+        found = doi;
+    }
+    return found;
+}
+
+namespace {
+
+std::optional<int> monthFromName(const QString &name)
+{
+    static const QStringList months = {QStringLiteral("jan"), QStringLiteral("feb"), QStringLiteral("mar"),
+                                       QStringLiteral("apr"), QStringLiteral("may"), QStringLiteral("jun"),
+                                       QStringLiteral("jul"), QStringLiteral("aug"), QStringLiteral("sep"),
+                                       QStringLiteral("oct"), QStringLiteral("nov"), QStringLiteral("dec")};
+    const qsizetype index = months.indexOf(name.left(3).toLower());
+    return index < 0 ? std::nullopt : std::optional<int>(int(index) + 1);
+}
+
+std::optional<int> printedYear(const QString &digits)
+{
+    const int year = digits.toInt();
+    return year >= 1600 && year <= 2200 ? std::optional<int>(year) : std::nullopt;
+}
+
+} // namespace
+
+std::optional<IssueNumbering> findIssueNumbering(const QString &text)
+{
+    static const QString month = QStringLiteral(
+        "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
+        "nov(?:ember)?|dec(?:ember)?)\\.?");
+    // "VOL. 7, NO. 11, NOVEMBER 2026", as in a running header, with the date optional.
+    static const QRegularExpression after(
+        QStringLiteral("\\bvol(?:ume)?\\.?\\s*(\\d{1,4})\\s*,?\\s*(?:no|number|issue)\\.?\\s*(\\d{1,4})\\b(?:\\s*,?\\s*")
+            + month + QStringLiteral("\\s*(\\d{4}))?"),
+        QRegularExpression::CaseInsensitiveOption);
+    // "NOVEMBER 2026 VOLUME 7 NUMBER 11", as on some covers.
+    static const QRegularExpression before(
+        QStringLiteral("\\b") + month
+            + QStringLiteral("\\s*(\\d{4})\\W{0,6}vol(?:ume)?\\.?\\s*(\\d{1,4})\\W{0,6}(?:no|number|issue)\\.?\\s*(\\d{1,4})\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    const QString flat = text.simplified();
+    if (const QRegularExpressionMatch match = before.match(flat); match.hasMatch()) {
+        IssueNumbering found;
+        found.month = monthFromName(match.captured(1));
+        found.year = printedYear(match.captured(2));
+        found.volume = match.captured(3);
+        found.issue = match.captured(4);
+        return found;
+    }
+    if (const QRegularExpressionMatch match = after.match(flat); match.hasMatch()) {
+        IssueNumbering found;
+        found.volume = match.captured(1);
+        found.issue = match.captured(2);
+        if (!match.captured(3).isEmpty()) {
+            found.month = monthFromName(match.captured(3));
+            found.year = printedYear(match.captured(4));
+        }
+        return found;
+    }
+    return std::nullopt;
+}
+
 bool isValidIsbn(const QString &digits)
 {
     if (digits.size() == 10) {
@@ -615,7 +698,7 @@ Classification classify(const ClassificationInput &input)
 
     // A long file with a journal's ISSN and no ISBN is probably a whole volume.
     if (!input.issn.isEmpty() && pages >= 150)
-        return {PublicationType::JournalVolume, false};
+        return {PublicationType::JournalIssue, false};
 
     if (!input.doi.isEmpty() && pages > 0 && pages < 80)
         return {PublicationType::JournalArticle, true};

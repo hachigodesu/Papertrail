@@ -114,6 +114,12 @@ bool isPathInside(const QString &path, const QString &folder)
 
 QString coverPathFor(const QString &cacheDirectory, const QString &sha256)
 {
+    // An article's key is its file's hash and its first page, as core::articleCoverKey makes it.
+    const qsizetype mark = sha256.indexOf(u'#');
+    if (mark > 0) {
+        const QString hash = sha256.left(mark);
+        return QDir(cacheDirectory).filePath(QStringLiteral("covers/%1/%2-p%3.jpg").arg(hash.left(2), hash, sha256.mid(mark + 1)));
+    }
     return QDir(cacheDirectory).filePath(QStringLiteral("covers/%1/%2.jpg").arg(sha256.left(2), sha256));
 }
 

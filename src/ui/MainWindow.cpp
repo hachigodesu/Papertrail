@@ -21,6 +21,7 @@
 #include "metadata/Transport.h"
 #include "ui/ApiKeyStore.h"
 #include "ui/IndexThread.h"
+#include "ui/ArticleCoverThread.h"
 #include "ui/SummaryDialog.h"
 #include "ui/ReviewTab.h"
 #include "ui/VolumeDialogs.h"
@@ -88,7 +89,7 @@ constexpr int kMaxRechecks = 20; // A file locked for this long isn't simply sti
 constexpr qint64 kMaxToCombine = 20; // More than this at once is much more likely to be a slip.
 
 const QList<LibraryTab> kTabs = {
-    LibraryTab::All,       LibraryTab::JournalVolumes,         LibraryTab::JournalArticles,
+    LibraryTab::All,       LibraryTab::JournalIssues,         LibraryTab::JournalArticles,
     LibraryTab::Preprints, LibraryTab::ConferencePapers,       LibraryTab::Textbooks,
     LibraryTab::ThesesAndDissertations, LibraryTab::TechnicalReports, LibraryTab::Standards,
     LibraryTab::Other,
@@ -166,6 +167,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_bulk = new BulkChanges(session.paths().database, this);
     m_lookup = new LookupThread(session.paths(), this);
     m_index = new IndexThread(session.paths(), this);
+    m_articleCovers = new ArticleCoverThread(session.paths(), this);
     m_keys = session.paths().keyStoreFactory ? session.paths().keyStoreFactory() : createSystemKeyStore();
     m_summaryTransport = session.paths().transportFactory ? session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
 
@@ -193,6 +195,8 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
         if (!m_coverRepaint->isActive())
             m_coverRepaint->start();
     });
+    connect(m_covers, &CoverCache::articleCoverWanted, m_articleCovers, &ArticleCoverThread::request);
+    connect(m_articleCovers, &ArticleCoverThread::made, m_covers, &CoverCache::coverMade);
 
     buildToolbar();
     buildCentre();
@@ -237,6 +241,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_bulk->start();
     m_lookup->start();
     m_index->start();
+    m_articleCovers->start();
     {
         const QString mode = lookupMode();
         m_import->setLookupMode(mode == QLatin1StringView("offline") ? QString() : mode);
@@ -304,6 +309,11 @@ void MainWindow::buildToolbar()
     m_search->setAccessibleName(tr("Search the library"));
     m_search->setClearButtonEnabled(true);
     connect(m_search, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
+    // The results are in the library, so typing a search while reading goes there to show them.
+    connect(m_search, &QLineEdit::textEdited, this, [this] {
+        if (m_documentTabs && m_documentTabs->currentIndex() != 0)
+            m_documentTabs->setCurrentIndex(0);
+    });
     row->addWidget(m_search, 1);
 
     m_searchInside = new QCheckBox(tr("Inside documents"), container);
@@ -331,6 +341,7 @@ void MainWindow::buildToolbar()
 void MainWindow::buildCentre()
 {
     auto *central = new QWidget(this);
+    m_libraryPage = central;
     auto *column = new QVBoxLayout(central);
     column->setContentsMargins(0, 0, 0, 0);
     column->setSpacing(0);
@@ -487,8 +498,9 @@ void MainWindow::buildCentre()
     m_details->showNothing();
     connect(m_details, &DetailsPanel::libraryEdited, this, &MainWindow::scheduleRefresh);
     connect(m_details, &DetailsPanel::editRequested, this, &MainWindow::editPublication);
-    connect(m_details, &DetailsPanel::openRequested, this, &MainWindow::openPublication);
-    connect(m_details, &DetailsPanel::openFileRequested, this, &MainWindow::openPublicationFile);
+    connect(m_details, &DetailsPanel::openRequested, this, [this](qint64 id) { openPublication(id); });
+    connect(m_details, &DetailsPanel::openInVolumeRequested, this, [this](qint64 id) { openPublication(id, false); });
+    connect(m_details, &DetailsPanel::openFileRequested, this, [this](qint64 id, qint64 fileId) { openPublicationFile(id, fileId); });
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
     connect(m_details, &DetailsPanel::openMatchRequested, this, &MainWindow::openAtMatch);
     connect(m_details, &DetailsPanel::summarizeRequested, this, &MainWindow::showSummaryDialog);
@@ -506,12 +518,24 @@ void MainWindow::buildCentre()
     m_splitter->setSizes({240, 760, 280});
     m_splitter->setCollapsible(1, false);
 
-    // The library is always the first tab. The tab bar only appears once a document is open.
+    // The library is always the first tab. The tab bar only appears once a document is open. Documents can be
+    // dragged into any order after it.
     m_documentTabs = new QTabWidget(this);
     m_documentTabs->setDocumentMode(true);
     m_documentTabs->setTabBarAutoHide(true);
     m_documentTabs->setTabsClosable(true);
-    m_documentTabs->setMovable(false);
+    m_documentTabs->setMovable(true);
+    connect(m_documentTabs->tabBar(), &QTabBar::tabMoved, this, [this] {
+        // Put back once the drag is over, since moving a tab in the middle of one confuses the tab bar.
+        QTimer::singleShot(0, this, [this] {
+            if (QApplication::mouseButtons() != Qt::NoButton) {
+                m_documentTabs->tabBar()->update();
+                return;
+            }
+            keepLibraryFirst();
+        });
+    });
+    m_documentTabs->tabBar()->installEventFilter(this);
     m_documentTabs->addTab(central, tr("Library"));
     for (const QTabBar::ButtonPosition side : {QTabBar::LeftSide, QTabBar::RightSide}) {
         if (QWidget *close = m_documentTabs->tabBar()->tabButton(0, side)) {
@@ -1136,21 +1160,23 @@ void MainWindow::openOrChooseFormat(qint64 id)
     menu.exec(QCursor::pos());
 }
 
-ReaderTab *MainWindow::openPublication(qint64 id)
+ReaderTab *MainWindow::openPublication(qint64 id, bool articleOnly)
 {
     const QList<FileRecord> choices = formatChoices(id);
     if (choices.isEmpty()) {
         statusBar()->showMessage(tr("This publication's file can't be found right now."), 8000);
         return nullptr;
     }
-    return openPublicationFile(id, choices.first().id);
+    return openPublicationFile(id, choices.first().id, articleOnly);
 }
 
-ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId)
+ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId, bool articleOnly)
 {
     for (int i = 1; i < m_documentTabs->count(); ++i) {
         auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
         if (reader && reader->publicationId() == id && reader->fileId() == fileId) {
+            if (reader->isArticle())
+                reader->setArticleOnly(articleOnly);
             m_documentTabs->setCurrentIndex(i);
             return reader;
         }
@@ -1169,6 +1195,7 @@ ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId)
             ? QString()
             : import::convertedPathFor(m_session.paths().cacheDirectory, file->sha256);
         reader = new ReaderTab(m_session, id, fileId, file->format, path, converted, m_documentTabs);
+        reader->setArticleOnly(articleOnly);
         connect(reader, &ReaderTab::openElsewhereRequested, this,
                 [](const QString &file) { QDesktopServices::openUrl(QUrl::fromLocalFile(file)); });
         connect(reader, &ReaderTab::statusMessage, this,
@@ -1185,6 +1212,20 @@ ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId)
         m_documentTabs->setCurrentIndex(index);
     });
     return reader;
+}
+
+void MainWindow::keepLibraryFirst()
+{
+    const int index = m_documentTabs->indexOf(m_libraryPage);
+    if (index > 0)
+        m_documentTabs->tabBar()->moveTab(index, 0);
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (m_documentTabs && watched == m_documentTabs->tabBar() && event->type() == QEvent::MouseButtonRelease)
+        QTimer::singleShot(0, this, &MainWindow::keepLibraryFirst);
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::closeDocumentTab(int index)
@@ -1299,7 +1340,14 @@ void MainWindow::showContentsDialog(qint64 volumeId)
 {
     ContentsDialog dialog(m_session, volumeId, this);
     if (dialog.exec() == QDialog::Accepted) {
-        statusBar()->showMessage(tr("Created %1.").arg(publicationCount(dialog.createdCount())), 8000);
+        QStringList done;
+        if (dialog.createdCount() > 0 || dialog.namedCount() == 0)
+            done << tr("Created %1.").arg(publicationCount(dialog.createdCount()));
+        if (dialog.namedCount() > 0)
+            done << tr("Named %1.").arg(publicationCount(dialog.namedCount()));
+        statusBar()->showMessage(done.join(u' '), 8000);
+    }
+    if (dialog.result() == QDialog::Accepted || dialog.filledNumbering()) {
         m_details->reload();
         refreshNow();
     }
@@ -1331,7 +1379,7 @@ void MainWindow::askToDeleteArticle(qint64 articleId)
         if (!article || !article->parentId)
             return;
         QMessageBox box(QMessageBox::Question, tr("Delete article"),
-                        tr("Delete the article \"%1\"? Its tags and notes will be gone for good. The volume and its file aren't touched.")
+                        tr("Delete the article \"%1\"? Its tags and notes will be gone for good. What it's part of, and its file, aren't touched.")
                             .arg(article->title),
                         QMessageBox::Yes | QMessageBox::Cancel, this);
         box.setTextFormat(Qt::PlainText);

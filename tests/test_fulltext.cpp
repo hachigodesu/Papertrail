@@ -231,7 +231,7 @@ private slots:
     void articlesAreFoundByTheirOwnPages()
     {
         Publication volumeRecord;
-        volumeRecord.type = PublicationType::JournalVolume;
+        volumeRecord.type = PublicationType::JournalIssue;
         volumeRecord.title = QStringLiteral("A Volume");
         const qint64 volume = m_publications->create(volumeRecord);
         linkFile(volume, QStringLiteral("volume"), {QStringLiteral("first page"), QStringLiteral("the fatigue page"), QStringLiteral("last page")});

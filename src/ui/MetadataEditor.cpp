@@ -77,7 +77,7 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
     addText(main, QStringLiteral("subtitle"), tr("Subtitle"), &Publication::subtitle, {});
     addPeople(main, QStringLiteral("authors"), tr("Authors\n(one per line)"), &Publication::authors, {});
     addPeople(main, QStringLiteral("editors"), tr("Editors"), &Publication::editors,
-              {T::JournalVolume, T::ConferenceProceedings, T::Book, T::Textbook, T::BookChapter});
+              {T::JournalIssue, T::ConferenceProceedings, T::Book, T::Textbook, T::BookChapter});
     addPeople(main, QStringLiteral("translators"), tr("Translators"), &Publication::translators,
               {T::Book, T::Textbook, T::BookChapter});
     addPeople(main, QStringLiteral("advisors"), tr("Advisors"), &Publication::advisors, {T::Thesis, T::Dissertation});
@@ -94,7 +94,7 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
             edit = new QLineEdit(mainPage);
             edit->setValidator(new QIntValidator(1, 9999999, edit));
             edit->setMaximumWidth(90);
-            edit->setToolTip(tr("Its position in the volume's file, which may differ from the number printed on the page."));
+            edit->setToolTip(tr("Its position in the file it's part of, which may differ from the number printed on the page."));
             if (value)
                 edit->setText(QString::number(*value));
             main->addRow(label, edit);
@@ -103,15 +103,15 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
         addPage(m_pageEnd, tr("Last page in the file"), publication.pageEnd);
     }
 
-    const QList<PublicationType> inContainer = {T::JournalVolume, T::JournalArticle, T::ConferencePaper, T::BookChapter,
+    const QList<PublicationType> inContainer = {T::JournalIssue, T::JournalArticle, T::ConferencePaper, T::BookChapter,
                                                 T::Preprint};
     const QList<PublicationType> bookLike = {T::Textbook, T::Book, T::BookChapter, T::ConferenceProceedings};
-    const QList<PublicationType> published = {T::JournalVolume, T::ConferenceProceedings, T::Textbook, T::Book,
+    const QList<PublicationType> published = {T::JournalIssue, T::ConferenceProceedings, T::Textbook, T::Book,
                                               T::BookChapter, T::TechnicalReport, T::Standard};
 
     addText(main, QStringLiteral("container"), tr("Journal or source"), &Publication::containerTitle, inContainer);
     addText(main, QStringLiteral("volume"), tr("Volume"), &Publication::volume, inContainer);
-    addText(main, QStringLiteral("issue"), tr("Issue"), &Publication::issue, {T::JournalVolume, T::JournalArticle});
+    addText(main, QStringLiteral("issue"), tr("Issue"), &Publication::issue, {T::JournalIssue, T::JournalArticle});
     addText(main, QStringLiteral("pages"), tr("Pages"), &Publication::pages, inContainer);
     addText(main, QStringLiteral("publisher"), tr("Publisher"), &Publication::publisher, published);
     addText(main, QStringLiteral("place"), tr("Place"), &Publication::place, bookLike);

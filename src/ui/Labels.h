@@ -5,6 +5,8 @@
 #include <QString>
 #include <QUrl>
 
+#include <optional>
+
 // What the app calls things on screen, and the checks on text and links that came from documents.
 namespace papertrail::ui {
 
@@ -14,6 +16,12 @@ QString readStatusLabel(core::ReadStatus status);
 QString readStatusLabelFromDb(const QString &value);
 QString fileStatusLabel(const QString &status); // Empty for a file with nothing wrong.
 QString tabLabel(core::LibraryTab tab);
+
+// A journal issue's numbers and date, such as "Vol. 7, No. 11, Nov 2026". Empty if there are none.
+QString issueNumbering(const QString &volume, const QString &issue, std::optional<int> month, std::optional<int> year);
+
+// For a button leading from an article to what holds it, such as "Show the issue".
+QString showHolderLabel(core::PublicationType holderType);
 QString publicationCount(qint64 count); // "1 publication", "1,200 publications"
 
 // Metadata comes from files and online sources, so a link in it can't be trusted. Only web

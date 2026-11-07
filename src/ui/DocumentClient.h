@@ -36,6 +36,16 @@ struct ReaderLink {
     double y = 0;
 };
 
+// What's printed on a page that starts an article: see DocumentClient::requestHeading.
+struct ReaderHeading {
+    QString title;
+    QString doi;
+    QString volume; // As printed in a running header or on a cover, such as "VOL. 7, NO. 11".
+    QString issue;
+    int month = 0;
+    int year = 0;
+};
+
 struct RenderRequest {
     int page = 0;
     double scale = 1; // Pixels per point.
@@ -74,6 +84,11 @@ public:
 
     void requestOutline();
     void requestLinks(int page);
+
+    // The largest text on a page, and a DOI printed there, for naming an article that starts on it. The
+    // answer always comes, empty if the page couldn't be read, so nothing waits for ever.
+    void requestHeading(int page);
+
     void requestThumbnail(int page, double scale);
 
     // Only the newest selection on each page matters.
@@ -109,6 +124,7 @@ signals:
     void thumbnailReady(int page, const QImage &image);
     void outlineReady(const QList<papertrail::ui::ReaderOutlineItem> &items);
     void linksReady(int page, const QList<papertrail::ui::ReaderLink> &links);
+    void headingReady(int page, const papertrail::ui::ReaderHeading &heading);
     void selectionReady(int page, const QList<QRectF> &rects, const QString &text);
     void anchored(qint64 token, int part, const QString &place, int occurrence);
     void located(qint64 token, int part, int page, const QList<QRectF> &rects);
@@ -120,7 +136,7 @@ signals:
     void recovered(); // The helper crashed, and has been restarted.
 
 private:
-    enum class Kind { Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Select, Bookmark, Anchor, Locate, Find, Search };
+    enum class Kind { Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Heading, Select, Bookmark, Anchor, Locate, Find, Search };
 
     struct Request {
         Kind kind = Kind::Open;

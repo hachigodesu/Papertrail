@@ -53,6 +53,13 @@ public:
     // Puts the cursor in this document's search box.
     void focusSearch();
 
+    // For an article in a volume's file: whether only its own pages are shown, or the whole file. Anything
+    // else always shows the whole file. Opened from the library, an article shows only its own pages.
+    void setArticleOnly(bool only);
+    bool isArticleOnly() const { return m_articleOnly; }
+    bool isArticle() const { return m_articlePages.has_value(); }
+    QToolButton *wholeFileButton() const { return m_wholeFile; }
+
     // For tests.
     PageView *pageView() const { return m_view; }
     DocumentClient *client() const { return m_client; }
@@ -121,6 +128,9 @@ private:
     void updateSearchStatus();
     void showCurrentHit();
     void onContentsActivated(QTreeWidgetItem *item);
+    void applyArticleRange();
+    void ensurePageShown(int page);
+    bool pageIsShown(int page) const;
 
     LibrarySession &m_session;
     void applyPendingMatch();
@@ -132,6 +142,13 @@ private:
     void onAnchored(qint64 token, int part, const QString &place, int occurrence);
     void onLocated(qint64 token, int part, int page, const QList<QRectF> &rects);
     void addAnnotationActions(QMenu *menu, const QPoint &viewportPoint);
+    static QStringList colourNames();
+
+public:
+    // Adds a menu for a highlight's colour, with its current one ticked. For tests too.
+    QMenu *addColourMenu(QMenu *menu, qint64 id);
+
+private:
     void askForNoteAndAnnotate();
     void askToEditNote(qint64 id);
     void askToExportAnnotations();
@@ -158,6 +175,13 @@ private:
 
     qint64 m_publicationId;
     qint64 m_fileId;
+
+    // An article's first and last pages in its volume's file, counting from 0.
+    std::optional<std::pair<int, int>> m_articlePages;
+    bool m_articleOnly = false;
+    QString m_wholeFileLabel;
+    QToolButton *m_wholeFile = nullptr;
+    QAction *m_wholeFileAction = nullptr;
     QString m_format;
     QString m_path;
     ReaderLayout m_layout;

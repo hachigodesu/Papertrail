@@ -19,7 +19,7 @@ QString tr(const char *text)
 QString typeLabel(PublicationType type)
 {
     switch (type) {
-    case PublicationType::JournalVolume: return tr("Journal volume");
+    case PublicationType::JournalIssue: return tr("Journal issue");
     case PublicationType::JournalArticle: return tr("Journal article");
     case PublicationType::ConferenceProceedings: return tr("Conference proceedings");
     case PublicationType::ConferencePaper: return tr("Conference paper");
@@ -69,11 +69,37 @@ QString fileStatusLabel(const QString &status)
     return {};
 }
 
+QString issueNumbering(const QString &volume, const QString &issue, std::optional<int> month, std::optional<int> year)
+{
+    QStringList parts;
+    if (!volume.isEmpty())
+        parts << tr("Vol. %1").arg(volume);
+    if (!issue.isEmpty())
+        parts << tr("No. %1").arg(issue);
+    if (year) {
+        parts << (month && *month >= 1 && *month <= 12
+                      ? QLocale().monthName(*month, QLocale::ShortFormat) + u' ' + QString::number(*year)
+                      : QString::number(*year));
+    }
+    return parts.join(QStringLiteral(", "));
+}
+
+QString showHolderLabel(PublicationType holderType)
+{
+    switch (holderType) {
+    case PublicationType::JournalIssue: return tr("Show the issue");
+    case PublicationType::ConferenceProceedings: return tr("Show the proceedings");
+    case PublicationType::Book:
+    case PublicationType::Textbook: return tr("Show the book");
+    default: return tr("Show what it's part of");
+    }
+}
+
 QString tabLabel(LibraryTab tab)
 {
     switch (tab) {
     case LibraryTab::All: return tr("All");
-    case LibraryTab::JournalVolumes: return tr("Journal Volumes");
+    case LibraryTab::JournalIssues: return tr("Journal Issues");
     case LibraryTab::JournalArticles: return tr("Journal Articles");
     case LibraryTab::Preprints: return tr("Preprints");
     case LibraryTab::ConferencePapers: return tr("Conference Papers");

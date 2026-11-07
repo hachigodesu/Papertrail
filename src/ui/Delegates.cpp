@@ -171,8 +171,11 @@ void GridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
     rest.setTop(rest.top() + drawLines(painter, rest, index.data(PublicationListModel::AuthorsRole).toString(), 1));
     // The formats only earn their space on the card when there's a choice of them.
     QStringList lastLine;
+    const QString numbering = index.data(PublicationListModel::NumberingRole).toString();
     const QVariant year = index.data(PublicationListModel::YearRole);
-    if (year.isValid())
+    if (!numbering.isEmpty())
+        lastLine << numbering; // An issue's date is part of its numbering.
+    else if (year.isValid())
         lastLine << year.toString();
     const QString formats = index.data(PublicationListModel::FormatsRole).toString();
     if (formats.contains(u','))

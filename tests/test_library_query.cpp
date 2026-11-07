@@ -52,7 +52,7 @@ private slots:
         filter.tabTypes = typesForTab(LibraryTab::Textbooks);
         QCOMPARE(titleSet(filter), (QSet<QString>{QStringLiteral("The Art of Bridges")}));
 
-        filter.tabTypes = typesForTab(LibraryTab::JournalVolumes);
+        filter.tabTypes = typesForTab(LibraryTab::JournalIssues);
         QCOMPARE(titleSet(filter), (QSet<QString>{QStringLiteral("Structures Volume 1")}));
 
         QCOMPARE(typesForTab(LibraryTab::All).size(), 0);
@@ -62,7 +62,7 @@ private slots:
     {
         for (const PublicationType type : allPublicationTypes()) {
             int tabs = 0;
-            for (const LibraryTab tab : {LibraryTab::JournalVolumes, LibraryTab::JournalArticles, LibraryTab::Preprints,
+            for (const LibraryTab tab : {LibraryTab::JournalIssues, LibraryTab::JournalArticles, LibraryTab::Preprints,
                                          LibraryTab::ConferencePapers, LibraryTab::Textbooks,
                                          LibraryTab::ThesesAndDissertations, LibraryTab::TechnicalReports,
                                          LibraryTab::Standards, LibraryTab::Other}) {
@@ -588,7 +588,7 @@ private:
         m_tags->assign(neuralId, m_computing);
 
         Publication volume;
-        volume.type = PublicationType::JournalVolume;
+        volume.type = PublicationType::JournalIssue;
         volume.title = QStringLiteral("Structures Volume 1");
         volume.editors = {{QStringLiteral("EditorOnly"), QString()}};
         const qint64 volumeId = m_publications->create(volume);

@@ -296,6 +296,19 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
         emit linksReady(request.page, links);
         break;
     }
+    case Kind::Heading: {
+        ReaderHeading heading;
+        if (ok) {
+            heading.title = reply.value(QStringLiteral("title")).toString();
+            heading.doi = reply.value(QStringLiteral("doi")).toString();
+            heading.volume = reply.value(QStringLiteral("volume")).toString();
+            heading.issue = reply.value(QStringLiteral("issue")).toString();
+            heading.month = reply.value(QStringLiteral("month")).toInt();
+            heading.year = reply.value(QStringLiteral("year")).toInt();
+        }
+        emit headingReady(request.page, heading);
+        break;
+    }
     case Kind::Select:
         // A newer selection for this page is already waiting, so this one's out of date.
         if (ok && !m_selections.contains(request.page)) {
@@ -358,6 +371,9 @@ void DocumentClient::handleLostRequest()
         break;
     case Kind::Locate:
         emit located(request.token, request.part, -1, {});
+        break;
+    case Kind::Heading:
+        emit headingReady(request.page, ReaderHeading{});
         break;
     default:
         break;
@@ -458,6 +474,16 @@ void DocumentClient::requestLinks(int page)
     request.page = page;
     request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("links")}, {QStringLiteral("page"), page}};
     m_urgent << request;
+    pump();
+}
+
+void DocumentClient::requestHeading(int page)
+{
+    Request request;
+    request.kind = Kind::Heading;
+    request.page = page;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("heading")}, {QStringLiteral("page"), page}};
+    m_background << request;
     pump();
 }
 

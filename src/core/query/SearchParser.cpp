@@ -148,14 +148,20 @@ bool parseYear(const QString &value, ParsedSearch &result)
     return true;
 }
 
-// Matches the stored name or any word in it, so type:thesis and type:journal both work.
+// The name a search uses, which is the stored one except where that's out of date.
+QString searchName(PublicationType type)
+{
+    return type == PublicationType::JournalIssue ? QStringLiteral("journal_issue") : toDbString(type);
+}
+
+// Matches the name or any word in it, so type:thesis and type:journal both work.
 QList<PublicationType> matchTypes(const QString &value)
 {
     QString wanted = value.trimmed().toLower();
     wanted.replace(u' ', u'_');
     QList<PublicationType> matches;
     for (const PublicationType type : allPublicationTypes()) {
-        const QString name = toDbString(type);
+        const QString name = searchName(type);
         if (name == wanted || name.split(u'_').contains(wanted))
             matches << type;
     }

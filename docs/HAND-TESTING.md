@@ -45,18 +45,29 @@ This has never run against the real API, so it's the most likely place to find a
 9. Try a **biomedical paper**. If Claude's safeguards decline, it should say so and offer another go with a new estimate.
 10. Try **Haiku** and **Opus** once each, to see that other models work.
 
-## 2. Volumes on a real journal volume (M7)
+## 2. Articles in a real journal issue (M7)
 
 The only sample is a tiny generated PDF, so real tables of contents are the main unknown.
 
-1. Set a real volume's type to **Journal volume** in its editor, then choose **From contents...** in the details panel.
+1. Set a real issue's type to **Journal issue** in its editor, then choose **From contents...** in the details panel.
 2. Is the level it chooses the one that lists articles? Do page ranges look right? Are covers and indexes left unticked?
+   - **If the contents only number the articles,** the titles should fill in from each article's first page, marked **Title from its first page**. Check they're right, and whether any picked up a running header or a journal name instead.
+   - **If you already made articles with number titles,** they should be offered as **Names the article already made**, and confirming should rename them rather than add more.
+   - Check whether articles got their **DOI**.
+   - The issue's **volume and issue numbers** should be filled in, and shown on its card, such as "Vol. 7, No. 11, Nov 2026".
+   - Articles should get **covers of their own first pages** after a moment.
+   - Opening the issue, its **Contents** panel should show the articles' titles rather than numbers.
+   - Opening an article from **Journal Articles** should show **only its pages**, numbered from 1, with **Whole issue** in the toolbar to see the rest. Opening it from the issue's **Articles** list should show the whole issue.
+   - Document tabs should **drag into a new order**, with **Library** always staying first.
+   - Long titles in the reader's **Contents** panel should wrap, and rewrap when the panel is widened.
 3. Create the articles. Double-click one in the details panel: does it open at the right page?
 4. Check they appear under **Journal Articles**, and can be tagged and added to a collection.
 5. Try **Mark as checked** on several, since they all start as needing checking.
 6. Try a book with chapters, and a volume with **hundreds** of entries if you have one.
 
 ## 3. Search inside documents on your real library (M8)
+
+Typing in the search box while reading should go back to the library and show the results.
 
 1. Watch the status bar while indexing runs. Note how long it takes and whether the PC stays usable. **Stop indexing** should work, and it should carry on after a restart.
 2. Check how large `fulltext.db` gets beside your library.
@@ -66,7 +77,7 @@ The only sample is a tiny generated PDF, so real tables of contents are the main
 
 ## 4. Highlights and notes (M9)
 
-1. Drag to select text in a PDF. Use **Highlight**, and right-click for colours, **Underline** and **Add a note...**.
+1. Drag to select text in a PDF. Use **Highlight**, and right-click for colours, **Underline** and **Add a note...**. Right-clicking a highlight should tick its current colour.
 2. Check how highlights look in **dark** and **sepia** modes, as I've only seen them in light.
 3. Close and reopen the document, then restart the app. They should still be there.
 4. Move or rename the file and rescan. They should still be there.

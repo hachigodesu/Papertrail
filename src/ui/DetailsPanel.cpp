@@ -102,6 +102,11 @@ QString reviewReason(PublicationRepository &publications, qint64 id)
 DetailsPanel::DetailsPanel(LibrarySession &session, CoverCache &covers, QWidget *parent)
     : QWidget(parent), m_session(session), m_covers(covers)
 {
+    // An article's own cover may only be made after it's first shown here.
+    connect(&m_covers, &CoverCache::coverReady, this, [this](const QString &key) {
+        if (!m_coverSha.isEmpty() && key == m_coverSha)
+            updateCover();
+    });
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     m_pages = new QStackedWidget(this);
@@ -267,18 +272,18 @@ void DetailsPanel::buildSinglePage()
     column->addWidget(m_matchesSection);
     m_matchesSection->hide();
 
-    // A volume lists its articles, and an article leads back to its volume.
+    // An issue, proceedings or book lists its articles, and an article leads back to it.
     m_articlesSection = new QWidget;
     auto *articles = new QVBoxLayout(m_articlesSection);
     articles->setContentsMargins(0, 0, 0, 0);
     articles->addWidget(sectionHeading(tr("Articles")));
     m_articleList = new QListWidget; // List items show text as it is, so a title can't become formatting.
-    m_articleList->setAccessibleName(tr("Articles in this volume"));
+    m_articleList->setAccessibleName(tr("Articles in this publication"));
     m_articleList->setMaximumHeight(170);
     m_articleList->setTextElideMode(Qt::ElideRight);
     m_articleList->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_articleList, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
-        emit openRequested(item->data(Qt::UserRole).toLongLong());
+        emit openInVolumeRequested(item->data(Qt::UserRole).toLongLong());
     });
     connect(m_articleList, &QListWidget::customContextMenuRequested, this, [this](const QPoint &position) {
         QListWidgetItem *item = m_articleList->itemAt(position);
@@ -286,7 +291,8 @@ void DetailsPanel::buildSinglePage()
             return;
         const qint64 id = item->data(Qt::UserRole).toLongLong();
         QMenu menu(this);
-        menu.addAction(tr("Open"), this, [this, id] { emit openRequested(id); });
+        menu.addAction(tr("Open"), this, [this, id] { emit openInVolumeRequested(id); });
+        menu.addAction(tr("Open on its own"), this, [this, id] { emit openRequested(id); });
         menu.addAction(tr("Show its details"), this, [this, id] { showPublication(id); });
         menu.addSeparator();
         menu.addAction(tr("Delete article..."), this, [this, id] { emit deleteArticleRequested(id); });
@@ -316,7 +322,7 @@ void DetailsPanel::buildSinglePage()
     m_partOf->setWordWrap(true);
     column->addWidget(m_partOf);
     auto *partOfButtons = new QHBoxLayout;
-    m_showVolume = new QPushButton(tr("Show its volume"));
+    m_showVolume = new QPushButton(tr("Show what it's part of"));
     connect(m_showVolume, &QPushButton::clicked, this, [this] {
         if (!m_id)
             return;
@@ -483,6 +489,7 @@ void DetailsPanel::showPublication(qint64 id)
 
 void DetailsPanel::updateCover()
 {
+    m_covers.cover(m_coverSha); // Has an article's own cover made, if it hasn't been yet.
     const QImage cover = m_covers.fullCover(m_coverSha);
     if (cover.isNull()) {
         m_cover->clear();
@@ -669,6 +676,8 @@ void DetailsPanel::reload()
     m_deleteArticle->setVisible(p.parentId.has_value());
     if (p.parentId) {
         const std::optional<Publication> volume = m_session.publications().get(*p.parentId);
+        if (volume)
+            m_showVolume->setText(showHolderLabel(volume->type));
         QString text = tr("Part of %1.").arg(volume ? volume->title : QString());
         if (p.pageStart) {
             text += QLatin1Char(' ')
@@ -711,7 +720,7 @@ void DetailsPanel::reload()
     QStringList separated;
     for (const FileRecord &file : files) {
         if (m_coverSha.isEmpty())
-            m_coverSha = file.sha256;
+            m_coverSha = p.parentId && p.pageStart ? articleCoverKey(file.sha256, *p.pageStart) : file.sha256;
 
         QStringList facts;
         if (!file.format.isEmpty())

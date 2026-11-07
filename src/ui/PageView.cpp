@@ -116,6 +116,45 @@ int PageView::pagesPerRow() const
     return m_layoutMode == LayoutMode::TwoPages ? 2 : 1;
 }
 
+int PageView::firstShownPage() const
+{
+    if (m_rangeFirst < 0 || m_sizes.isEmpty())
+        return 0;
+    return qMin(m_rangeFirst, int(m_sizes.size()) - 1);
+}
+
+int PageView::lastShownPage() const
+{
+    return shownEnd() - 1;
+}
+
+int PageView::shownEnd() const
+{
+    if (m_rangeFirst < 0)
+        return int(m_sizes.size());
+    return qMax(firstShownPage() + 1, qMin(m_rangeLast + 1, int(m_sizes.size())));
+}
+
+int PageView::rowStart(int row) const
+{
+    return firstShownPage() + row * pagesPerRow();
+}
+
+void PageView::setPageRange(int first, int last)
+{
+    const int page = currentPage();
+    if (first < 0) {
+        m_rangeFirst = m_rangeLast = -1;
+    } else {
+        m_rangeFirst = first;
+        m_rangeLast = qMax(first, last);
+    }
+    m_shownRow = 0;
+    relayout();
+    goToPage(qBound(firstShownPage(), page, lastShownPage()));
+    scheduleWanted();
+}
+
 void PageView::updateFitScale()
 {
     if (m_zoomMode == ZoomMode::Fixed || m_sizes.isEmpty())
@@ -129,7 +168,7 @@ void PageView::updateFitScale()
         width = m_typicalPageSize.width();
         height = m_typicalPageSize.height();
     } else {
-        for (int i = m_shownRow * perRow; i < (m_shownRow + 1) * perRow && i < m_sizes.size(); ++i) {
+        for (int i = rowStart(m_shownRow); i < rowStart(m_shownRow) + perRow && i < shownEnd(); ++i) {
             width += m_sizes.at(i).width();
             height = qMax(height, m_sizes.at(i).height());
         }
@@ -152,18 +191,18 @@ void PageView::relayout()
     updateFitScale();
 
     const int perRow = pagesPerRow();
-    const int pages = int(m_sizes.size());
-    const int rows = (pages + perRow - 1) / perRow;
+    const int pages = shownEnd();
+    const int rows = m_sizes.isEmpty() ? 0 : (pages - firstShownPage() + perRow - 1) / perRow;
     const bool oneRowAtATime = m_layoutMode != LayoutMode::Continuous;
     m_shownRow = qBound(0, m_shownRow, qMax(0, rows - 1));
 
-    m_pageRects.fill(QRectF(), pages);
+    m_pageRects.fill(QRectF(), int(m_sizes.size()));
     m_rowTops.resize(rows);
     m_rowHeights.resize(rows);
 
     for (int row = 0; row < rows; ++row) {
         double height = 0;
-        for (int i = row * perRow; i < (row + 1) * perRow && i < pages; ++i)
+        for (int i = rowStart(row); i < rowStart(row) + perRow && i < pages; ++i)
             height = qMax(height, m_sizes.at(i).height() * m_scale);
         m_rowHeights[row] = height;
     }
@@ -176,11 +215,11 @@ void PageView::relayout()
         }
         m_rowTops[row] = y;
         double width = -kGap;
-        for (int i = row * perRow; i < (row + 1) * perRow && i < pages; ++i)
+        for (int i = rowStart(row); i < rowStart(row) + perRow && i < pages; ++i)
             width += m_sizes.at(i).width() * m_scale + kGap;
         // Centred if it fits, and otherwise from the left, with the scroll bar to reach the rest.
         double x = width + 2 * kMargin <= viewport()->width() ? (viewport()->width() - width) / 2 : kMargin;
-        for (int i = row * perRow; i < (row + 1) * perRow && i < pages; ++i) {
+        for (int i = rowStart(row); i < rowStart(row) + perRow && i < pages; ++i) {
             const QSizeF size = m_sizes.at(i) * m_scale;
             m_pageRects[i] = QRectF(QPointF(std::round(x), std::round(y)), QSizeF(std::round(size.width()), std::round(size.height())));
             x += size.width() + kGap;
@@ -223,7 +262,7 @@ void PageView::updateHorizontalRange()
                 break;
             if (m_layoutMode != LayoutMode::Continuous && row != m_shownRow)
                 break;
-            for (int i = row * perRow; i < (row + 1) * perRow && i < m_pageRects.size(); ++i)
+            for (int i = rowStart(row); i < rowStart(row) + perRow && i < shownEnd(); ++i)
                 widest = qMax(widest, m_pageRects.at(i).right());
         }
     }
@@ -252,7 +291,7 @@ int PageView::rowForY(double y) const
 
 int PageView::rowOfPage(int page) const
 {
-    return page / pagesPerRow();
+    return (page - firstShownPage()) / pagesPerRow();
 }
 
 int PageView::currentPage() const
@@ -260,7 +299,7 @@ int PageView::currentPage() const
     if (m_sizes.isEmpty())
         return 0;
     const int row = rowForY(contentY() + viewport()->height() / 2.0);
-    return qMin(row * pagesPerRow(), int(m_sizes.size()) - 1);
+    return qMin(rowStart(row), lastShownPage());
 }
 
 int PageView::topPage() const
@@ -268,7 +307,7 @@ int PageView::topPage() const
     if (m_sizes.isEmpty())
         return 0;
     const int row = rowForY(contentY() + kMargin + 1);
-    return qMin(row * pagesPerRow(), int(m_sizes.size()) - 1);
+    return qMin(rowStart(row), lastShownPage());
 }
 
 double PageView::topOffset() const
@@ -284,7 +323,7 @@ void PageView::goToPage(int page, double offset)
 {
     if (m_sizes.isEmpty())
         return;
-    const int target = qBound(0, page, int(m_sizes.size()) - 1);
+    const int target = qBound(firstShownPage(), page, lastShownPage());
     const int row = rowOfPage(target);
     if (m_layoutMode != LayoutMode::Continuous && row != m_shownRow) {
         m_shownRow = row;
@@ -330,7 +369,7 @@ void PageView::showRow(int row, bool atEnd)
 void PageView::nextPage()
 {
     if (m_layoutMode == LayoutMode::Continuous)
-        goToPage(rowOfPage(currentPage()) * pagesPerRow() + pagesPerRow());
+        goToPage(rowStart(rowOfPage(currentPage()) + 1));
     else
         showRow(m_shownRow + 1);
 }
@@ -338,7 +377,7 @@ void PageView::nextPage()
 void PageView::previousPage()
 {
     if (m_layoutMode == LayoutMode::Continuous)
-        goToPage((rowOfPage(currentPage()) - 1) * pagesPerRow());
+        goToPage(rowStart(rowOfPage(currentPage()) - 1));
     else
         showRow(m_shownRow - 1);
 }
@@ -415,7 +454,7 @@ void PageView::sendWanted()
         return;
 
     const int perRow = pagesPerRow();
-    const int pages = int(m_sizes.size());
+    const int pages = shownEnd();
     const double top = contentY();
     const double bottom = top + viewport()->height();
     const int firstRow = rowForY(top);
@@ -427,7 +466,7 @@ void PageView::sendWanted()
 
     QList<int> order;
     for (int row = firstRow; row <= lastRow; ++row) {
-        for (int i = row * perRow; i < (row + 1) * perRow && i < pages; ++i)
+        for (int i = rowStart(row); i < rowStart(row) + perRow && i < pages; ++i)
             order << i;
     }
     for (const int page : QList<int>(order)) {
@@ -442,7 +481,7 @@ void PageView::sendWanted()
         const int last = order.last();
         for (int i = 1; i <= kPagesAfter * perRow && last + i < pages; ++i)
             order << last + i;
-        for (int i = 1; i <= kPagesBefore * perRow && first - i >= 0; ++i)
+        for (int i = 1; i <= kPagesBefore * perRow && first - i >= firstShownPage(); ++i)
             order << first - i;
     }
 
@@ -633,7 +672,7 @@ std::optional<std::pair<int, QPointF>> PageView::pageAt(const QPoint &viewportPo
     const QPointF content(viewportPoint.x() + contentX(), viewportPoint.y() + contentY());
     const int row = rowForY(content.y());
     const int perRow = pagesPerRow();
-    for (int i = row * perRow; i < (row + 1) * perRow && i < m_sizes.size(); ++i) {
+    for (int i = rowStart(row); i < rowStart(row) + perRow && i < shownEnd(); ++i) {
         const QRectF area = m_pageRects.at(i);
         if (area.contains(content)) {
             return std::make_pair(i, QPointF((content.x() - area.x()) / m_scale, (content.y() - area.y()) / m_scale));
@@ -642,8 +681,8 @@ std::optional<std::pair<int, QPointF>> PageView::pageAt(const QPoint &viewportPo
     if (!nearest)
         return std::nullopt;
 
-    int best = qMin(row * perRow, int(m_sizes.size()) - 1);
-    if (perRow == 2 && best + 1 < m_sizes.size() && content.x() > m_pageRects.at(best).right())
+    int best = qMin(rowStart(row), lastShownPage());
+    if (perRow == 2 && best + 1 < shownEnd() && content.x() > m_pageRects.at(best).right())
         best += 1;
     const QRectF area = m_pageRects.at(best);
     if (area.isNull())
@@ -792,7 +831,7 @@ void PageView::paintEvent(QPaintEvent *event)
             break;
         if (m_layoutMode != LayoutMode::Continuous && row != m_shownRow)
             break;
-        for (int i = row * perRow; i < (row + 1) * perRow && i < m_sizes.size(); ++i) {
+        for (int i = rowStart(row); i < rowStart(row) + perRow && i < shownEnd(); ++i) {
             const QRectF area = m_pageRects.at(i);
             if (!area.isNull())
                 drawPage(painter, i, area.translated(-x, -y));
@@ -858,10 +897,10 @@ void PageView::keyPressEvent(QKeyEvent *event)
             bar->setValue(bar->value() - bar->pageStep() * 9 / 10);
         return;
     case Qt::Key_Home:
-        goToPage(0);
+        goToPage(firstShownPage());
         return;
     case Qt::Key_End:
-        goToPage(int(m_sizes.size()) - 1);
+        goToPage(lastShownPage());
         return;
     case Qt::Key_Plus:
     case Qt::Key_Equal:

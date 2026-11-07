@@ -50,6 +50,7 @@ class LookupThread;
 class ReaderTab;
 class ApiKeyStore;
 class IndexThread;
+class ArticleCoverThread;
 class ReviewTab;
 
 // The library: tabs, search, filters, the grid or list of publications, and their details.
@@ -101,7 +102,8 @@ public:
     void markSelectedChecked();
 
     // Opens a publication's main file in a tab of its own, or goes to its tab if it already has one.
-    ReaderTab *openPublication(qint64 id);
+    // An article shows only its own pages unless `articleOnly` is false, when it's shown in its volume's whole file.
+    ReaderTab *openPublication(qint64 id, bool articleOnly = true);
 
     // Asks what to do with the folder's publications, then does it.
     void removeRoot(qint64 rootId);
@@ -112,7 +114,7 @@ public:
     void forgetHiddenPublications();
 
     // The same, for one particular file. Each format of a publication can have a tab of its own.
-    ReaderTab *openPublicationFile(qint64 id, qint64 fileId);
+    ReaderTab *openPublicationFile(qint64 id, qint64 fileId, bool articleOnly = true);
 
     // One file per format that's available now, starting with the main file. More than one is a choice.
     QList<core::FileRecord> formatChoices(qint64 id);
@@ -165,9 +167,11 @@ signals:
 protected:
     void closeEvent(QCloseEvent *event) override;
     void changeEvent(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void buildMenus();
+    void keepLibraryFirst();
     void buildToolbar();
     void buildCentre();
     void buildStatusBar();
@@ -229,6 +233,8 @@ private:
     LibrarySession &m_session;
     ImportThread *m_import = nullptr;
     IndexThread *m_index = nullptr;
+    QWidget *m_libraryPage = nullptr; // Always the first tab.
+    ArticleCoverThread *m_articleCovers = nullptr;
     std::unique_ptr<ApiKeyStore> m_keys;
     std::unique_ptr<metadata::Transport> m_summaryTransport;
     QCheckBox *m_searchInside = nullptr;

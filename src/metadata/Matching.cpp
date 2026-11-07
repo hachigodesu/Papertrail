@@ -121,7 +121,7 @@ QList<FieldChange> plannedChanges(const Publication &publication, const FoundRec
     // says. Preprints are left out both ways: they're only ever what the user has said.
     if (found.type && !setByHand.contains(QStringLiteral("type")) && publication.type != PublicationType::Preprint
         && *found.type != PublicationType::Preprint) {
-        const QList<LibraryTab> tabs = {LibraryTab::JournalVolumes, LibraryTab::JournalArticles, LibraryTab::ConferencePapers,
+        const QList<LibraryTab> tabs = {LibraryTab::JournalIssues, LibraryTab::JournalArticles, LibraryTab::ConferencePapers,
                                         LibraryTab::Textbooks, LibraryTab::ThesesAndDissertations, LibraryTab::TechnicalReports,
                                         LibraryTab::Standards, LibraryTab::Other};
         const bool sameGroup = std::any_of(tabs.cbegin(), tabs.cend(), [&](LibraryTab tab) {

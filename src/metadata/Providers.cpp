@@ -89,8 +89,8 @@ std::optional<PublicationType> typeFromCrossref(const QString &type)
 {
     static const QMap<QString, PublicationType> types = {
         {QStringLiteral("journal-article"), PublicationType::JournalArticle},
-        {QStringLiteral("journal-volume"), PublicationType::JournalVolume},
-        {QStringLiteral("journal-issue"), PublicationType::JournalVolume},
+        {QStringLiteral("journal-volume"), PublicationType::JournalIssue},
+        {QStringLiteral("journal-issue"), PublicationType::JournalIssue},
         {QStringLiteral("proceedings-article"), PublicationType::ConferencePaper},
         {QStringLiteral("proceedings"), PublicationType::ConferenceProceedings},
         {QStringLiteral("book"), PublicationType::Book},

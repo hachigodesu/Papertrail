@@ -39,6 +39,8 @@ add_library(papertrail_ui STATIC
     ReaderTab.h
     IndexThread.cpp
     IndexThread.h
+    ArticleCoverThread.cpp
+    ArticleCoverThread.h
     ApiKeyStore.cpp
     ApiKeyStore.h
     SummaryDialog.cpp

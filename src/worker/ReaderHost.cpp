@@ -149,6 +149,8 @@ public:
                 outline(reply);
             else if (op == QStringLiteral("links"))
                 links(request, reply);
+            else if (op == QStringLiteral("heading"))
+                heading(request, reply);
             else if (op == QStringLiteral("anchor"))
                 anchor(request, reply);
             else if (op == QStringLiteral("locate"))
@@ -289,6 +291,26 @@ private:
         }
         reply.insert(QStringLiteral("page"), page(request));
         reply.insert(QStringLiteral("links"), items);
+    }
+
+    // What an article starting on this page is probably called, for a table of contents that only numbers them.
+    void heading(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        if (number < 0 || number >= m_document->pageCount())
+            throw engine::EngineError("there's no such page");
+        reply.insert(QStringLiteral("page"), number);
+        reply.insert(QStringLiteral("title"), m_document->largestTextOnPage(number).left(500));
+        const QString text = m_document->pageText(number);
+        reply.insert(QStringLiteral("doi"), import::articleDoiOnPage(text));
+        if (const std::optional<import::IssueNumbering> numbering = import::findIssueNumbering(text.left(4000))) {
+            reply.insert(QStringLiteral("volume"), numbering->volume);
+            reply.insert(QStringLiteral("issue"), numbering->issue);
+            if (numbering->month)
+                reply.insert(QStringLiteral("month"), *numbering->month);
+            if (numbering->year)
+                reply.insert(QStringLiteral("year"), *numbering->year);
+        }
     }
 
     void search(const QJsonObject &request, QJsonObject &reply)

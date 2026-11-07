@@ -77,6 +77,8 @@ signals:
     void libraryEdited();
     void editRequested(qint64 id);
     void openRequested(qint64 id);
+    // An article from a volume's list, to be read in the whole of the volume's file.
+    void openInVolumeRequested(qint64 articleId);
     void openFileRequested(qint64 id, qint64 fileId);
     void showInFolderRequested(qint64 id);
 

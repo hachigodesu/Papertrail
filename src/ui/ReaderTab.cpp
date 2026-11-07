@@ -1,6 +1,7 @@
 #include "ui/ReaderTab.h"
 
 #include "core/repo/ReadingStateRepository.h"
+#include "core/repo/VolumeArticles.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
 
@@ -37,6 +38,11 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
+#include <QActionGroup>
+#include <QEvent>
+#include <QPainter>
+#include <QStyledItemDelegate>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -99,6 +105,69 @@ PageView::Colours coloursFromSetting(const QString &value)
     if (value == QLatin1StringView("sepia"))
         return PageView::Colours::Sepia;
     return PageView::Colours::Light;
+}
+
+// Contents entries wrap onto as many lines as they need at the panel's width, with room between them, so a
+// long title can be read in full.
+class WrappingContentsDelegate : public QStyledItemDelegate {
+public:
+    explicit WrappingContentsDelegate(QTreeView *view) : QStyledItemDelegate(view), m_view(view) {}
+
+    static constexpr int kPadding = 6; // Above and below each entry.
+
+    void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override
+    {
+        QStyledItemDelegate::initStyleOption(option, index);
+        option->features |= QStyleOptionViewItem::WrapText;
+        option->textElideMode = Qt::ElideNone;
+    }
+
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        int depth = 0;
+        for (QModelIndex parent = index.parent(); parent.isValid(); parent = parent.parent())
+            ++depth;
+        const int indent = m_view->indentation() * (depth + (m_view->rootIsDecorated() ? 1 : 0));
+        const int margin = m_view->style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, m_view) + 1;
+        const int width = qMax(40, m_view->viewport()->width() - indent - 2 * margin);
+        const QString text = index.data(Qt::DisplayRole).toString();
+        const QRect bounds = option.fontMetrics.boundingRect(QRect(0, 0, width, 100000), Qt::TextWordWrap, text);
+        return QSize(width, bounds.height() + 2 * kPadding);
+    }
+
+private:
+    QTreeView *m_view;
+};
+
+// Lays the contents out again when the panel's width changes, since that changes how titles wrap.
+class RelayoutOnResize : public QObject {
+public:
+    explicit RelayoutOnResize(QTreeView *view) : QObject(view), m_view(view)
+    {
+        m_timer.setSingleShot(true);
+        m_timer.setInterval(30);
+        QObject::connect(&m_timer, &QTimer::timeout, view, [view] { view->doItemsLayout(); });
+        view->viewport()->installEventFilter(this);
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched == m_view->viewport() && event->type() == QEvent::Resize)
+            m_timer.start();
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    QTreeView *m_view;
+    QTimer m_timer;
+};
+
+QIcon colourSwatch(const QString &colour)
+{
+    QPixmap pixmap(14, 14);
+    pixmap.fill(QColor(colour));
+    return QIcon(pixmap);
 }
 
 } // namespace
@@ -178,6 +247,21 @@ ReaderTab::ReaderTab(LibrarySession &session, qint64 publicationId, qint64 fileI
 {
     m_openLink = [](const QUrl &url) { QDesktopServices::openUrl(url); };
     m_layout.fontSize = session.settings().value(QStringLiteral("reader.font_size")).toDouble(12);
+    try {
+        const std::optional<Publication> publication = session.publications().get(publicationId);
+        if (publication && publication->parentId && publication->pageStart) {
+            const int first = *publication->pageStart - 1;
+            m_articlePages = std::make_pair(first, qMax(first, publication->pageEnd.value_or(*publication->pageStart) - 1));
+            const std::optional<Publication> holder = session.publications().get(*publication->parentId);
+            const PublicationType type = holder ? holder->type : PublicationType::Other;
+            m_wholeFileLabel = type == PublicationType::JournalIssue ? tr("Whole issue")
+                : type == PublicationType::ConferenceProceedings  ? tr("All the proceedings")
+                : type == PublicationType::Book || type == PublicationType::Textbook ? tr("Whole book")
+                                                                                     : tr("Whole file");
+        }
+    } catch (const std::exception &) {
+        // Shown as a whole file, like anything else.
+    }
     m_client = new DocumentClient(session.paths().workerPath, this);
 
     auto *column = new QVBoxLayout(this);
@@ -262,6 +346,13 @@ void ReaderTab::buildToolbar()
         setSidePanelVisible(!m_side->isVisible());
     });
     m_toolbar->addWidget(m_sideToggle);
+
+    // An article can be read on its own, or in the whole of what it's part of.
+    m_wholeFile = button(m_wholeFileLabel, tr("Show the rest of the file this article is in, or only this article"),
+                         [this] { setArticleOnly(!m_articleOnly); });
+    m_wholeFile->setCheckable(true);
+    m_wholeFileAction = m_toolbar->addWidget(m_wholeFile);
+    m_wholeFileAction->setVisible(false);
     m_toolbar->addSeparator();
     m_highlightAction = m_toolbar->addAction(tr("Highlight"), this, [this] { annotateSelection(AnnotationType::Highlight); });
     m_highlightAction->setToolTip(tr("Highlights the selected text. Right-click it for colours, underlining and notes."));
@@ -279,7 +370,7 @@ void ReaderTab::buildToolbar()
     m_pageBox->setAlignment(Qt::AlignRight);
     m_pageBox->setAccessibleName(tr("Page number"));
     connect(m_pageBox, &QLineEdit::returnPressed, this, [this] {
-        m_view->goToPage(m_pageBox->text().toInt() - 1);
+        m_view->goToPage(m_view->firstShownPage() + m_pageBox->text().toInt() - 1);
         m_view->setFocus();
     });
     m_toolbar->addWidget(m_pageBox);
@@ -375,8 +466,14 @@ void ReaderTab::buildSidePanel()
     m_contents->setHeaderHidden(true);
     m_contents->setAccessibleName(tr("Table of contents"));
     m_contents->setExpandsOnDoubleClick(false);
-    m_contents->header()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_contents->header()->setStretchLastSection(false);
+    // Titles wrap at the panel's width rather than running off to the side.
+    m_contents->header()->setStretchLastSection(true);
+    m_contents->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_contents->setWordWrap(true);
+    m_contents->setTextElideMode(Qt::ElideNone);
+    m_contents->setUniformRowHeights(false);
+    m_contents->setItemDelegate(new WrappingContentsDelegate(m_contents));
+    new RelayoutOnResize(m_contents);
     connect(m_contents, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) { onContentsActivated(item); });
     connect(m_contents, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *item) { onContentsActivated(item); });
     m_side->addTab(m_contents, tr("Contents"));
@@ -407,12 +504,7 @@ void ReaderTab::buildSidePanel()
         const qint64 id = item->data(Qt::UserRole).toLongLong();
         QMenu menu(this);
         menu.addAction(tr("Edit note..."), this, [this, id] { askToEditNote(id); });
-        QMenu *colours = menu.addMenu(tr("Colour"));
-        const QStringList names = {tr("Yellow"), tr("Green"), tr("Blue"), tr("Pink")};
-        for (int i = 0; i < annotationColours().size(); ++i) {
-            const QString colour = annotationColours().at(i);
-            colours->addAction(names.at(i), this, [this, id, colour] { setAnnotationColour(id, colour); });
-        }
+        addColourMenu(&menu, id);
         menu.addSeparator();
         menu.addAction(tr("Delete"), this, [this, id] { deleteAnnotation(id); });
         menu.exec(m_annotationList->viewport()->mapToGlobal(position));
@@ -526,9 +618,61 @@ void ReaderTab::onOpened(int pageCount, bool reflowable)
     sizes.fill(assumed, pageCount);
     m_thumbnailModel->setPages(sizes);
     m_pageTotal->setText(tr("of %1").arg(pageCount));
+    applyArticleRange();
     updatePageBox();
     updateZoomBox();
     m_client->requestOutline();
+}
+
+void ReaderTab::setArticleOnly(bool only)
+{
+    m_articleOnly = only;
+    applyArticleRange();
+}
+
+bool ReaderTab::pageIsShown(int page) const
+{
+    return !m_view->hasPageRange() || (page >= m_view->firstShownPage() && page <= m_view->lastShownPage());
+}
+
+void ReaderTab::ensurePageShown(int page)
+{
+    if (!pageIsShown(page))
+        setArticleOnly(false);
+}
+
+void ReaderTab::applyArticleRange()
+{
+    // A page range only means anything where pages are fixed.
+    const bool canLimit = m_articlePages && !m_reflowable && m_view->pageCount() > 0;
+    if (m_wholeFileAction)
+        m_wholeFileAction->setVisible(canLimit);
+    if (m_wholeFile) {
+        const QSignalBlocker blocker(m_wholeFile);
+        m_wholeFile->setChecked(!m_articleOnly);
+    }
+    const bool limited = canLimit && m_articleOnly;
+    const bool wasLimited = m_view->hasPageRange();
+    if (limited)
+        m_view->setPageRange(m_articlePages->first, m_articlePages->second);
+    else if (wasLimited)
+        m_view->setPageRange(-1, -1);
+
+    for (int row = 0; row < m_thumbnailModel->rowCount(); ++row)
+        m_thumbnails->setRowHidden(row, !pageIsShown(row));
+    for (QTreeWidgetItemIterator it(m_contents); *it; ++it) {
+        const int page = (*it)->data(0, kPageRole).toInt();
+        (*it)->setHidden(page >= 0 && !pageIsShown(page));
+    }
+    updatePageBox();
+
+    // Matches outside the article are left out while it's on its own, so a search runs again when that changes.
+    if (limited != wasLimited && !m_activeSearch.isEmpty()) {
+        const QString text = m_activeSearch;
+        m_activeSearch.clear();
+        m_search->setText(text);
+        applySearch();
+    }
 }
 
 void ReaderTab::restorePlace()
@@ -638,11 +782,14 @@ bool ReaderTab::isShowingProblem() const
 
 void ReaderTab::updatePageBox()
 {
+    // Within an article on its own, pages count from its first.
+    const int first = m_view->firstShownPage();
+    const int shown = m_view->pageCount() > 0 ? m_view->lastShownPage() - first + 1 : 0;
     if (!m_pageBox->hasFocus())
-        m_pageBox->setText(QString::number(m_view->currentPage() + 1));
-    m_pageTotal->setText(tr("of %1").arg(m_view->pageCount()));
-    if (!m_pageBox->validator() || static_cast<const QIntValidator *>(m_pageBox->validator())->top() != m_view->pageCount())
-        m_pageBox->setValidator(new QIntValidator(1, qMax(1, m_view->pageCount()), m_pageBox));
+        m_pageBox->setText(QString::number(m_view->currentPage() - first + 1));
+    m_pageTotal->setText(tr("of %1").arg(shown));
+    if (!m_pageBox->validator() || static_cast<const QIntValidator *>(m_pageBox->validator())->top() != shown)
+        m_pageBox->setValidator(new QIntValidator(1, qMax(1, shown), m_pageBox));
 }
 
 void ReaderTab::updateZoomBox()
@@ -674,6 +821,20 @@ void ReaderTab::updateZoomBox()
 
 void ReaderTab::onOutline(const QList<ReaderOutlineItem> &items)
 {
+    // Where the file's contents only number an entry, an article starting on that page gives its title.
+    QHash<int, QString> articleTitles;
+    try {
+        const std::optional<Publication> publication = m_session.publications().get(m_publicationId);
+        const qint64 owner = publication ? publication->parentId.value_or(m_publicationId) : m_publicationId;
+        for (const qint64 id : m_session.publications().childIds(owner)) {
+            const std::optional<Publication> article = m_session.publications().get(id);
+            if (article && article->pageStart && !articleTitles.contains(*article->pageStart - 1))
+                articleTitles.insert(*article->pageStart - 1, article->title);
+        }
+    } catch (const std::exception &) {
+        // The file's own titles are shown.
+    }
+
     m_contents->clear();
     QList<QTreeWidgetItem *> parents;
     for (const ReaderOutlineItem &item : items) {
@@ -681,14 +842,18 @@ void ReaderTab::onOutline(const QList<ReaderOutlineItem> &items)
         parents.resize(depth);
         QTreeWidgetItem *entry = parents.isEmpty() ? new QTreeWidgetItem(m_contents) : new QTreeWidgetItem(parents.last());
         // Tree items show text as it is, so a title from the file can't turn into formatting.
-        entry->setText(0, item.title);
-        entry->setToolTip(0, item.title);
+        QString title = item.title;
+        if (isPlaceholderTitle(title) && articleTitles.contains(item.page))
+            title = articleTitles.value(item.page);
+        entry->setText(0, title);
+        entry->setToolTip(0, title);
         entry->setData(0, kPageRole, item.page);
         entry->setData(0, kPointRole, item.y);
         entry->setData(0, kNoPageRole, item.page < 0);
         parents << entry;
     }
     m_contents->expandToDepth(0);
+    applyArticleRange();
 
     // Opens with the contents showing if there are any, and on the page thumbnails if not.
     m_side->setCurrentWidget(items.isEmpty() ? static_cast<QWidget *>(m_thumbnails) : static_cast<QWidget *>(m_contents));
@@ -882,6 +1047,7 @@ void ReaderTab::goToAnnotation(qint64 id)
     if (const auto located = m_locatedParts.constFind(id); located != m_locatedParts.constEnd()) {
         for (const auto &part : *located) {
             if (part.first >= 0) {
+                ensurePageShown(part.first);
                 m_view->goToPage(part.first);
                 return;
             }
@@ -892,6 +1058,7 @@ void ReaderTab::goToAnnotation(qint64 id)
             continue;
         if (annotation.firstPage() >= 0) {
             const AnnotationPart &part = annotation.parts.first();
+            ensurePageShown(part.page);
             m_view->goToPoint(part.page, part.rects.isEmpty() ? 0 : qMax(0.0, part.rects.first().top() - 40));
         } else if (!annotation.parts.isEmpty() && !annotation.parts.first().place.isEmpty()) {
             m_client->requestPageForBookmark(annotation.parts.first().place);
@@ -1074,10 +1241,11 @@ void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
     menu->addSeparator();
     if (m_view->hasSelection()) {
         QMenu *highlight = menu->addMenu(tr("Highlight"));
-        const QStringList names = {tr("Yellow"), tr("Green"), tr("Blue"), tr("Pink")};
+        const QStringList names = colourNames();
         for (int i = 0; i < annotationColours().size(); ++i) {
             const QString colour = annotationColours().at(i);
-            highlight->addAction(names.at(i), this, [this, colour] { annotateSelection(AnnotationType::Highlight, QString(), colour); });
+            highlight->addAction(colourSwatch(colour), names.at(i), this,
+                                 [this, colour] { annotateSelection(AnnotationType::Highlight, QString(), colour); });
         }
         menu->addAction(tr("Underline"), this, [this] { annotateSelection(AnnotationType::Underline); });
         menu->addAction(tr("Add a note..."), this, &ReaderTab::askForNoteAndAnnotate);
@@ -1086,14 +1254,39 @@ void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
         const qint64 annotation = *id;
         menu->addSeparator();
         menu->addAction(tr("Edit note..."), this, [this, annotation] { askToEditNote(annotation); });
-        QMenu *colours = menu->addMenu(tr("Colour"));
-        const QStringList names = {tr("Yellow"), tr("Green"), tr("Blue"), tr("Pink")};
-        for (int i = 0; i < annotationColours().size(); ++i) {
-            const QString colour = annotationColours().at(i);
-            colours->addAction(names.at(i), this, [this, annotation, colour] { setAnnotationColour(annotation, colour); });
-        }
+        addColourMenu(menu, annotation);
         menu->addAction(tr("Delete highlight"), this, [this, annotation] { deleteAnnotation(annotation); });
     }
+}
+
+QStringList ReaderTab::colourNames()
+{
+    return {tr("Yellow"), tr("Green"), tr("Blue"), tr("Pink")};
+}
+
+QMenu *ReaderTab::addColourMenu(QMenu *menu, qint64 id)
+{
+    QString current;
+    for (const QList<Annotation> *list : {&m_annotations, &m_annotationsElsewhere}) {
+        for (const Annotation &annotation : *list) {
+            if (annotation.id == id)
+                current = annotation.colour;
+        }
+    }
+
+    QMenu *colours = menu->addMenu(tr("Colour"));
+    auto *group = new QActionGroup(colours);
+    group->setExclusive(true);
+    const QStringList names = colourNames();
+    for (int i = 0; i < annotationColours().size(); ++i) {
+        const QString colour = annotationColours().at(i);
+        QAction *action = colours->addAction(colourSwatch(colour), names.at(i), this,
+                                             [this, id, colour] { setAnnotationColour(id, colour); });
+        action->setCheckable(true);
+        action->setChecked(colour.compare(current, Qt::CaseInsensitive) == 0);
+        group->addAction(action);
+    }
+    return colours;
 }
 
 void ReaderTab::showMatch(int page, const QString &text)
@@ -1109,6 +1302,8 @@ void ReaderTab::applyPendingMatch()
         return;
     const auto [page, text] = *m_pendingMatch;
     m_pendingMatch.reset();
+    if (!m_reflowable)
+        ensurePageShown(page);
     m_view->goToPage(m_reflowable ? 0 : page);
     m_search->setText(text);
     m_activeSearch.clear(); // So that it searches again from here, even for the same words.
@@ -1139,6 +1334,8 @@ void ReaderTab::applySearch()
 
 void ReaderTab::onSearchHits(int page, const QList<QRectF> &rects)
 {
+    if (!pageIsShown(page))
+        return;
     m_view->setSearchHits(page, rects);
 
     // Kept in reading order from the start of the document, though they arrive from where the

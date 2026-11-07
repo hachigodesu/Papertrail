@@ -14,7 +14,7 @@ The project folder is empty, so this is a new build.
 | Formats | PDF, EPUB, DjVu, MOBI/AZW3, XPS, CBZ, FB2 |
 | V1 research features | Full-text search, highlights and notes, citation export |
 | Metadata | Users choose between all three modes: online lookup with review, online lookup without review, offline only |
-| Journal volumes | A volume is one entry, with child articles defined by page range |
+| Journal issues | An issue is one entry, with child articles defined by page range. (First planned as "journal volumes", but a volume holds several issues) |
 | Library location | One library per computer |
 | Moving between computers | Export and import of all database information and settings, which works even when files sit in a different folder structure. No cloud sync |
 | OCR | Not in V1. Scanned files are flagged as "no text" |
@@ -123,7 +123,7 @@ Code rules that keep it distro-neutral:
 - `library_root`: a named scan location with its absolute path. If it's unavailable, such as an unplugged drive, its entries show as *offline* rather than deleted, and a root can be repointed to a new path.
 - `file`: root, relative path, size, modified time, SHA-256, format, page count, has-text-layer flag and status (`ok`, `missing`, `offline`, `unreadable`).
 - `publication`: the core record.
-  - **Type:** journal volume, journal article, conference proceedings, conference paper, textbook, book, book chapter, thesis, dissertation, technical report, standard, preprint, other.
+  - **Type:** journal issue, journal article, conference proceedings, conference paper, textbook, book, book chapter, thesis, dissertation, technical report, standard, preprint, other.
   - **Common fields:** title, subtitle, abstract, date, language, URL, edition, series.
   - **Identifiers:** DOI, ISBN-10/13, ISSN/eISSN, arXiv ID, PMID.
   - **Container fields:** journal or container title, volume, issue, pages, publisher, place.
@@ -239,7 +239,7 @@ An import report shows how many publications were linked, proposed or left unmat
 └──────────────┴───────────────────────────────────────┴──────────────────┘
 ```
 
-- **Tabs:** All, Journal Volumes, Journal Articles, Preprints, Conference Papers, Textbooks, Theses & Dissertations, Technical Reports, Standards, Other.
+- **Tabs:** All, Journal Issues, Journal Articles, Preprints, Conference Papers, Textbooks, Theses & Dissertations, Technical Reports, Standards, Other.
 - **Filter sidebar:** every filter shows live counts. Values within one filter combine with OR, and different filters combine with AND. Filters cover tags, year range, author, journal, publisher, conference, institution, language, format, read status, needs review, no text, no file linked, and missing or offline files.
 - **Search box:** plain text, or field searches such as `author:`, `tag:`, `year:>2010`, `doi:`. A scope switch extends the search to document contents.
 - **Grid and list:** both use virtualised models and load covers lazily.
@@ -341,7 +341,7 @@ Each milestone ends with something you can run.
 | **M5** | Other formats: DjVu, MOBI/AZW3, XPS, CBZ, FB2, using the M0 results | Every format renders and supplies a cover and, where it has any, text |
 | **M6** | Metadata lookup: providers, all three modes, review queue, provenance and undo | Each mode behaves as specified, and offline mode makes no network requests |
 | **M6.5** | Collections: create, rename and delete, add and remove publications, and a sidebar section to narrow the library to them | A project's publications can be gathered into a collection and worked with on their own, and nothing outside it shows while it's chosen |
-| **M7** | Volumes: child articles, table-of-contents proposals, open at page, per-article tags | A journal volume can be split into searchable, citable articles |
+| **M7** | Volumes: child articles, table-of-contents proposals, open at page, per-article tags | A journal issue can be split into searchable, citable articles |
 | **M8** | Full-text search: indexing, snippets, jump to match, "no text" flag | A phrase search across the library opens the right page |
 | **M9** | Highlights and notes: anchoring on fixed and reflowable formats, panel, Markdown export | Annotations survive restarts, file moves and EPUB font changes |
 | **M9.5** | Article summaries: API key handling, model and effort choice, cost estimates, summaries from identifying information, accept or discard, and sending the paper as a last resort | A paper can be summarized from its identifiers alone, with the cost shown beforehand and the sources shown afterwards. Nothing is sent without confirmation, and without a key the app makes no requests to Anthropic |

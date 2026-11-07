@@ -57,6 +57,20 @@ QString findIssn(const QString &text); // Checks the check digit.
 QString findArxivId(const QString &text);
 bool isValidIsbn(const QString &digits);
 
+// The DOI of the article starting on this page, if it's printed there. Anything after a list of references
+// is left out, and so is a page with more than one DOI, since there's then no telling which is the article's.
+QString articleDoiOnPage(const QString &pageText);
+
+// A journal issue's numbers as printed on its cover or in a running header, such as
+// "VOL. 7, NO. 11, NOVEMBER 2026" or "NOVEMBER 2026 VOLUME 7 NUMBER 11".
+struct IssueNumbering {
+    QString volume;
+    QString issue;
+    std::optional<int> month;
+    std::optional<int> year;
+};
+std::optional<IssueNumbering> findIssueNumbering(const QString &text);
+
 // A likely publication year from text such as a copyright line, or from a metadata date.
 std::optional<int> findCopyrightYear(const QString &text);
 std::optional<int> yearFromDate(const QString &date);

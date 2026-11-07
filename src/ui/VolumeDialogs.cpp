@@ -106,13 +106,14 @@ ContentsDialog::ContentsDialog(LibrarySession &session, qint64 volumeId, QWidget
     if (!file && !files.isEmpty())
         file = &files.first();
     if (!file) {
-        QMetaObject::invokeMethod(this, [this] { cantOffer(tr("This volume has no file to read.")); }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(this, [this] { cantOffer(tr("This publication has no file to read.")); }, Qt::QueuedConnection);
         return;
     }
 
     m_client = new DocumentClient(m_session.paths().workerPath, this);
     connect(m_client, &DocumentClient::opened, this, &ContentsDialog::onOpened);
     connect(m_client, &DocumentClient::outlineReady, this, &ContentsDialog::onOutline);
+    connect(m_client, &DocumentClient::headingReady, this, &ContentsDialog::onHeading);
     connect(m_client, &DocumentClient::failed, this,
             [this](DocumentClient::Failure, const QString &message) { cantOffer(tr("This file couldn't be read: %1").arg(message)); });
     const QString converted = file->sha256.isEmpty() ? QString() : import::convertedPathFor(m_session.paths().cacheDirectory, file->sha256);
@@ -172,43 +173,135 @@ void ContentsDialog::onOutline(const QList<ReaderOutlineItem> &items)
             levelLabel->setVisible(ordered.size() > 1);
     }
     fillTable();
-    m_message->setText(tr("Tick the entries that are articles, and correct anything that's wrong. "
-                          "Nothing is created until you choose Create articles."));
     emit contentsReady();
+}
+
+void ContentsDialog::requestHeadings()
+{
+    // Only for what the contents didn't name, which saves reading every article's first page, and the first
+    // few for the volume's numbers, which are usually on its cover or in a running header.
+    for (qsizetype i = 0; i < m_drafts.size(); ++i) {
+        const ArticleDraft &draft = m_drafts.at(i);
+        const int page = draft.firstPage - 1;
+        const bool forNumbers = i < 3 && !m_numberingRead;
+        if ((forNumbers || isPlaceholderTitle(draft.title)) && !m_headings.contains(page) && !m_headingsWanted.contains(page)) {
+            m_headingsWanted.insert(page);
+            m_client->requestHeading(page);
+        }
+    }
+}
+
+void ContentsDialog::onHeading(int page, const ReaderHeading &heading)
+{
+    if (!m_headingsWanted.remove(page))
+        return;
+    const QString &title = heading.title;
+    const QString &doi = heading.doi;
+    m_headings.insert(page, Heading{title, doi});
+
+    // The numbers fill gaps in the volume's details, and its articles', changing nothing already there.
+    if (!m_numberingRead && !heading.volume.isEmpty()) {
+        m_numberingRead = true;
+        try {
+            const std::optional<int> month = heading.month > 0 ? std::optional<int>(heading.month) : std::nullopt;
+            const std::optional<int> year = heading.year > 0 ? std::optional<int>(heading.year) : std::nullopt;
+            if (fillVolumeNumbering(m_session.database(), m_volumeId, heading.volume, heading.issue, month, year)) {
+                m_filledNumbering = true;
+                m_numberingNote = tr("Its volume and issue numbers, %1 and %2, were read from its pages and filled in.")
+                                      .arg(heading.volume, heading.issue);
+            }
+        } catch (const std::exception &) {
+            // Only a convenience: they can still be typed in.
+        }
+    }
+    for (int row = 0; row < m_drafts.size(); ++row) {
+        ArticleDraft &draft = m_drafts[row];
+        QTableWidgetItem *titleItem = m_table->item(row, TitleColumn);
+        // A title someone has already typed over is theirs.
+        if (draft.firstPage - 1 != page || !titleItem || titleItem->text().simplified() != draft.title)
+            continue;
+        if (adoptPageHeading(draft, title, doi))
+            showRow(row);
+    }
+    updateCreateButton();
+    updateMessage();
+    if (m_headingsWanted.isEmpty())
+        emit headingsRead();
+}
+
+void ContentsDialog::updateMessage()
+{
+    QString text = tr("Tick the entries that are articles, and correct anything that's wrong. "
+                      "Nothing is created until you choose Create articles.");
+    if (!m_headingsWanted.isEmpty()) {
+        text += u' ' + tr("Reading titles and numbers from the articles' first pages (%n left).", nullptr,
+                          int(m_headingsWanted.size()));
+    }
+    if (!m_numberingNote.isEmpty())
+        text += u' ' + m_numberingNote;
+    m_message->setText(text);
 }
 
 void ContentsDialog::fillTable()
 {
-    QList<ArticleDraft> drafts = draftsFromContents(m_entries, m_level->currentData().toInt(), m_pageCount);
+    m_drafts = draftsFromContents(m_entries, m_level->currentData().toInt(), m_pageCount);
     try {
-        markExistingArticles(m_session.database(), m_volumeId, drafts);
+        markExistingArticles(m_session.database(), m_volumeId, m_drafts);
     } catch (const std::exception &) {
         // Only a convenience: at worst, something can be chosen twice.
     }
-
-    const QSignalBlocker blocker(m_table);
-    m_table->setRowCount(int(drafts.size()));
-    for (int row = 0; row < drafts.size(); ++row) {
-        const ArticleDraft &draft = drafts.at(row);
-        auto *title = new QTableWidgetItem(draft.title); // Shown as it is, so a file's text can't become formatting.
-        title->setFlags(Qt::ItemIsEnabled | Qt::ItemIsEditable | Qt::ItemIsUserCheckable | Qt::ItemIsSelectable);
-        title->setCheckState(draft.likelyNotAnArticle || draft.alreadyAdded ? Qt::Unchecked : Qt::Checked);
-        m_table->setItem(row, TitleColumn, title);
-
-        auto *first = new QTableWidgetItem;
-        first->setData(Qt::EditRole, draft.firstPage);
-        m_table->setItem(row, FirstColumn, first);
-        auto *last = new QTableWidgetItem;
-        last->setData(Qt::EditRole, draft.lastPage);
-        m_table->setItem(row, LastColumn, last);
-
-        auto *note = new QTableWidgetItem(draft.alreadyAdded ? tr("Already added")
-                                          : draft.likelyNotAnArticle ? tr("Probably not an article")
-                                                                     : QString());
-        note->setFlags(Qt::ItemIsEnabled);
-        m_table->setItem(row, NoteColumn, note);
+    for (ArticleDraft &draft : m_drafts) {
+        const auto known = m_headings.constFind(draft.firstPage - 1);
+        if (known != m_headings.cend())
+            adoptPageHeading(draft, known->title, known->doi);
     }
+
+    {
+        const QSignalBlocker blocker(m_table);
+        m_table->setRowCount(int(m_drafts.size()));
+        for (int row = 0; row < m_drafts.size(); ++row) {
+            auto *title = new QTableWidgetItem; // Shown as it is, so a file's text can't become formatting.
+            title->setFlags(Qt::ItemIsEnabled | Qt::ItemIsEditable | Qt::ItemIsUserCheckable | Qt::ItemIsSelectable);
+            m_table->setItem(row, TitleColumn, title);
+
+            auto *first = new QTableWidgetItem;
+            first->setData(Qt::EditRole, m_drafts.at(row).firstPage);
+            m_table->setItem(row, FirstColumn, first);
+            auto *last = new QTableWidgetItem;
+            last->setData(Qt::EditRole, m_drafts.at(row).lastPage);
+            m_table->setItem(row, LastColumn, last);
+
+            auto *note = new QTableWidgetItem;
+            note->setFlags(Qt::ItemIsEnabled);
+            m_table->setItem(row, NoteColumn, note);
+            showRow(row);
+        }
+    }
+    requestHeadings();
+    updateMessage();
     updateCreateButton();
+}
+
+void ContentsDialog::showRow(int row)
+{
+    const ArticleDraft &draft = m_drafts.at(row);
+    {
+        const QSignalBlocker blocker(m_table);
+        QTableWidgetItem *title = m_table->item(row, TitleColumn);
+        title->setText(draft.title);
+        title->setCheckState(draft.likelyNotAnArticle || draft.alreadyAdded ? Qt::Unchecked : Qt::Checked);
+
+        QStringList notes;
+        if (draft.alreadyAdded)
+            notes << tr("Already added");
+        else if (draft.renames)
+            notes << tr("Names the article already made");
+        if (draft.likelyNotAnArticle)
+            notes << tr("Probably not an article");
+        if (draft.titleFromPage)
+            notes << tr("Title from its first page");
+        m_table->item(row, NoteColumn)->setText(notes.join(QStringLiteral(". ")));
+    }
 }
 
 QList<ArticleDraft> ContentsDialog::chosenDrafts(QString *problem) const
@@ -221,6 +314,13 @@ QList<ArticleDraft> ContentsDialog::chosenDrafts(QString *problem) const
         draft.title = m_table->item(row, TitleColumn)->text().simplified();
         draft.firstPage = m_table->item(row, FirstColumn)->data(Qt::EditRole).toInt();
         draft.lastPage = m_table->item(row, LastColumn)->data(Qt::EditRole).toInt();
+        if (row < m_drafts.size()) {
+            const ArticleDraft &proposed = m_drafts.at(row);
+            draft.renames = proposed.renames;
+            // A DOI read from the first page only belongs to the article if it still starts there.
+            if (draft.firstPage == proposed.firstPage)
+                draft.doi = proposed.doi;
+        }
         if (problem && problem->isEmpty()) {
             if (draft.title.isEmpty()) {
                 *problem = tr("Row %1 has no title.").arg(row + 1);
@@ -242,7 +342,9 @@ bool ContentsDialog::createChosen()
         return false;
     }
     try {
-        m_created = int(createArticles(m_session.database(), m_volumeId, drafts, true).size());
+        const auto named = std::count_if(drafts.cbegin(), drafts.cend(), [](const ArticleDraft &draft) { return draft.renames.has_value(); });
+        m_created = int(createArticles(m_session.database(), m_volumeId, drafts, true).size() - named);
+        m_named = int(named);
     } catch (const std::exception &error) {
         m_message->setText(tr("Those articles couldn't be created: %1").arg(QString::fromUtf8(error.what())));
         return false;
@@ -252,9 +354,16 @@ bool ContentsDialog::createChosen()
 
 void ContentsDialog::updateCreateButton()
 {
-    const qsizetype count = chosenDrafts().size();
-    m_create->setEnabled(count > 0);
-    m_create->setText(count == 1 ? tr("Create 1 article") : tr("Create %1 articles").arg(count));
+    const QList<ArticleDraft> drafts = chosenDrafts();
+    const auto renaming = std::count_if(drafts.cbegin(), drafts.cend(), [](const ArticleDraft &draft) { return draft.renames.has_value(); });
+    const int creating = int(drafts.size() - renaming);
+    m_create->setEnabled(!drafts.isEmpty());
+    if (renaming == 0)
+        m_create->setText(creating == 1 ? tr("Create 1 article") : tr("Create %1 articles").arg(creating));
+    else if (creating == 0)
+        m_create->setText(renaming == 1 ? tr("Name 1 article") : tr("Name %1 articles").arg(renaming));
+    else
+        m_create->setText(tr("Create %1, name %2").arg(creating).arg(renaming));
 }
 
 AddArticleDialog::AddArticleDialog(const std::optional<int> &pageCount, QWidget *parent)

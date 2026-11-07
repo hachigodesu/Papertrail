@@ -940,7 +940,7 @@ private slots:
     {
         const qint64 volume = importSample(QStringLiteral("reader_doc.pdf"));
         Publication record = *m_session->publications().get(volume);
-        record.type = PublicationType::JournalVolume;
+        record.type = PublicationType::JournalIssue;
         m_session->publications().update(record);
         ArticleDraft draft;
         draft.title = QStringLiteral("An Article");

@@ -408,7 +408,8 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
     const ListQuery query = buildListQuery(filter, sort, searchClause(filter), anyHidden());
     auto select = m_db.prepare(
         "SELECT p.id, p.type, p.title, p.authors_display, p.year, p.container_title, p.read_status, "
-        "p.needs_review, coalesce(p.parent_id, p.id)"
+        "p.needs_review, coalesce(p.parent_id, p.id), CASE WHEN p.parent_id IS NULL THEN NULL ELSE p.page_start END, "
+        "p.volume, p.issue, p.month"
         + query.sql + " LIMIT ? OFFSET ?");
     bindAll(*select, query.bindings);
     select->bind(int(query.bindings.size()) + 1, limit);
@@ -416,8 +417,10 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
 
     QList<PublicationSummary> rows;
     QList<qint64> fileOwners;
+    QList<int> firstPages; // An article's, for its cover. 0 for anything else.
     rows.reserve(limit);
     fileOwners.reserve(limit);
+    firstPages.reserve(limit);
     while (select->step()) {
         PublicationSummary row;
         row.id = select->int64At(0);
@@ -429,6 +432,10 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
         row.readStatus = readStatusFromDb(select->textAt(6)).value_or(ReadStatus::Unread);
         row.needsReview = select->intAt(7) != 0;
         fileOwners << select->int64At(8);
+        firstPages << select->optIntAt(9).value_or(0);
+        row.volume = select->textAt(10);
+        row.issue = select->textAt(11);
+        row.month = select->optIntAt(12);
         rows << row;
     }
 
@@ -442,7 +449,7 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
     for (qsizetype i = 0; i < rows.size(); ++i) {
         file.bind(1, fileOwners.at(i));
         if (file.step()) {
-            rows[i].coverSha = file.textAt(0);
+            rows[i].coverSha = articleCoverKey(file.textAt(0), firstPages.at(i));
             rows[i].format = file.textAt(1);
             rows[i].fileStatus = file.textAt(2);
             rows[i].formats = file.textAt(3).split(u',', Qt::SkipEmptyParts);

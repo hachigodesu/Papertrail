@@ -98,7 +98,7 @@ public:
 
             const qint64 id = m_publications.create(p);
             ++stats.publications;
-            if (p.type == PublicationType::JournalVolume)
+            if (p.type == PublicationType::JournalIssue)
                 volumes << id;
 
             const int tagCount = between(0, 5);
@@ -186,7 +186,7 @@ private:
         if (roll <= 55) return PublicationType::JournalArticle;
         if (roll <= 67) return PublicationType::ConferencePaper;
         if (roll <= 69) return PublicationType::ConferenceProceedings;
-        if (roll <= 71) return PublicationType::JournalVolume;
+        if (roll <= 71) return PublicationType::JournalIssue;
         if (roll <= 79) return PublicationType::Textbook;
         if (roll <= 83) return PublicationType::Book;
         if (roll <= 85) return PublicationType::BookChapter;
@@ -217,7 +217,7 @@ private:
 
         switch (p.type) {
         case PublicationType::JournalArticle:
-        case PublicationType::JournalVolume:
+        case PublicationType::JournalIssue:
             p.containerTitle = pickSkewed(m_journals);
             p.volume = QString::number(between(1, 90));
             p.issue = QString::number(between(1, 12));

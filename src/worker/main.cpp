@@ -178,7 +178,7 @@ QJsonObject inspectFile(engine::Engine &engine, const QString &originalPath, con
     reply.insert(QStringLiteral("text"), text.left(kMaxReplyText));
 
     try {
-        reply.insert(QStringLiteral("largestText"), document->largestTextOnFirstPage());
+        reply.insert(QStringLiteral("largestText"), document->largestTextOnPage(0));
     } catch (const engine::EngineError &) {
         // A title guess is a bonus, so carry on without one.
     }
@@ -222,9 +222,10 @@ QJsonObject inspectFile(engine::Engine &engine, const QString &originalPath, con
 
 // A run of pages' text for the full-text index. A document stays open between requests for the same file,
 // since reading a long one takes many of them.
-QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
+// The document a request is about. It's kept open between requests, since they usually come in runs for one
+// file. Returns null with `error` set if it can't be read.
+engine::Document *documentFor(engine::Engine &engine, const QJsonObject &request, QString &error)
 {
-    constexpr int kMostCharactersOnAPage = 400000; // More than any real page, and it keeps a reply bounded.
     static QString openPath;
     static std::unique_ptr<engine::Document> document;
 
@@ -238,12 +239,48 @@ QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
                 readable = worker::readablePath(engine, path, request.value(QStringLiteral("convertedPath")).toString());
             document = engine.open(readable);
             openPath = path;
-        } catch (const engine::EngineError &error) {
-            return failure(QString::fromUtf8(error.what()));
+        } catch (const engine::EngineError &caught) {
+            error = QString::fromUtf8(caught.what());
+            return nullptr;
         }
     }
-    if (document->needsPassword())
-        return failure(QStringLiteral("it needs a password"));
+    if (document->needsPassword()) {
+        error = QStringLiteral("it needs a password");
+        return nullptr;
+    }
+    return document.get();
+}
+
+// A cover from one page, for an article that starts there.
+QJsonObject pageCover(engine::Engine &engine, const QJsonObject &request)
+{
+    QString error;
+    engine::Document *document = documentFor(engine, request, error);
+    if (!document)
+        return failure(error);
+    const int page = request.value(QStringLiteral("page")).toInt(-1);
+    const QString coverPath = request.value(QStringLiteral("coverPath")).toString();
+    try {
+        if (page < 0 || page >= document->pageCount())
+            return failure(QStringLiteral("there's no such page"));
+        if (coverPath.isEmpty())
+            return failure(QStringLiteral("there's nowhere to put the cover"));
+        engine.saveJpeg(document->renderPage(page, kCoverSize), coverPath);
+    } catch (const engine::EngineError &caught) {
+        return failure(QString::fromUtf8(caught.what()));
+    }
+    QJsonObject reply;
+    reply.insert(QStringLiteral("ok"), true);
+    return reply;
+}
+
+QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
+{
+    constexpr int kMostCharactersOnAPage = 400000; // More than any real page, and it keeps a reply bounded.
+    QString error;
+    engine::Document *document = documentFor(engine, request, error);
+    if (!document)
+        return failure(error);
 
     int pageCount = 0;
     try {
@@ -321,6 +358,8 @@ int main(int argc, char *argv[])
             reply = hashFile(path);
         } else if (op == QStringLiteral("pagetext")) {
             reply = pageTexts(engine, object);
+        } else if (op == QStringLiteral("cover")) {
+            reply = pageCover(engine, object);
         } else if (op == QStringLiteral("inspect")) {
             reply = inspectFile(engine, path, object.value(QStringLiteral("coverPath")).toString(),
                                 object.value(QStringLiteral("convertedPath")).toString());

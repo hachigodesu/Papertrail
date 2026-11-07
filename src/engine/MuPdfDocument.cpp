@@ -436,13 +436,15 @@ public:
         return selection;
     }
 
-    QString largestTextOnFirstPage() override
+    QString largestTextOnPage(int page) override
     {
         layoutIfNeeded();
+        if (page < 0 || page >= pageCount())
+            return {};
         fz_stext_page *text = nullptr;
         fz_var(text);
         fz_try(m_ctx) {
-            text = fz_new_stext_page_from_page_number(m_ctx, m_doc, 0, nullptr);
+            text = fz_new_stext_page_from_page_number(m_ctx, m_doc, page, nullptr);
         }
         fz_catch(m_ctx) {
             return {};

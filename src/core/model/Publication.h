@@ -9,7 +9,7 @@
 namespace papertrail::core {
 
 enum class PublicationType {
-    JournalVolume,
+    JournalIssue, // One issue of a journal, holding articles. Stored as "journal_volume": see toDbString.
     JournalArticle,
     ConferenceProceedings,
     ConferencePaper,
@@ -25,13 +25,20 @@ enum class PublicationType {
 };
 
 const QList<PublicationType> &allPublicationTypes();
+
+// The cover of an article starting on `firstPage` (counting from 1) of the file with this hash.
+QString articleCoverKey(const QString &sha256, int firstPage);
+// The file's hash alone, from a cover key of either kind.
+QString coverKeyHash(const QString &key);
+// The page an article's cover key is for, counting from 1, or 0 for a whole file's.
+int coverKeyPage(const QString &key);
 QString toDbString(PublicationType type);
 std::optional<PublicationType> publicationTypeFromDb(const QString &value);
 
 // The library's tabs. Each shows one or more publication types.
 enum class LibraryTab {
     All,
-    JournalVolumes,
+    JournalIssues,
     JournalArticles,
     Preprints,
     ConferencePapers,
@@ -136,10 +143,14 @@ struct PublicationSummary {
     QString authors;
     std::optional<int> year;
     QString containerTitle;
+    QString volume;
+    QString issue;
+    std::optional<int> month;
     ReadStatus readStatus = ReadStatus::Unread;
     bool needsReview = false;
 
-    // From the publication's main file, or its volume's. All null if it has no file.
+    // From the publication's main file, or its volume's. All null if it has no file. An article's cover is
+    // its own first page, so its key also says which page: see articleCoverKey.
     QString coverSha;
     QString format;
     QString fileStatus; // "ok", "missing", "offline" or "unreadable".

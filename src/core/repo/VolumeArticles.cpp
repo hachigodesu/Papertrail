@@ -38,10 +38,39 @@ bool looksLikeFrontOrBackMatter(const QString &title)
 
 } // namespace
 
+bool isPlaceholderTitle(const QString &title)
+{
+    static const QRegularExpression pattern(
+        // Roman numerals only as they're properly written, so a word such as "Civil" isn't one.
+        QStringLiteral("^(?:(?:article|paper|chapter|part|section|item|no\\.?|number|#)\\s*)?"
+                       "(?:\\d+|(?=[ivxlc])(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))[.:)]?$|^untitled$"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QString tidy = tidied(title);
+    return tidy.isEmpty() || pattern.match(tidy).hasMatch();
+}
+
+bool adoptPageHeading(ArticleDraft &draft, const QString &pageTitle, const QString &doi)
+{
+    bool changed = false;
+    const QString heading = tidied(pageTitle);
+    const auto letters = std::count_if(heading.cbegin(), heading.cend(), [](QChar c) { return c.isLetter(); });
+    if (isPlaceholderTitle(draft.title) && letters >= 3 && !isPlaceholderTitle(heading)) {
+        draft.title = heading;
+        draft.titleFromPage = true;
+        draft.likelyNotAnArticle = looksLikeFrontOrBackMatter(heading);
+        changed = true;
+    }
+    if (draft.doi.isEmpty() && !doi.trimmed().isEmpty()) {
+        draft.doi = doi.trimmed();
+        changed = true;
+    }
+    return changed;
+}
+
 bool canHoldArticles(PublicationType type)
 {
     switch (type) {
-    case PublicationType::JournalVolume:
+    case PublicationType::JournalIssue:
     case PublicationType::ConferenceProceedings:
     case PublicationType::Book:
     case PublicationType::Textbook:
@@ -109,16 +138,68 @@ QList<ArticleDraft> draftsFromContents(const QList<ContentsEntry> &entries, int 
     return drafts;
 }
 
+bool fillVolumeNumbering(Database &db, qint64 volumeId, const QString &volume, const QString &issue,
+                         std::optional<int> month, std::optional<int> year)
+{
+    PublicationRepository publications(db);
+    QList<qint64> ids = {volumeId};
+    ids += publications.childIds(volumeId);
+    bool changed = false;
+    Transaction transaction(db);
+    for (const qint64 id : std::as_const(ids)) {
+        std::optional<Publication> publication = publications.get(id);
+        if (!publication)
+            continue;
+        bool fill = false;
+        if (publication->volume.isEmpty() && !volume.isEmpty()) {
+            publication->volume = volume;
+            fill = true;
+        }
+        if (publication->issue.isEmpty() && !issue.isEmpty()) {
+            publication->issue = issue;
+            fill = true;
+        }
+        // A month only means something with its own year.
+        if (!publication->year && year) {
+            publication->year = year;
+            fill = true;
+        }
+        if (!publication->month && month && publication->year == year) {
+            publication->month = month;
+            fill = true;
+        }
+        if (fill) {
+            publications.update(*publication);
+            changed = true;
+        }
+    }
+    transaction.commit();
+    return changed;
+}
+
 void markExistingArticles(Database &db, qint64 volumeId, QList<ArticleDraft> &drafts)
 {
     PublicationRepository publications(db);
     QSet<QString> existing;
+    QHash<int, qint64> numberedOnly; // By first page.
     for (const qint64 id : publications.childIds(volumeId)) {
-        if (const std::optional<Publication> article = publications.get(id))
+        if (const std::optional<Publication> article = publications.get(id)) {
             existing.insert(matchKey(article->pageStart.value_or(0), article->title));
+            if (isPlaceholderTitle(article->title) && article->pageStart)
+                numberedOnly.insert(*article->pageStart, id);
+        }
     }
-    for (ArticleDraft &draft : drafts)
-        draft.alreadyAdded = existing.contains(matchKey(draft.firstPage, draft.title));
+    for (ArticleDraft &draft : drafts) {
+        draft.renames.reset();
+        const auto numbered = numberedOnly.constFind(draft.firstPage);
+        if (numbered != numberedOnly.cend()) {
+            // It's there, but only as a number, so it's offered for naming rather than as already added.
+            draft.alreadyAdded = false;
+            draft.renames = numbered.value();
+        } else {
+            draft.alreadyAdded = existing.contains(matchKey(draft.firstPage, draft.title));
+        }
+    }
 }
 
 QList<qint64> createArticles(Database &db, qint64 volumeId, const QList<ArticleDraft> &drafts, bool needsReview)
@@ -135,6 +216,29 @@ QList<qint64> createArticles(Database &db, qint64 volumeId, const QList<ArticleD
     for (const ArticleDraft &draft : drafts) {
         if (tidied(draft.title).isEmpty())
             throw std::invalid_argument("an article needs a title");
+
+        if (draft.renames) {
+            std::optional<Publication> existing = publications.get(*draft.renames);
+            if (!existing || existing->parentId != volumeId)
+                throw std::invalid_argument("the article to be named isn't part of this volume");
+            // Only a number is replaced, so a title someone has typed since is never lost.
+            bool changed = false;
+            if (isPlaceholderTitle(existing->title) && tidied(draft.title) != tidied(existing->title)) {
+                existing->title = tidied(draft.title);
+                changed = true;
+            }
+            if (existing->doi.isEmpty() && !draft.doi.isEmpty()) {
+                existing->doi = draft.doi;
+                changed = true;
+            }
+            if (changed) {
+                existing->needsReview = existing->needsReview || needsReview;
+                publications.update(*existing);
+            }
+            ids << existing->id;
+            continue;
+        }
+
         Publication article;
         article.type = articleTypeFor(volume->type);
         article.parentId = volumeId;

@@ -1,5 +1,6 @@
 #include "ui/CoverCache.h"
 
+#include "core/model/Publication.h"
 #include "import/ImportService.h"
 
 #include <QGuiApplication>
@@ -29,8 +30,11 @@ CoverCache::~CoverCache()
 
 QPixmap CoverCache::cover(const QString &sha256)
 {
-    if (sha256.isEmpty() || m_missing.contains(sha256))
+    if (sha256.isEmpty())
         return {};
+    const bool article = core::coverKeyPage(sha256) > 0;
+    if (m_missing.contains(sha256))
+        return article ? cover(core::coverKeyHash(sha256)) : QPixmap();
     if (const QPixmap *found = m_pixmaps.object(sha256))
         return *found;
 
@@ -41,7 +45,15 @@ QPixmap CoverCache::cover(const QString &sha256)
             m_waiting.removeFirst(); // Asked for again if it comes back into view.
         startNext();
     }
-    return {};
+    // While an article's own cover loads, its file's is better than nothing.
+    return article ? cover(core::coverKeyHash(sha256)) : QPixmap();
+}
+
+void CoverCache::coverMade(const QString &key)
+{
+    m_missing.remove(key);
+    m_pixmaps.remove(key);
+    cover(key);
 }
 
 void CoverCache::forgetMissing()
@@ -54,7 +66,10 @@ QImage CoverCache::fullCover(const QString &sha256) const
     if (sha256.isEmpty())
         return {};
     QImageReader reader(import::coverPathFor(m_cacheDirectory, sha256));
-    return reader.read();
+    const QImage image = reader.read();
+    if (image.isNull() && core::coverKeyPage(sha256) > 0)
+        return fullCover(core::coverKeyHash(sha256));
+    return image;
 }
 
 void CoverCache::startNext()
@@ -82,6 +97,10 @@ void CoverCache::onLoaded(const QString &sha256, const QImage &image)
     m_running.remove(sha256);
     if (image.isNull()) {
         m_missing.insert(sha256);
+        if (core::coverKeyPage(sha256) > 0 && !m_wanted.contains(sha256)) {
+            m_wanted.insert(sha256);
+            emit articleCoverWanted(sha256);
+        }
     } else {
         auto *pixmap = new QPixmap(QPixmap::fromImage(image));
         const int cost = int(image.sizeInBytes());

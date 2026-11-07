@@ -128,7 +128,7 @@ This is a real risk: Arch's MuPDF hits a double free on `tests/samples/truncated
 
 `DocumentClient` runs one `papertrail-worker --reader` process (`src/worker/ReaderHost.cpp`) per open document, so nothing in the window ever parses a document. Replies are a JSON line, optionally followed by raw bytes, so stdout has to stay binary-clean: the host takes a private copy of it and points the original at stderr. Nothing in the client waits. It sends one request at a time, in order of importance: urgent requests, selections, the wanted pages (replaced wholesale as the view scrolls, so skipped pages are never rendered), thumbnails, then background work such as measuring pages and searching. If the process dies mid-request, that request's page is marked bad for the session and the process restarts.
 
-`PageView` paints, and holds only pages near the view. Page colours are applied at paint time. `ReaderTab` holds the toolbar and side panel, and saves the place in `reading_state`. Store a place with `placeForPage`, not `bookmarkForPage`: MuPDF's EPUB bookmarks are only valid inside one process.
+`PageView` paints, and holds only pages near the view. Page colours are applied at paint time. `setPageRange` limits it to some pages, which is how an article opened from the library shows only its own: everything that counts pages goes through `rowStart` and `shownEnd` so the range holds. `ReaderTab` holds the toolbar and side panel, and saves the place in `reading_state`. Store a place with `placeForPage`, not `bookmarkForPage`: MuPDF's EPUB bookmarks are only valid inside one process.
 
 ### Import pipeline
 
@@ -148,6 +148,7 @@ The window's thread never waits on slow work, and each background thread opens i
 | `BulkChanges` | Changes to many publications, in batches so other writers only wait briefly |
 | `CoverCache` pool | Decodes covers, newest request first |
 | `IndexThread` | Reads document text into the full-text index, through the worker |
+| `ArticleCoverThread` | Makes an article's cover from its first page, through the worker's `cover` op, the first time it's shown |
 | `LookupThread` | Runs `LookupEngine` through the queued online lookups |
 
 Tests that show a window should fail on a `QMessageBox`, which would otherwise wait forever for a click: see `m_boxWatcher` in `test_reader.cpp`.
@@ -188,7 +189,7 @@ Document text is in `fulltext.db`, attached to a connection as `fulltext` by `at
 
 ### Volumes and articles
 
-An article is a publication with `parent_id`, `page_start` and `page_end`, and no file of its own: anything reading a file goes through `coalesce(parent_id, id)`, as `kOwnerOfFile` does. Those pages are positions in the file, not printed page numbers, so they don't go in the citation `pages` field. `core/repo/VolumeArticles` works out articles from a table of contents, and `ContentsDialog` reads the contents through a `DocumentClient`, so a bad file can't take the window down.
+An article is a publication with `parent_id`, `page_start` and `page_end`, and no file of its own: anything reading a file goes through `coalesce(parent_id, id)`, as `kOwnerOfFile` does. Those pages are positions in the file, not printed page numbers, so they don't go in the citation `pages` field. `core/repo/VolumeArticles` works out articles from a table of contents, and `ContentsDialog` reads the contents through a `DocumentClient`, so a bad file can't take the window down. Where the contents only number an entry, the dialog reads that page's largest text and any DOI with the worker's `heading` op, which also finds the issue's printed numbers (`findIssueNumbering`). An article's cover key is its file's hash and first page (`articleCoverKey`), and `CoverCache` shows the file's cover until it's made. The code says "volume" for anything holding articles, but the journal type is `PublicationType::JournalIssue`, shown as "Journal issue" and stored as `journal_volume`, its first name.
 
 ### Collections
 
