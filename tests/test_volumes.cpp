@@ -9,6 +9,7 @@
 #include "core/repo/TagRepository.h"
 #include "core/repo/VolumeArticles.h"
 #include "import/ImportService.h"
+#include "ui/CitationActions.h"
 #include "ui/DetailsPanel.h"
 #include "ui/Labels.h"
 #include "ui/ImportThread.h"
@@ -28,6 +29,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QClipboard>
 #include <QTableWidget>
 #include <QTabBar>
 #include <QToolButton>
@@ -623,6 +625,36 @@ private slots:
         QVERIFY(dialog.createChosen());
         for (const qint64 id : m_session->publications().childIds(volume))
             QCOMPARE(m_session->publications().get(id)->volume, QStringLiteral("3"));
+    }
+
+    void articlesFromAnIssueAreCitedWithTheIssuesDetails()
+    {
+        const qint64 volume = importVolume(QStringLiteral("numbered_issue.pdf"));
+        ContentsDialog dialog(*m_session, volume);
+        QSignalSpy ready(&dialog, &ContentsDialog::contentsReady);
+        QSignalSpy read(&dialog, &ContentsDialog::headingsRead);
+        QVERIFY(ready.wait(kLongWaitMs));
+        if (dialog.headingsPending() > 0)
+            QVERIFY(read.wait(kLongWaitMs));
+        dialog.table()->item(0, 0)->setCheckState(Qt::Unchecked);
+        QVERIFY(dialog.createChosen());
+        const QList<qint64> articles = m_session->publications().childIds(volume);
+        QCOMPARE(articles.size(), 2);
+
+        // These are what's looked up afterwards, since a table of contents gives no authors.
+        QCOMPARE(QSet<qint64>(dialog.articleIds().cbegin(), dialog.articleIds().cend()),
+                 QSet<qint64>(articles.cbegin(), articles.cend()));
+
+        // Their references take the issue's journal, volume and issue, and copying them says what's missing.
+        QSignalSpy said(m_window->citations(), &CitationActions::message);
+        m_window->citations()->setStyle(citation::CitationStyle::Harvard);
+        QVERIFY(m_window->citations()->copyReferences(articles));
+        const QString copied = QApplication::clipboard()->text();
+        QVERIFY2(copied.contains(QStringLiteral("Journal of Imaginary Findings [online], 3 (2).")), qPrintable(copied));
+        QCOMPARE(said.size(), 1);
+        QVERIFY2(said.first().first().toString().contains(QStringLiteral("2 of them are missing details")),
+                 qPrintable(said.first().first().toString()));
+        QVERIFY(said.first().first().toString().contains(QStringLiteral("Look up details online")));
     }
 
     void articlesMadeBeforeTitlesWereReadAreNamed()

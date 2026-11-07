@@ -10,6 +10,11 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QAbstractItemView>
+#include <QCompleter>
+#include <QScrollBar>
+#include <QStringListModel>
+#include <QTextBlock>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QTabWidget>
@@ -207,6 +212,88 @@ QLineEdit *MetadataEditor::field(const QString &name) const
             return field.edit;
     }
     return nullptr;
+}
+
+namespace {
+
+// The single-line fields worth suggesting for: names of things, rather than numbers or identifiers.
+const QStringList kSuggestedFields = {QStringLiteral("container"),   QStringLiteral("publisher"),
+                                      QStringLiteral("place"),       QStringLiteral("series"),
+                                      QStringLiteral("conference"),  QStringLiteral("conference_location"),
+                                      QStringLiteral("institution"), QStringLiteral("department"),
+                                      QStringLiteral("degree"),      QStringLiteral("standard_body"),
+                                      QStringLiteral("language")};
+
+QCompleter *makeCompleter(QWidget *parent)
+{
+    auto *completer = new QCompleter(new QStringListModel(parent), parent);
+    completer->setCaseSensitivity(Qt::CaseInsensitive);
+    completer->setFilterMode(Qt::MatchContains);
+    completer->setCompletionMode(QCompleter::PopupCompletion);
+    completer->setMaxVisibleItems(10);
+    return completer;
+}
+
+} // namespace
+
+void MetadataEditor::setSuggestions(const Suggestions &suggestions)
+{
+    m_suggestions = suggestions;
+    for (const TextField &field : std::as_const(m_textFields)) {
+        if (kSuggestedFields.contains(field.name))
+            suggestFor(field.edit, field.name);
+    }
+    for (const PeopleField &field : std::as_const(m_peopleFields))
+        suggestFor(field.edit, field.name);
+}
+
+QCompleter *MetadataEditor::completerFor(const QString &name) const
+{
+    return m_completers.value(name);
+}
+
+void MetadataEditor::suggestFor(QLineEdit *edit, const QString &name)
+{
+    QCompleter *completer = makeCompleter(this);
+    edit->setCompleter(completer);
+    m_completers.insert(name, completer);
+    // Asked for as they type, so a large library's values never all have to be held at once.
+    connect(edit, &QLineEdit::textEdited, this, [this, completer, name](const QString &text) {
+        const QString typed = text.trimmed();
+        auto *model = static_cast<QStringListModel *>(completer->model());
+        model->setStringList(typed.size() >= 2 && m_suggestions ? m_suggestions(name, typed) : QStringList());
+    });
+}
+
+void MetadataEditor::suggestFor(QPlainTextEdit *edit, const QString &name)
+{
+    // One person to a line, so it's the line being typed that's suggested for, and a choice replaces it.
+    QCompleter *completer = makeCompleter(this);
+    completer->setWidget(edit);
+    m_completers.insert(name, completer);
+    connect(completer, qOverload<const QString &>(&QCompleter::activated), this, [edit](const QString &chosen) {
+        QTextCursor cursor = edit->textCursor();
+        cursor.movePosition(QTextCursor::StartOfBlock);
+        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+        cursor.insertText(chosen);
+        edit->setTextCursor(cursor);
+    });
+    connect(edit, &QPlainTextEdit::textChanged, this, [this, edit, completer, name] {
+        const QTextCursor cursor = edit->textCursor();
+        const QString line = cursor.block().text().left(cursor.positionInBlock()).trimmed();
+        auto *model = static_cast<QStringListModel *>(completer->model());
+        const QStringList found = line.size() >= 2 && m_suggestions ? m_suggestions(name, line) : QStringList();
+        model->setStringList(found);
+        // Only shown while someone's typing there.
+        if (!edit->hasFocus() || found.isEmpty() || (found.size() == 1 && found.first().compare(line, Qt::CaseInsensitive) == 0)) {
+            completer->popup()->hide();
+            return;
+        }
+        completer->setCompletionPrefix(line);
+        QRect place = edit->cursorRect();
+        place.setWidth(completer->popup()->sizeHintForColumn(0) + completer->popup()->verticalScrollBar()->sizeHint().width());
+        completer->complete(place);
+    });
 }
 
 QPlainTextEdit *MetadataEditor::peopleField(const QString &name) const

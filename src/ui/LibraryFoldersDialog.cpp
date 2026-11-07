@@ -32,7 +32,7 @@ LibraryFoldersDialog::LibraryFoldersDialog(LibrarySession &session, QWidget *par
     m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_table->verticalHeader()->hide();
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     connect(m_table, &QTableWidget::itemSelectionChanged, this, &LibraryFoldersDialog::updateButtons);
     layout->addWidget(m_table, 1);
@@ -51,13 +51,23 @@ LibraryFoldersDialog::LibraryFoldersDialog(LibrarySession &session, QWidget *par
     layout->addLayout(hiddenRow);
     connect(m_forget, &QPushButton::clicked, this, &LibraryFoldersDialog::forgetRequested);
 
+    auto *waitingRow = new QHBoxLayout;
+    m_waitingNote = new QLabel(this);
+    m_waitingNote->setWordWrap(true);
+    m_forgetWaiting = new QPushButton(tr("Delete them..."), this);
+    m_forgetWaiting->setToolTip(tr("Deletes their details from Papertrail, so they're no longer waited for."));
+    waitingRow->addWidget(m_waitingNote, 1);
+    waitingRow->addWidget(m_forgetWaiting);
+    layout->addLayout(waitingRow);
+    connect(m_forgetWaiting, &QPushButton::clicked, this, &LibraryFoldersDialog::forgetWaitingRequested);
+
     auto *buttons = new QHBoxLayout;
     auto *add = new QPushButton(tr("Add folder..."), this);
     m_rescan = new QPushButton(tr("Scan again"), this);
     m_change = new QPushButton(tr("Change location..."), this);
     m_change->setToolTip(tr("For a folder that has moved. Its files keep their tags and notes."));
     m_remove = new QPushButton(tr("Remove"), this);
-    m_remove->setToolTip(tr("Papertrail stops indexing this folder. Nothing is deleted from your disk."));
+    m_remove->setToolTip(tr("Papertrail stops indexing the chosen folders. Nothing is deleted from your disk."));
     buttons->addWidget(add);
     buttons->addWidget(m_rescan);
     buttons->addWidget(m_change);
@@ -66,9 +76,9 @@ LibraryFoldersDialog::LibraryFoldersDialog(LibrarySession &session, QWidget *par
     layout->addLayout(buttons);
 
     connect(add, &QPushButton::clicked, this, &LibraryFoldersDialog::addRequested);
-    connect(m_rescan, &QPushButton::clicked, this, [this] { emit rescanRequested(selectedRoot()); });
+    connect(m_rescan, &QPushButton::clicked, this, [this] { emit rescanRequested(selectedRoots()); });
     connect(m_change, &QPushButton::clicked, this, [this] { emit changeLocationRequested(selectedRoot()); });
-    connect(m_remove, &QPushButton::clicked, this, [this] { emit removeRequested(selectedRoot()); });
+    connect(m_remove, &QPushButton::clicked, this, [this] { emit removeRequested(selectedRoots()); });
 
     auto *close = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(close, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -79,8 +89,9 @@ LibraryFoldersDialog::LibraryFoldersDialog(LibrarySession &session, QWidget *par
 
 void LibraryFoldersDialog::reload()
 {
-    const qint64 selected = selectedRoot();
+    const QList<qint64> selected = selectedRoots();
     const QList<core::LibraryRoot> roots = m_session.files().roots();
+    m_table->clearSelection();
     const QHash<qint64, qint64> counts = m_session.files().fileCountsByRoot();
 
     m_table->setRowCount(int(roots.size()));
@@ -95,8 +106,9 @@ void LibraryFoldersDialog::reload()
         files->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         m_table->setItem(row, 1, files);
         m_table->setItem(row, 2, new QTableWidgetItem(QFileInfo::exists(root.path) ? tr("Available") : tr("Not found")));
-        if (root.id == selected)
-            m_table->selectRow(row);
+        if (selected.contains(root.id))
+            m_table->selectionModel()->select(m_table->model()->index(row, 0),
+                                              QItemSelectionModel::Select | QItemSelectionModel::Rows);
     }
 
     const qint64 hidden = m_session.files().hiddenCount();
@@ -106,6 +118,13 @@ void LibraryFoldersDialog::reload()
                               .arg(count));
     m_hiddenNote->setVisible(hidden > 0);
     m_forget->setVisible(hidden > 0);
+
+    const qint64 waiting = m_session.files().waitingPublicationCount();
+    m_waitingNote->setText(tr("%1 imported from another computer are waiting for their files, out of sight. Each appears when "
+                              "a file with the same contents is found in one of these folders.")
+                               .arg(waiting == 1 ? tr("1 publication") : tr("%1 publications").arg(QLocale().toString(waiting))));
+    m_waitingNote->setVisible(waiting > 0);
+    m_forgetWaiting->setVisible(waiting > 0);
     updateButtons();
 }
 
@@ -116,22 +135,30 @@ void LibraryFoldersDialog::setImportRunning(bool running)
     updateButtons();
 }
 
+QList<qint64> LibraryFoldersDialog::selectedRoots() const
+{
+    QList<qint64> ids;
+    for (int row = 0; row < m_table->rowCount(); ++row) {
+        const QTableWidgetItem *item = m_table->item(row, 0);
+        if (item && item->isSelected())
+            ids << item->data(Qt::UserRole).toLongLong();
+    }
+    return ids;
+}
+
 qint64 LibraryFoldersDialog::selectedRoot() const
 {
-    const QList<QTableWidgetItem *> items = m_table->selectedItems();
-    for (const QTableWidgetItem *item : items) {
-        if (item->column() == 0)
-            return item->data(Qt::UserRole).toLongLong();
-    }
-    return 0;
+    const QList<qint64> ids = selectedRoots();
+    return ids.size() == 1 ? ids.first() : 0;
 }
 
 void LibraryFoldersDialog::updateButtons()
 {
-    const bool hasRoot = selectedRoot() != 0;
-    m_rescan->setEnabled(hasRoot);
-    m_change->setEnabled(hasRoot && !m_importRunning);
-    m_remove->setEnabled(hasRoot && !m_importRunning);
+    const qsizetype chosen = selectedRoots().size();
+    m_rescan->setEnabled(chosen > 0);
+    m_change->setEnabled(chosen == 1 && !m_importRunning); // One folder moves at a time.
+    m_remove->setEnabled(chosen > 0 && !m_importRunning);
+    m_remove->setText(chosen > 1 ? tr("Remove %1 folders").arg(chosen) : tr("Remove"));
     m_forget->setEnabled(!m_importRunning);
 }
 

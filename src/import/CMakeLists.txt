@@ -5,6 +5,8 @@ add_library(papertrail_import STATIC
     FullTextIndexer.h
     ImportService.cpp
     ImportService.h
+    JournalIssues.cpp
+    JournalIssues.h
     WorkerClient.cpp
     WorkerClient.h)
 

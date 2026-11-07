@@ -220,14 +220,14 @@ QJsonObject inspectFile(engine::Engine &engine, const QString &originalPath, con
     return reply;
 }
 
-// A run of pages' text for the full-text index. A document stays open between requests for the same file,
-// since reading a long one takes many of them.
-// The document a request is about. It's kept open between requests, since they usually come in runs for one
-// file. Returns null with `error` set if it can't be read.
+// The document the last request was about, kept open since requests usually come in runs for one file. It
+// has to be closed before the engine that opened it goes, so main() closes it before returning.
+QString openPath;
+std::unique_ptr<engine::Document> document;
+
+// The document a request is about. Returns null with `error` set if it can't be read.
 engine::Document *documentFor(engine::Engine &engine, const QJsonObject &request, QString &error)
 {
-    static QString openPath;
-    static std::unique_ptr<engine::Document> document;
 
     const QString path = request.value(QStringLiteral("path")).toString();
     if (path != openPath || !document) {
@@ -370,5 +370,6 @@ int main(int argc, char *argv[])
 
         std::cout << QJsonDocument(reply).toJson(QJsonDocument::Compact).constData() << std::endl;
     }
+    document.reset();
     return 0;
 }

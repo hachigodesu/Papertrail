@@ -478,6 +478,42 @@ CREATE TABLE IF NOT EXISTS publication_summary (
 ) STRICT;
 )sql";
 
+// For a library imported from another computer: the files each publication had there, by contents, so
+// each can be connected when a file with those contents turns up here. Kept until it does.
+//
+// And possible matches for those that weren't certain, such as another download of the same paper, which
+// wait for the user to accept or reject them.
+const char *const kMigration11 = R"sql(
+CREATE TABLE IF NOT EXISTS expected_file (
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    sha256          TEXT NOT NULL,
+    size            INTEGER,
+    format          TEXT,
+    file_name       TEXT,
+    is_primary      INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1)),
+    PRIMARY KEY (publication_id, sha256)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS expected_file_sha256 ON expected_file(sha256);
+
+CREATE TABLE IF NOT EXISTS file_proposal (
+    id              INTEGER PRIMARY KEY,
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    file_id         INTEGER NOT NULL REFERENCES file(id) ON DELETE CASCADE,
+    reason          TEXT NOT NULL CHECK (reason IN ('identifier', 'name_and_size')),
+    created_at      INTEGER NOT NULL,
+    UNIQUE (publication_id, file_id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS file_proposal_file ON file_proposal(file_id);
+)sql";
+
+// Publications imported from another computer stay out of sight until their files are found here, as those
+// kept for a removed folder do. The trigger that brings a hidden publication back when it gets a file does the
+// rest. Libraries that imported before this get theirs hidden now.
+const char *const kMigration12 = R"sql(
+INSERT OR IGNORE INTO hidden_publication (publication_id)
+SELECT p.id FROM publication p WHERE coalesce(p.parent_id, p.id) IN (SELECT publication_id FROM expected_file) AND coalesce(p.parent_id, p.id) NOT IN (SELECT publication_id FROM publication_file);
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -493,6 +529,8 @@ const std::vector<Migration> &libraryMigrations()
         {8, kMigration8},
         {9, kMigration9},
         {10, kMigration10},
+        {11, kMigration11},
+        {12, kMigration12},
     };
     return migrations;
 }

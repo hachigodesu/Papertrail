@@ -55,6 +55,8 @@ public:
         qint64 staying = 0;
     };
     RemovalImpact removalImpact(qint64 rootId);
+    // For removing several at once, where a publication in two of them leaves rather than stays.
+    RemovalImpact removalImpact(const QList<qint64> &rootIds);
 
     // Stops indexing a root, and hides what's only there. Its records are kept, so adding the folder
     // again brings everything back. Anything also found elsewhere just loses this location.
@@ -62,6 +64,7 @@ public:
     void restoreRoot(qint64 rootId);
     QList<LibraryRoot> removedRoots();
 
+    // Kept for removed folders. Publications waiting for their files are hidden too, but aren't these.
     qint64 hiddenCount();
     QList<qint64> hiddenPublications();
     // Hidden publications from this root, along with any articles inside them. A hidden publication's
@@ -93,6 +96,24 @@ public:
     void link(qint64 publicationId, qint64 fileId, bool primary = false);
     void unlink(qint64 publicationId, qint64 fileId);
     QList<FileRecord> filesFor(qint64 publicationId);
+
+    // For publications imported from another computer: the contents of the files each had there, so that a
+    // file with those contents can be connected to it whenever one turns up here.
+    struct ExpectedFile {
+        QString sha256;
+        qint64 size = 0;
+        QString format;
+        QString fileName;
+        bool primary = false;
+    };
+    void expectFile(qint64 publicationId, const ExpectedFile &file);
+    // Connects this file to a publication waiting for its contents, and returns which. Nothing happens to a file
+    // in a removed folder, or to an empty one, since all empty files have the same contents.
+    std::optional<qint64> linkWaitingPublication(qint64 fileId);
+    // Those still waiting are hidden until a file turns up, with the articles inside them.
+    void hideWaitingPublications();
+    qint64 waitingPublicationCount();
+    QList<qint64> waitingPublications(); // With the articles inside them.
 
     QString absolutePath(qint64 fileId);
 

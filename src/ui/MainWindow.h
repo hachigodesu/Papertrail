@@ -51,6 +51,7 @@ class ReaderTab;
 class ApiKeyStore;
 class IndexThread;
 class CitationActions;
+class LibraryTransferActions;
 class ArticleCoverThread;
 class ReviewTab;
 
@@ -82,6 +83,7 @@ public:
     LookupThread *lookupThread() const { return m_lookup; }
     IndexThread *indexThread() const { return m_index; }
     QCheckBox *searchInsideBox() const { return m_searchInside; }
+    QToolButton *searchHelpButton() const { return m_searchHelp; }
     QAction *indexContentsAction() const { return m_indexContents; }
     QPushButton *reviewButton() const { return m_reviewButton; }
     QMessageBox *reviewOffer() const { return m_reviewOffer; }
@@ -108,10 +110,16 @@ public:
 
     // Asks what to do with the folder's publications, then does it.
     void removeRoot(qint64 rootId);
+    // Asks once for all of them, and removes them together.
+    void removeRoots(const QList<qint64> &rootIds);
+    // Imported publications still waiting for their files, deleted after asking.
+    void confirmForgetWaiting();
 
     // What each choice for removing a folder does, once it's been made.
-    void removeRootKeepingDetails(qint64 rootId);
-    void removeRootAndDetails(qint64 rootId);
+    void removeRootKeepingDetails(qint64 rootId) { removeRootsKeepingDetails({rootId}); }
+    void removeRootAndDetails(qint64 rootId) { removeRootsAndDetails({rootId}); }
+    void removeRootsKeepingDetails(const QList<qint64> &rootIds);
+    void removeRootsAndDetails(const QList<qint64> &rootIds);
     void forgetHiddenPublications();
 
     // The same, for one particular file. Each format of a publication can have a tab of its own.
@@ -153,6 +161,17 @@ public:
 
     // Exports citations for what's selected, or everything shown if nothing is.
     void exportCitations();
+
+    LibraryTransferActions *libraryTransfer() const { return m_transfer; }
+    // Quietens everything else that writes to the library, and closes open documents, before an import.
+    void prepareForImport();
+    void showSuggestedFiles();
+
+    // Says which file is a publication's, for one with none, such as one imported that's still waiting for its
+    // file. The file must be in one of the library's folders. If it's already another publication's, the two
+    // become one. Returns whether it could.
+    bool linkFileByHand(qint64 publicationId, const QString &path);
+    QAction *checkSuggestedFilesAction() const { return m_checkSuggestedFiles; }
     QLineEdit *searchBox() const { return m_search; }
     QTabBar *tabBar() const { return m_tabs; }
     QComboBox *sortBox() const { return m_sortBox; }
@@ -177,6 +196,7 @@ protected:
 private:
     void buildMenus();
     void keepLibraryFirst();
+    void updateSuggestedFilesAction();
     void buildToolbar();
     void buildCentre();
     void buildStatusBar();
@@ -216,6 +236,13 @@ private:
     void openPublicationElsewhere(qint64 id);
     void showPublicationInFolder(qint64 id);
     std::optional<QString> firstFilePath(qint64 publicationId);
+
+public:
+    // What the metadata editor suggests while typing: values already in the library for `field`, or names of
+    // people for a people field.
+    QStringList metadataSuggestions(const QString &field, const QString &typed);
+
+private:
     void showAbout();
     void showLookupSettings();
     void askAndLookUpLibrary();
@@ -239,6 +266,9 @@ private:
     ImportThread *m_import = nullptr;
     IndexThread *m_index = nullptr;
     CitationActions *m_citations = nullptr;
+    QToolButton *m_searchHelp = nullptr;
+    LibraryTransferActions *m_transfer = nullptr;
+    QAction *m_checkSuggestedFiles = nullptr;
     QWidget *m_libraryPage = nullptr; // Always the first tab.
     ArticleCoverThread *m_articleCovers = nullptr;
     std::unique_ptr<ApiKeyStore> m_keys;

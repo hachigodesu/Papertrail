@@ -778,8 +778,29 @@ void DetailsPanel::reload()
             m_fileRows->addWidget(separate);
         }
     }
-    if (files.isEmpty())
-        m_fileRows->addWidget(plainLabel(tr("No file linked.")));
+    if (files.isEmpty()) {
+        // One imported from another computer may be waiting for its file to turn up here.
+        QString waitingFor;
+        try {
+            auto waiting = m_session.database().prepare("SELECT file_name FROM expected_file WHERE publication_id = ? ORDER BY is_primary DESC");
+            waiting->bind(1, p.id);
+            if (waiting->step())
+                waitingFor = waiting->textAt(0);
+        } catch (const std::exception &) {
+        }
+        m_fileRows->addWidget(plainLabel(waitingFor.isEmpty()
+                                             ? tr("No file linked.")
+                                             : tr("Waiting for its file, %1. It's connected when a file with the same contents is "
+                                                  "found in one of the library's folders.")
+                                                   .arg(waitingFor)));
+        if (!p.parentId) {
+            auto *find = new QPushButton(tr("Find its file..."));
+            find->setToolTip(tr("Choose the file in one of the library's folders that is this publication."));
+            const qint64 id = p.id;
+            connect(find, &QPushButton::clicked, this, [this, id] { emit findFileRequested(id); });
+            m_fileRows->addWidget(find);
+        }
+    }
     m_open->setEnabled(!files.isEmpty());
     m_showInFolder->setEnabled(!files.isEmpty());
 

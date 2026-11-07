@@ -26,7 +26,7 @@ Requires CMake 3.25+, Ninja, a C++20 compiler and Qt 6.12 or newer. Windows buil
 Install MSYS2 at `C:\msys64`, then in a UCRT64 shell:
 
 ```bash
-pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-libmupdf mingw-w64-ucrt-x86_64-djvulibre
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-libmupdf mingw-w64-ucrt-x86_64-djvulibre mingw-w64-ucrt-x86_64-zlib
 ```
 
 Then from the project folder:
@@ -50,7 +50,7 @@ Install Qt 6.12 or newer, MuPDF, DjVuLibre, libsecret (so that an API key can be
 On Arch:
 
 ```bash
-sudo pacman -S --needed base-devel cmake ninja qt6-base libmupdf djvulibre libsecret
+sudo pacman -S --needed base-devel cmake ninja qt6-base libmupdf djvulibre libsecret zlib
 ```
 
 Ubuntu's own Qt and MuPDF packages are too old. Install Qt with [aqtinstall](https://github.com/miurahr/aqtinstall) and pass its location to CMake with `-DCMAKE_PREFIX_PATH`, and build MuPDF with `packaging/linux/install-mupdf.sh`.

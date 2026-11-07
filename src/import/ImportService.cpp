@@ -1,5 +1,7 @@
 #include "import/ImportService.h"
 
+#include "import/JournalIssues.h"
+
 #include "core/db/Database.h"
 #include "core/model/Identifiers.h"
 #include "core/repo/LookupRepository.h"
@@ -430,6 +432,9 @@ void ImportService::processFingerprint(const Job &job, ImportReport &report)
     if (!linkToKnownContents(*file, hash.sha256, report)) {
         if (!m_files.publicationsFor(file->id).isEmpty())
             ++report.updated; // Same path, new contents: the publication and its edits are kept.
+        else if (m_files.linkWaitingPublication(file->id))
+            ++report.relinked; // A publication imported from another computer, now with its file here.
+        // Either way, it's read for its cover and facts. One that's linked doesn't get another publication.
         enqueue(kInspectJob, file->id);
     }
     finishJob(job);
@@ -825,6 +830,8 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
             LookupRepository(m_db).enqueue({id}, mode);
     }
     m_publications.recordProvenance(id, {QStringLiteral("title"), titleSource, std::nullopt, QString(), p.title, 0});
+    if (p.type == PublicationType::JournalIssue)
+        tidyJournalIssue(m_db, id); // A cover's text is no title for an issue.
     ++report.publicationsCreated;
     if (p.needsReview)
         ++report.needsReview;

@@ -30,6 +30,12 @@ papertrail_core_test(test_extractors papertrail_import)
 papertrail_core_test(test_import papertrail_import)
 papertrail_core_test(test_citations papertrail_citation)
 target_compile_definitions(test_citations PRIVATE PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+papertrail_core_test(test_transfer papertrail_transfer papertrail_import)
+target_compile_definitions(test_transfer PRIVATE
+    PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
+    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples"
+    PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_dependencies(test_transfer papertrail-worker)
 target_compile_definitions(test_import PRIVATE
     PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
     PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples")
@@ -94,6 +100,10 @@ set_tests_properties(test_metadata PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # labelled: `ctest -LE perf` skips it, and `ctest -L perf` runs only this.
 papertrail_core_test(test_query_perf papertrail_synthetic)
 set_tests_properties(test_query_perf PROPERTIES LABELS perf TIMEOUT 1800)
+
+# Times exporting and importing a 100,000-publication library.
+papertrail_core_test(test_transfer_perf papertrail_synthetic papertrail_transfer)
+set_tests_properties(test_transfer_perf PROPERTIES LABELS perf TIMEOUT 1800)
 
 # Times the library window on a 100,000-publication library. Also labelled, for the same reason.
 qt_add_executable(test_ui_perf test_ui_perf.cpp)

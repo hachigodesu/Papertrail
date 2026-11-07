@@ -122,6 +122,27 @@ void FileRepository::setRootOnline(qint64 rootId, bool online)
     update->step();
 }
 
+FileRepository::RemovalImpact FileRepository::removalImpact(const QList<qint64> &rootIds)
+{
+    if (rootIds.isEmpty())
+        return {};
+    QStringList numbers;
+    for (const qint64 id : rootIds)
+        numbers << QString::number(id); // Numbers from the library itself, so they can go in the query as they are.
+    const QByteArray list = numbers.join(u',').toLatin1();
+    auto select = m_db.prepare(
+        "WITH here AS (SELECT DISTINCT pf.publication_id AS id FROM publication_file pf "
+        "              JOIN file f ON f.id = pf.file_id WHERE f.root_id IN (" + list + ")) "
+        "SELECT count(*), coalesce(sum(EXISTS (SELECT 1 FROM publication_file o JOIN file g ON g.id = o.file_id "
+        "    WHERE o.publication_id = here.id AND g.root_id NOT IN (" + list + ") "
+        "      AND g.root_id NOT IN (SELECT root_id FROM removed_root))), 0) "
+        "FROM here");
+    select->step();
+    const qint64 all = select->int64At(0);
+    const qint64 staying = select->int64At(1);
+    return {all - staying, staying};
+}
+
 FileRepository::RemovalImpact FileRepository::removalImpact(qint64 rootId)
 {
     auto select = m_db.prepare(
@@ -203,9 +224,16 @@ void FileRepository::restoreRoot(qint64 rootId)
     transaction.commit();
 }
 
+namespace {
+
+// Publications imported from another computer whose files haven't been found here yet.
+const char *const kWaiting = "SELECT p.id FROM publication p WHERE coalesce(p.parent_id, p.id) IN (SELECT publication_id FROM expected_file) AND coalesce(p.parent_id, p.id) NOT IN (SELECT publication_id FROM publication_file)";
+
+} // namespace
+
 qint64 FileRepository::hiddenCount()
 {
-    auto select = m_db.prepare("SELECT count(*) FROM hidden_publication");
+    auto select = m_db.prepare(QByteArray("SELECT count(*) FROM hidden_publication WHERE publication_id NOT IN (") + kWaiting + ")");
     select->step();
     return select->int64At(0);
 }
@@ -213,7 +241,7 @@ qint64 FileRepository::hiddenCount()
 QList<qint64> FileRepository::hiddenPublications()
 {
     QList<qint64> ids;
-    auto select = m_db.prepare("SELECT publication_id FROM hidden_publication");
+    auto select = m_db.prepare(QByteArray("SELECT publication_id FROM hidden_publication WHERE publication_id NOT IN (") + kWaiting + ")");
     while (select->step())
         ids << select->int64At(0);
     return ids;
@@ -359,6 +387,82 @@ QList<qint64> FileRepository::publicationsFor(qint64 fileId)
     QList<qint64> ids;
     auto select = m_db.prepare("SELECT publication_id FROM publication_file WHERE file_id = ?");
     select->bind(1, fileId);
+    while (select->step())
+        ids << select->int64At(0);
+    return ids;
+}
+
+void FileRepository::expectFile(qint64 publicationId, const ExpectedFile &file)
+{
+    Statement &insert = m_db.cached(
+        "INSERT INTO expected_file (publication_id, sha256, size, format, file_name, is_primary) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (publication_id, sha256) DO UPDATE SET is_primary = max(is_primary, excluded.is_primary)");
+    insert.bind(1, publicationId);
+    insert.bind(2, file.sha256.toLower());
+    insert.bind(3, file.size);
+    insert.bind(4, file.format);
+    insert.bind(5, file.fileName);
+    insert.bind(6, file.primary ? 1 : 0);
+    insert.step();
+    insert.reset();
+}
+
+std::optional<qint64> FileRepository::linkWaitingPublication(qint64 fileId)
+{
+    const std::optional<FileRecord> file = get(fileId);
+    if (!file || file->sha256.isEmpty() || file->size == 0)
+        return std::nullopt;
+    Statement &removed = m_db.cached("SELECT 1 FROM removed_root WHERE root_id = ?");
+    removed.bind(1, file->rootId);
+    const bool inRemovedFolder = removed.step();
+    removed.reset();
+    if (inRemovedFolder)
+        return std::nullopt;
+
+    Statement &waiting = m_db.cached(
+        "SELECT publication_id, is_primary FROM expected_file WHERE sha256 = ? ORDER BY publication_id LIMIT 1");
+    waiting.bind(1, file->sha256.toLower());
+    if (!waiting.step()) {
+        waiting.reset();
+        return std::nullopt;
+    }
+    const qint64 publicationId = waiting.int64At(0);
+    const bool primary = waiting.intAt(1) != 0;
+    waiting.reset();
+
+    Transaction transaction(m_db);
+    link(publicationId, fileId, primary);
+    Statement &done = m_db.cached("DELETE FROM expected_file WHERE publication_id = ? AND sha256 = ?");
+    done.bind(1, publicationId);
+    done.bind(2, file->sha256.toLower());
+    done.step();
+    done.reset();
+    // Possible files suggested for it are no longer needed.
+    Statement &proposals = m_db.cached("DELETE FROM file_proposal WHERE publication_id = ?");
+    proposals.bind(1, publicationId);
+    proposals.step();
+    proposals.reset();
+    transaction.commit();
+    return publicationId;
+}
+
+void FileRepository::hideWaitingPublications()
+{
+    m_db.exec((QByteArray("INSERT OR IGNORE INTO hidden_publication (publication_id) ") + kWaiting).constData());
+}
+
+qint64 FileRepository::waitingPublicationCount()
+{
+    auto count = m_db.prepare("SELECT count(DISTINCT publication_id) FROM expected_file "
+                              "WHERE publication_id NOT IN (SELECT publication_id FROM publication_file)");
+    count->step();
+    return count->int64At(0);
+}
+
+QList<qint64> FileRepository::waitingPublications()
+{
+    QList<qint64> ids;
+    auto select = m_db.prepare(kWaiting);
     while (select->step())
         ids << select->int64At(0);
     return ids;

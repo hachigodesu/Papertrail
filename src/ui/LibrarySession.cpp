@@ -1,5 +1,6 @@
 #include "ui/LibrarySession.h"
 
+#include "import/JournalIssues.h"
 #include "core/repo/FullTextIndex.h"
 
 #include "core/db/Schema.h"
@@ -42,6 +43,12 @@ LibrarySession::LibrarySession(const LibraryPaths &paths)
     m_db = std::make_unique<core::Database>(paths.database);
     core::migrateLibrary(*m_db);
     core::attachFullText(*m_db, core::fullTextPathFor(paths.database));
+    // Issues titled from their covers before this was done get their proper titles.
+    try {
+        import::tidyJournalIssues(*m_db);
+    } catch (const std::exception &) {
+        // Only tidying: the library opens either way.
+    }
     m_publications = std::make_unique<core::PublicationRepository>(*m_db);
     m_tags = std::make_unique<core::TagRepository>(*m_db);
     m_collections = std::make_unique<core::CollectionRepository>(*m_db);

@@ -6,12 +6,17 @@
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
 #include "import/ImportService.h"
+#include "import/JournalIssues.h"
+#include "core/repo/VolumeArticles.h"
 
 #include "KindleSamples.h"
 
 #include <QCryptographicHash>
 #include <QDirIterator>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
 #include <QElapsedTimer>
 #include <QTemporaryDir>
 #include <QThread>
@@ -49,6 +54,137 @@ private slots:
         m_publications.reset();
         m_files.reset();
         m_db.reset();
+    }
+
+    void issueTitlesThatOnlyDescribeAnIssueAreNoticed_data()
+    {
+        QTest::addColumn<QString>("title");
+        QTest::addColumn<QString>("journal");
+        QTest::addColumn<bool>("descriptive");
+        QTest::newRow("information page") << "Made-Up Transactions on Examples Publication Information" << "" << true;
+        QTest::newRow("cover") << "OCTOBER 2026 VOLUME 18 NUMBER 5 MUTE (ISSN 1234-5679)" << "" << true;
+        QTest::newRow("numbers") << "Vol. 3, No. 2" << "" << true;
+        QTest::newRow("contents") << "Table of Contents" << "" << true;
+        QTest::newRow("the journal alone") << "Journal of Imaginary Findings" << "journal of imaginary findings" << true;
+        QTest::newRow("empty") << "" << "" << true;
+        QTest::newRow("a real title") << "A Special Issue on Pretend Crystals" << "Journal of Imaginary Findings" << false;
+        QTest::newRow("journal, no other") << "Journal of Imaginary Findings" << "" << false;
+    }
+
+    void issueTitlesThatOnlyDescribeAnIssueAreNoticed()
+    {
+        QFETCH(QString, title);
+        QFETCH(QString, journal);
+        QFETCH(bool, descriptive);
+        QCOMPARE(isDescriptiveIssueTitle(title, journal), descriptive);
+    }
+
+    void anIssueGetsATitleFromItsDetails()
+    {
+        Publication issue;
+        issue.type = PublicationType::JournalIssue;
+        QVERIFY(issueTitle(issue).isEmpty()); // Not without its journal.
+        issue.containerTitle = QStringLiteral("Journal of Imaginary Findings");
+        QCOMPARE(issueTitle(issue), QStringLiteral("Journal of Imaginary Findings"));
+        issue.volume = QStringLiteral("7");
+        issue.issue = QStringLiteral("11");
+        issue.year = 2026;
+        QCOMPARE(issueTitle(issue), QStringLiteral("Journal of Imaginary Findings, Vol. 7, No. 11 (2026)"));
+        issue.month = 11;
+        QCOMPARE(issueTitle(issue), QStringLiteral("Journal of Imaginary Findings, Vol. 7, No. 11 (November 2026)"));
+    }
+
+    void anIssueIsPutInOrder()
+    {
+        // Titled from its cover, with no journal yet.
+        Publication cover;
+        cover.type = PublicationType::JournalIssue;
+        cover.title = QStringLiteral("OCTOBER 2026 VOLUME 18 NUMBER 5 MUTE (ISSN 1234-5679)");
+        const qint64 id = m_publications->create(cover);
+        ArticleDraft draft;
+        draft.title = QStringLiteral("An Article Inside");
+        const qint64 article = createArticles(*m_db, id, {draft}, false).first();
+        QCOMPARE(m_publications->get(article)->containerTitle, cover.title); // It had nothing better then.
+
+        // Its numbers and ISSN come from the cover's words, but without a journal, the title stays.
+        QVERIFY(tidyJournalIssue(*m_db, id));
+        Publication issue = *m_publications->get(id);
+        QCOMPARE(issue.volume, QStringLiteral("18"));
+        QCOMPARE(issue.issue, QStringLiteral("5"));
+        QCOMPARE(issue.year.value(), 2026);
+        QCOMPARE(issue.month.value(), 10);
+        QCOMPARE(issue.issn, QStringLiteral("1234-5679"));
+        QCOMPARE(issue.title, cover.title);
+        // The article that took the cover's words as its journal's name has them taken away again.
+        QVERIFY(m_publications->get(article)->containerTitle.isEmpty());
+        QVERIFY(!tidyJournalIssue(*m_db, id)); // Nothing more to do.
+
+        // An article's lookup brings the journal, and with it a proper title, for the issue and its articles.
+        Publication lookedUp = *m_publications->get(article);
+        lookedUp.containerTitle = QStringLiteral("Made-Up Letters");
+        lookedUp.publisher = QStringLiteral("Example Society");
+        m_publications->updateWithProvenance(lookedUp, QStringLiteral("crossref"));
+        ArticleDraft another;
+        another.title = QStringLiteral("Another Inside");
+        const qint64 sibling = createArticles(*m_db, id, {another}, false).first();
+        QVERIFY(tidyJournalIssue(*m_db, id, m_publications->get(article)));
+        issue = *m_publications->get(id);
+        QCOMPARE(issue.containerTitle, QStringLiteral("Made-Up Letters"));
+        QCOMPARE(issue.publisher, QStringLiteral("Example Society"));
+        QCOMPARE(issue.title, QStringLiteral("Made-Up Letters, Vol. 18, No. 5 (October 2026)"));
+        QCOMPARE(m_publications->get(sibling)->containerTitle, QStringLiteral("Made-Up Letters"));
+        // And it can be undone, like any other change.
+        QVERIFY(!m_publications->provenance(id, QStringLiteral("title")).isEmpty());
+
+        // A title typed by hand is never replaced.
+        Publication named = issue;
+        named.title = QStringLiteral("Table of Contents");
+        m_publications->updateWithProvenance(named, QStringLiteral("manual"));
+        QVERIFY(!tidyJournalIssue(*m_db, id));
+        QCOMPARE(m_publications->get(id)->title, QStringLiteral("Table of Contents"));
+
+        // Every issue at once, as when a library opens.
+        Publication information;
+        information.type = PublicationType::JournalIssue;
+        information.title = QStringLiteral("Journal of Imaginary Findings Publication Information");
+        information.containerTitle = QStringLiteral("Journal of Imaginary Findings");
+        information.volume = QStringLiteral("3");
+        const qint64 other = m_publications->create(information);
+        // One titled with its journal's name alone takes it as its journal, and its numbers in the title.
+        Publication named2;
+        named2.type = PublicationType::JournalIssue;
+        named2.title = QStringLiteral("Annals of Examples");
+        named2.volume = QStringLiteral("12");
+        const qint64 annals = m_publications->create(named2);
+        QCOMPARE(tidyJournalIssues(*m_db), 2);
+        QCOMPARE(m_publications->get(other)->title, QStringLiteral("Journal of Imaginary Findings, Vol. 3"));
+        QCOMPARE(m_publications->get(annals)->containerTitle, QStringLiteral("Annals of Examples"));
+        QCOMPARE(m_publications->get(annals)->title, QStringLiteral("Annals of Examples, Vol. 12"));
+    }
+
+    void theWorkerExitsCleanlyWithADocumentOpen()
+    {
+        // A document kept open between requests once outlived what opened it, and crashed the worker as it closed.
+        for (const QString &op : {QStringLiteral("pagetext"), QStringLiteral("cover")}) {
+            QProcess worker;
+            worker.start(QStringLiteral(PAPERTRAIL_WORKER_PATH), QStringList());
+            QVERIFY(worker.waitForStarted());
+            QJsonObject request{{QStringLiteral("id"), 1},
+                                {QStringLiteral("op"), op},
+                                {QStringLiteral("path"), QDir(QStringLiteral(PAPERTRAIL_TEST_SAMPLES)).filePath(QStringLiteral("reader_doc.pdf"))},
+                                {QStringLiteral("start"), 0},
+                                {QStringLiteral("count"), 2},
+                                {QStringLiteral("page"), 1},
+                                {QStringLiteral("coverPath"), m_dir->filePath(QStringLiteral("cover.jpg"))}};
+            worker.write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
+            QVERIFY(worker.waitForReadyRead(30000));
+            QVERIFY(worker.readAll().contains("\"ok\":true"));
+            worker.closeWriteChannel();
+            QVERIFY(worker.waitForFinished(30000));
+            QCOMPARE(worker.exitStatus(), QProcess::NormalExit);
+            QCOMPARE(worker.exitCode(), 0);
+        }
+        QVERIFY(QFile::exists(m_dir->filePath(QStringLiteral("cover.jpg"))));
     }
 
     void metadataComesFromInfoDictionary()

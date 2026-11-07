@@ -1,6 +1,4 @@
 add_library(papertrail_ui STATIC
-    CitationActions.cpp
-    CitationActions.h
     BulkChanges.cpp
     BulkChanges.h
     CoverCache.cpp
@@ -43,6 +41,12 @@ add_library(papertrail_ui STATIC
     IndexThread.h
     ArticleCoverThread.cpp
     ArticleCoverThread.h
+    CitationActions.cpp
+    GridView.cpp
+    GridView.h
+    CitationActions.h
+    TransferDialogs.cpp
+    TransferDialogs.h
     ApiKeyStore.cpp
     ApiKeyStore.h
     SummaryDialog.cpp
@@ -53,4 +57,4 @@ add_library(papertrail_ui STATIC
     ReviewTab.h)
 
 target_include_directories(papertrail_ui PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(papertrail_ui PUBLIC papertrail_summary papertrail_citation Papertrail::Keychain papertrail_core papertrail_import papertrail_metadata Qt6::Widgets)
+target_link_libraries(papertrail_ui PUBLIC papertrail_summary papertrail_citation papertrail_transfer Papertrail::Keychain papertrail_core papertrail_import papertrail_metadata Qt6::Widgets)

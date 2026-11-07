@@ -24,10 +24,19 @@ public:
 
 signals:
     void addRequested();
-    void rescanRequested(qint64 rootId);
+    void rescanRequested(const QList<qint64> &rootIds);
     void changeLocationRequested(qint64 rootId);
-    void removeRequested(qint64 rootId);
+    void removeRequested(const QList<qint64> &rootIds);
     void forgetRequested();
+    void forgetWaitingRequested();
+
+private:
+public:
+    // In the order they're listed. Several can be chosen, to scan or remove together.
+    QList<qint64> selectedRoots() const;
+    QTableWidget *table() const { return m_table; }
+    QPushButton *removeButton() const { return m_remove; }
+    QPushButton *changeButton() const { return m_change; }
 
 private:
     qint64 selectedRoot() const;
@@ -42,6 +51,8 @@ private:
     QPushButton *m_remove = nullptr;
     QLabel *m_hiddenNote = nullptr;
     QPushButton *m_forget = nullptr;
+    QLabel *m_waitingNote = nullptr;
+    QPushButton *m_forgetWaiting = nullptr;
 };
 
 } // namespace papertrail::ui

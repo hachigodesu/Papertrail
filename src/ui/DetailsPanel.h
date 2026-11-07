@@ -82,6 +82,8 @@ signals:
     void openInVolumeRequested(qint64 articleId);
     void openFileRequested(qint64 id, qint64 fileId);
     void showInFolderRequested(qint64 id);
+    // The user wants to say which file is this publication's, for one that has none.
+    void findFileRequested(qint64 id);
 
     // The user wants a summary of this publication from Claude.
     void summarizeRequested(qint64 publicationId);

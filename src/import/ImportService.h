@@ -67,6 +67,7 @@ struct ImportReport {
     int updated = 0;            // Files whose contents changed, keeping their publication.
     int reclassified = 0;       // Publications taken back out of Preprints.
     int formatsJoined = 0;      // Files recognised as another format of an existing publication.
+    int relinked = 0;           // Files of publications imported from another computer, found here.
     int unreadable = 0;         // Couldn't be read, or need a password.
     int workerRestarts = 0;     // Crashes or hangs recovered from.
     int needsReview = 0;

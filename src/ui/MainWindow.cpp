@@ -1,5 +1,6 @@
 #include "ui/MainWindow.h"
 
+#include "import/JournalIssues.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/LookupRepository.h"
 #include "core/repo/PublicationMerge.h"
@@ -23,6 +24,8 @@
 #include "ui/IndexThread.h"
 #include "ui/ArticleCoverThread.h"
 #include "ui/CitationActions.h"
+#include "ui/TransferDialogs.h"
+#include "ui/GridView.h"
 #include "ui/SummaryDialog.h"
 #include "ui/ReviewTab.h"
 #include "ui/VolumeDialogs.h"
@@ -171,6 +174,30 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_articleCovers = new ArticleCoverThread(session.paths(), this);
     m_citations = new CitationActions(session, this);
     connect(m_citations, &CitationActions::message, this, [this](const QString &text) { statusBar()->showMessage(text, 8000); });
+    m_transfer = new LibraryTransferActions(session, this);
+    connect(m_transfer, &LibraryTransferActions::message, this, [this](const QString &text) { statusBar()->showMessage(text, 8000); });
+    connect(m_transfer, &LibraryTransferActions::foldersRequested, this, &MainWindow::showFoldersDialog);
+    connect(m_transfer, &LibraryTransferActions::importFinished, this,
+            [this](bool ok, const transfer::ImportReport &report, const QString &text) {
+                // Whatever happened, the library is looked at afresh, and anything paused carries on.
+                m_covers->forgetMissing();
+                refreshNow();
+                m_details->reload();
+                rescanAll(); // Finds the files that imported publications are waiting for.
+                if (m_session.settings().value(QStringLiteral("library.index_contents")).toBool())
+                    m_index->kick();
+                updateSuggestedFilesAction();
+                QMessageBox box(ok ? QMessageBox::Information : QMessageBox::Warning, tr("Import a library"),
+                                ok ? describeImport(report) : tr("The library couldn't be imported: %1").arg(text),
+                                QMessageBox::Ok, this);
+                box.setTextFormat(Qt::PlainText);
+                QPushButton *check = nullptr;
+                if (ok && report.proposed > 0)
+                    check = box.addButton(tr("Check suggested files..."), QMessageBox::ActionRole);
+                box.exec();
+                if (check && box.clickedButton() == check)
+                    showSuggestedFiles();
+            });
     m_keys = session.paths().keyStoreFactory ? session.paths().keyStoreFactory() : createSystemKeyStore();
     m_summaryTransport = session.paths().transportFactory ? session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
 
@@ -319,6 +346,62 @@ void MainWindow::buildToolbar()
     });
     row->addWidget(m_search, 1);
 
+    // Every way of searching, each with an example that's added to the search when chosen.
+    m_searchHelp = new QToolButton(container);
+    m_searchHelp->setText(QStringLiteral("?"));
+    m_searchHelp->setToolTip(tr("Ways to search"));
+    m_searchHelp->setAccessibleName(tr("Ways to search"));
+    m_searchHelp->setPopupMode(QToolButton::InstantPopup);
+    auto *help = new QMenu(m_searchHelp);
+    const auto example = [this, help](const QString &text, const QString &meaning) {
+        // A tab puts the explanation in a column of its own.
+        QAction *action = help->addAction(text + u'\t' + meaning);
+        connect(action, &QAction::triggered, this, [this, text] {
+            QString current = m_search->text().trimmed();
+            m_search->setText(current.isEmpty() ? text : current + u' ' + text);
+            m_search->setFocus();
+            // Placed ready to type over the example's value, which follows the last colon or quote.
+            const qsizetype colon = text.lastIndexOf(u':');
+            if (colon >= 0 && colon + 1 < text.size())
+                m_search->setSelection(int(m_search->text().size() - (text.size() - colon - 1)), int(text.size() - colon - 1));
+        });
+        return action;
+    };
+    const auto heading = [help](const QString &text) {
+        QAction *action = help->addSection(text);
+        action->setEnabled(false);
+    };
+    heading(tr("Words"));
+    example(QStringLiteral("fatigue beams"), tr("Every word, anywhere in the details"));
+    example(QStringLiteral("\"steel beams\""), tr("These words together, in this order"));
+    heading(tr("In one detail"));
+    example(QStringLiteral("title:fatigue"), tr("In the title"));
+    example(QStringLiteral("author:knuth"), tr("By an author or editor"));
+    example(QStringLiteral("author:\"van der berg\""), tr("A name of several words, in quotes"));
+    example(QStringLiteral("abstract:corrosion"), tr("In the abstract"));
+    example(QStringLiteral("journal:nature"), tr("In a journal, or other source"));
+    example(QStringLiteral("conference:siggraph"), tr("At a conference"));
+    example(QStringLiteral("publisher:wiley"), tr("From a publisher"));
+    example(QStringLiteral("institution:leeds"), tr("From a university or other institution"));
+    example(QStringLiteral("tag:maths"), tr("With a tag, or one inside it"));
+    heading(tr("Kind and date"));
+    example(QStringLiteral("type:thesis"), tr("Of a type: thesis, issue, book, standard..."));
+    example(QStringLiteral("year:2020"), tr("From a year"));
+    example(QStringLiteral("year:>2010"), tr("After a year. Also <, >= and <="));
+    example(QStringLiteral("year:2015..2020"), tr("From a range of years"));
+    heading(tr("Identifiers"));
+    example(QStringLiteral("doi:10.1000"), tr("A DOI, or the start of one"));
+    example(QStringLiteral("isbn:9780306406157"), tr("An ISBN, with or without hyphens"));
+    example(QStringLiteral("issn:1234-5679"), tr("An ISSN"));
+    example(QStringLiteral("arxiv:2101.00001"), tr("An arXiv number"));
+    heading(tr("Together"));
+    example(QStringLiteral("author:knuth year:>2010"), tr("Several at once: all must match"));
+    help->addSeparator();
+    QAction *inside = help->addAction(tr("Tick Inside documents to search the text of documents too"));
+    connect(inside, &QAction::triggered, this, [this] { m_searchInside->setChecked(true); });
+    m_searchHelp->setMenu(help);
+    row->addWidget(m_searchHelp);
+
     m_searchInside = new QCheckBox(tr("Inside documents"), container);
     m_searchInside->setToolTip(tr("Also looks for your words in the text of documents. Double-click a place under "
                                   "Found inside in the details to open it there."));
@@ -410,7 +493,7 @@ void MainWindow::buildCentre()
 
     m_stack = new QStackedWidget(m_splitter);
 
-    m_grid = new QListView(m_stack);
+    m_grid = new GridView(m_stack);
     m_grid->setModel(m_model);
     m_grid->setModelColumn(PublicationListModel::TitleColumn);
     // List mode with wrapping, rather than icon mode, because icon mode's layout gets slow with
@@ -423,6 +506,9 @@ void MainWindow::buildCentre()
     m_grid->setUniformItemSizes(true);
     m_grid->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_grid->setSelectionBehavior(QAbstractItemView::SelectRows); // So the list shows whole rows selected.
+    // Without the band, a list-mode view only follows a drag while the pointer is over a card, so ending in the
+    // empty space beside a short last row left that row out. Set after the view mode, which it belongs to.
+    m_grid->setSelectionRectVisible(true);
     m_grid->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_grid->verticalScrollBar()->setSingleStep(40);
     m_grid->setItemDelegate(new GridDelegate(*m_covers, m_grid));
@@ -507,6 +593,15 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
     connect(m_details, &DetailsPanel::openMatchRequested, this, &MainWindow::openAtMatch);
     connect(m_details, &DetailsPanel::summarizeRequested, this, &MainWindow::showSummaryDialog);
+    connect(m_details, &DetailsPanel::findFileRequested, this, [this](qint64 id) {
+        QString start;
+        const QList<LibraryRoot> roots = m_session.files().roots();
+        if (!roots.isEmpty())
+            start = roots.first().path;
+        const QString path = QFileDialog::getOpenFileName(this, tr("Find its file"), start);
+        if (!path.isEmpty())
+            linkFileByHand(id, path);
+    });
     connect(m_details, &DetailsPanel::citeMenuRequested, this, [this](QMenu *menu, qint64 id) {
         m_citations->fillCiteMenu(menu, 1, [id] { return QList<qint64>{id}; });
     });
@@ -645,6 +740,11 @@ void MainWindow::buildMenus()
     });
     file->addSeparator();
     file->addAction(tr("&Export citations..."), this, &MainWindow::exportCitations);
+    file->addSeparator();
+    file->addAction(tr("Export library..."), this, [this] { m_transfer->askAndExport(); });
+    file->addAction(tr("Import library..."), this, [this] { m_transfer->askAndImport([this] { prepareForImport(); }); });
+    m_checkSuggestedFiles = file->addAction(tr("Check suggested files..."), this, &MainWindow::showSuggestedFiles);
+    updateSuggestedFilesAction();
     file->addSeparator();
     file->addAction(tr("&Online lookups..."), this, &MainWindow::showLookupSettings);
     file->addAction(tr("Look up details for the whole library..."), this, &MainWindow::askAndLookUpLibrary);
@@ -1101,6 +1201,9 @@ void MainWindow::saveEdit(Publication publication)
 {
     guarded(tr("Saving the changes"), [&] {
         m_session.publications().updateWithProvenance(publication, QStringLiteral("manual"));
+        // Made an issue, its title may only describe it. A title typed here is never replaced.
+        if (publication.type == PublicationType::JournalIssue)
+            import::tidyJournalIssue(m_session.database(), publication.id);
         m_details->reload();
         scheduleRefresh();
     });
@@ -1112,8 +1215,53 @@ void MainWindow::editPublication(qint64 id)
     if (!guarded(tr("Reading the publication"), [&] { publication = m_session.publications().get(id); }) || !publication)
         return;
     MetadataEditor editor(*publication, this);
+    editor.setSuggestions([this](const QString &field, const QString &typed) { return metadataSuggestions(field, typed); });
     if (editor.exec() == QDialog::Accepted)
         saveEdit(editor.result());
+}
+
+QStringList MainWindow::metadataSuggestions(const QString &field, const QString &typed)
+{
+    static const QHash<QString, QByteArray> columns = {
+        {QStringLiteral("container"), "container_title"},     {QStringLiteral("publisher"), "publisher"},
+        {QStringLiteral("place"), "place"},                   {QStringLiteral("series"), "series"},
+        {QStringLiteral("conference"), "conference_name"},    {QStringLiteral("conference_location"), "conference_location"},
+        {QStringLiteral("institution"), "institution"},       {QStringLiteral("department"), "department"},
+        {QStringLiteral("degree"), "degree"},                 {QStringLiteral("standard_body"), "standard_body"},
+        {QStringLiteral("language"), "language"}};
+    static const QHash<QString, QByteArray> roles = {{QStringLiteral("authors"), "author"},
+                                                     {QStringLiteral("editors"), "editor"},
+                                                     {QStringLiteral("translators"), "translator"},
+                                                     {QStringLiteral("advisors"), "advisor"}};
+    QString escaped = typed;
+    escaped.replace(u'\\', QStringLiteral("\\\\")).replace(u'%', QStringLiteral("\\%")).replace(u'_', QStringLiteral("\\_"));
+    QStringList found;
+    try {
+        if (const auto column = columns.constFind(field); column != columns.cend()) {
+            auto select = m_session.database().prepare(
+                "SELECT " + *column + ", count(*) AS used FROM publication WHERE " + *column + " LIKE ? ESCAPE '\\' AND "
+                + *column + " <> '' GROUP BY " + *column + " ORDER BY used DESC, " + *column + " LIMIT 15");
+            select->bind(1, u'%' + escaped + u'%');
+            while (select->step())
+                found << select->textAt(0);
+        } else if (roles.contains(field) || field == QLatin1StringView("people")) {
+            // Anyone named in the library, in any role, by family or given name, most often named first.
+            auto select = m_session.database().prepare(
+                "SELECT p.family_name, p.given_name, count(*) AS used FROM person p JOIN publication_person pp ON pp.person_id = p.id "
+                "WHERE p.family_name LIKE ?1 ESCAPE '\\' OR p.given_name LIKE ?1 ESCAPE '\\' OR "
+                "(p.family_name || ', ' || p.given_name) LIKE ?2 ESCAPE '\\' "
+                "GROUP BY p.id ORDER BY used DESC, p.family_name LIMIT 15");
+            select->bind(1, escaped + u'%');
+            select->bind(2, escaped + u'%');
+            while (select->step()) {
+                const QString given = select->textAt(1);
+                found << (given.isEmpty() ? select->textAt(0) : select->textAt(0) + QStringLiteral(", ") + given);
+            }
+        }
+    } catch (const std::exception &) {
+        // Only suggestions: typing carries on without them.
+    }
+    return found;
 }
 
 std::optional<QString> MainWindow::firstFilePath(qint64 publicationId)
@@ -1234,6 +1382,97 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     if (m_documentTabs && watched == m_documentTabs->tabBar() && event->type() == QEvent::MouseButtonRelease)
         QTimer::singleShot(0, this, &MainWindow::keepLibraryFirst);
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::prepareForImport()
+{
+    stopImport();
+    m_index->stopIndexing();
+    m_lookup->stopLookups();
+    // Documents open on publications that an import may change or, replacing the library, remove.
+    while (m_documentTabs->count() > 1)
+        closeDocumentTab(m_documentTabs->count() - 1);
+}
+
+void MainWindow::updateSuggestedFilesAction()
+{
+    if (!m_checkSuggestedFiles)
+        return;
+    qint64 count = 0;
+    try {
+        count = transfer::fileProposalCount(m_session.database());
+    } catch (const std::exception &) {
+    }
+    m_checkSuggestedFiles->setEnabled(count > 0);
+    m_checkSuggestedFiles->setText(count > 0 ? tr("Check suggested files (%1)...").arg(count) : tr("Check suggested files..."));
+}
+
+bool MainWindow::linkFileByHand(qint64 publicationId, const QString &path)
+{
+    const QString cleaned = QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath());
+    std::optional<LibraryRoot> root;
+    for (const LibraryRoot &candidate : m_session.files().roots()) {
+        if (import::isPathInside(cleaned, QDir::fromNativeSeparators(candidate.path)))
+            root = candidate;
+    }
+    if (!root) {
+        QMessageBox box(QMessageBox::Information, tr("Find its file"),
+                        tr("That file isn't in any of the library's folders. Add its folder to the library first, then try again."),
+                        QMessageBox::Ok, this);
+        box.setTextFormat(Qt::PlainText);
+        box.exec();
+        return false;
+    }
+    const bool done = guarded(tr("Linking the file"), [&] {
+        Database &db = m_session.database();
+        Transaction transaction(db);
+        FileRecord file;
+        file.rootId = root->id;
+        file.relativePath = QDir(root->path).relativeFilePath(cleaned);
+        file.relativePath = QDir::fromNativeSeparators(file.relativePath);
+        const QFileInfo info(cleaned);
+        file.size = info.size();
+        file.modifiedAt = 0; // So the next scan reads it, for its contents, cover and facts.
+        file.format = info.suffix().toLower();
+        for (const FileRecord &known : m_session.files().filesInRoot(root->id)) {
+            if (known.relativePath == file.relativePath)
+                file = known;
+        }
+        file.modifiedAt = 0;
+        const qint64 fileId = m_session.files().upsert(file);
+        // Already another publication's, from scanning: the user says they're the same.
+        for (const qint64 other : m_session.files().publicationsFor(fileId)) {
+            if (other != publicationId)
+                mergePublications(db, publicationId, other, QStringLiteral("manual"));
+        }
+        m_session.files().link(publicationId, fileId, true);
+        auto waiting = db.prepare("DELETE FROM expected_file WHERE publication_id = ?");
+        waiting->bind(1, publicationId);
+        waiting->step();
+        auto proposals = db.prepare("DELETE FROM file_proposal WHERE publication_id = ?");
+        proposals->bind(1, publicationId);
+        proposals->step();
+        transaction.commit();
+    });
+    if (done) {
+        refreshNow();
+        m_details->reload();
+        rescanAll();
+        updateSuggestedFilesAction();
+    }
+    return done;
+}
+
+void MainWindow::showSuggestedFiles()
+{
+    FileProposalsDialog dialog(m_session, this);
+    dialog.exec();
+    if (dialog.changed() > 0) {
+        refreshNow();
+        m_details->reload();
+        rescanAll(); // A file joined to an imported publication is read for its cover.
+    }
+    updateSuggestedFilesAction();
 }
 
 void MainWindow::exportCitations()
@@ -1368,6 +1607,7 @@ void MainWindow::showContentsDialog(qint64 volumeId)
         if (dialog.namedCount() > 0)
             done << tr("Named %1.").arg(publicationCount(dialog.namedCount()));
         statusBar()->showMessage(done.join(u' '), 8000);
+        guarded(tr("Tidying the issue"), [&] { import::tidyJournalIssue(m_session.database(), volumeId); });
         // A table of contents gives titles but not authors, so their details are looked up as a new file's would be.
         lookUp(dialog.articleIds());
     }
@@ -1390,7 +1630,9 @@ void MainWindow::showAddArticleDialog(qint64 volumeId)
         AddArticleDialog dialog(pageCount, this);
         if (dialog.exec() != QDialog::Accepted)
             return;
-        lookUp(createArticles(m_session.database(), volumeId, {dialog.draft()}, false));
+        const QList<qint64> made = createArticles(m_session.database(), volumeId, {dialog.draft()}, false);
+        import::tidyJournalIssue(m_session.database(), volumeId);
+        lookUp(made);
         m_details->reload();
         refreshNow();
     });
@@ -1804,13 +2046,15 @@ void MainWindow::showFoldersDialog()
     m_foldersDialog = &dialog;
     dialog.setImportRunning(m_import->isBusy());
     connect(&dialog, &LibraryFoldersDialog::addRequested, this, &MainWindow::chooseFolderToAdd);
-    connect(&dialog, &LibraryFoldersDialog::rescanRequested, this, [this](qint64 root) {
+    connect(&dialog, &LibraryFoldersDialog::rescanRequested, this, [this](const QList<qint64> &roots) {
         m_importStoppedByHand = false;
-        m_import->scanRoots({root});
+        if (!roots.isEmpty())
+            m_import->scanRoots(roots);
     });
     connect(&dialog, &LibraryFoldersDialog::changeLocationRequested, this, &MainWindow::changeRootLocation);
-    connect(&dialog, &LibraryFoldersDialog::removeRequested, this, &MainWindow::removeRoot);
+    connect(&dialog, &LibraryFoldersDialog::removeRequested, this, &MainWindow::removeRoots);
     connect(&dialog, &LibraryFoldersDialog::forgetRequested, this, &MainWindow::confirmForgetHidden);
+    connect(&dialog, &LibraryFoldersDialog::forgetWaitingRequested, this, &MainWindow::confirmForgetWaiting);
     dialog.exec();
     m_foldersDialog = nullptr;
     offerReviewIfDue();
@@ -1835,13 +2079,27 @@ void MainWindow::changeRootLocation(qint64 rootId)
 
 void MainWindow::removeRoot(qint64 rootId)
 {
+    removeRoots({rootId});
+}
+
+void MainWindow::removeRoots(const QList<qint64> &rootIds)
+{
     guarded(tr("Removing the folder"), [&] {
-        const auto root = m_session.files().root(rootId);
-        if (!root)
+        QStringList paths;
+        QList<qint64> ids;
+        for (const qint64 rootId : rootIds) {
+            if (const auto root = m_session.files().root(rootId)) {
+                paths << QDir::toNativeSeparators(root->path);
+                ids << rootId;
+            }
+        }
+        if (ids.isEmpty())
             return;
-        const FileRepository::RemovalImpact impact = m_session.files().removalImpact(rootId);
-        QMessageBox box(QMessageBox::Question, tr("Remove folder"),
-                        tr("Stop indexing %1?\n\nNothing is deleted from your disk.").arg(QDir::toNativeSeparators(root->path)),
+        const FileRepository::RemovalImpact impact = m_session.files().removalImpact(ids);
+        const QString question = ids.size() == 1
+            ? tr("Stop indexing %1?\n\nNothing is deleted from your disk.").arg(paths.first())
+            : tr("Stop indexing these %1 folders?\n\n%2\n\nNothing is deleted from your disk.").arg(ids.size()).arg(paths.join(u'\n'));
+        QMessageBox box(QMessageBox::Question, ids.size() == 1 ? tr("Remove folder") : tr("Remove folders"), question,
                         QMessageBox::NoButton, m_foldersDialog ? static_cast<QWidget *>(m_foldersDialog) : this);
         box.setTextFormat(Qt::PlainText);
 
@@ -1871,30 +2129,39 @@ void MainWindow::removeRoot(qint64 rootId)
         box.exec();
 
         if (box.clickedButton() == remove)
-            removeRootKeepingDetails(rootId);
+            removeRootsKeepingDetails(ids);
         else if (forget && box.clickedButton() == forget)
-            removeRootAndDetails(rootId);
+            removeRootsAndDetails(ids);
     });
 }
 
-void MainWindow::removeRootKeepingDetails(qint64 rootId)
+void MainWindow::removeRootsKeepingDetails(const QList<qint64> &rootIds)
 {
     guarded(tr("Removing the folder"), [&] {
-        m_watcher->removeRoot(rootId);
-        m_session.files().hideRoot(rootId);
+        for (const qint64 rootId : rootIds) {
+            m_watcher->removeRoot(rootId);
+            m_session.files().hideRoot(rootId);
+        }
         afterFoldersChanged();
     });
 }
 
-void MainWindow::removeRootAndDetails(qint64 rootId)
+void MainWindow::removeRootsAndDetails(const QList<qint64> &rootIds)
 {
     guarded(tr("Removing the folder"), [&] {
-        m_watcher->removeRoot(rootId);
-        m_session.files().hideRoot(rootId);
-        const QList<qint64> ids = m_session.files().hiddenIn(rootId);
+        // All are hidden first, so that something in two of them is counted as leaving.
+        for (const qint64 rootId : rootIds) {
+            m_watcher->removeRoot(rootId);
+            m_session.files().hideRoot(rootId);
+        }
+        QList<qint64> ids;
+        for (const qint64 rootId : rootIds)
+            ids += m_session.files().hiddenIn(rootId);
         letGoOfHidden(); // Readers and notes save as they close, so this has to come first.
-        m_session.files().removeRoot(rootId);
-        deletePublications(ids);
+        for (const qint64 rootId : rootIds)
+            m_session.files().removeRoot(rootId);
+        const QSet<qint64> unique(ids.cbegin(), ids.cend());
+        deletePublications(QList<qint64>(unique.cbegin(), unique.cend()));
         afterFoldersChanged();
     });
 }
@@ -1915,6 +2182,29 @@ void MainWindow::confirmForgetHidden()
         box.exec();
         if (box.clickedButton() == confirm)
             forgetHiddenPublications();
+    });
+}
+
+void MainWindow::confirmForgetWaiting()
+{
+    guarded(tr("Deleting details"), [&] {
+        const qint64 waiting = m_session.files().waitingPublicationCount();
+        QMessageBox box(QMessageBox::Warning, tr("Delete details"),
+                        tr("Delete the details of %1 waiting for their files?\n\nTheir tags, notes and highlights will be gone "
+                           "for good, and they won't appear if their files are found later. Your files aren't touched.")
+                            .arg(publicationCount(waiting)),
+                        QMessageBox::NoButton, m_foldersDialog ? static_cast<QWidget *>(m_foldersDialog) : this);
+        box.setTextFormat(Qt::PlainText);
+        QPushButton *confirm = box.addButton(tr("Delete details"), QMessageBox::DestructiveRole);
+        confirm->setObjectName(QStringLiteral("forgetWaiting"));
+        QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(cancel);
+        box.exec();
+        if (box.clickedButton() != confirm)
+            return;
+        // Their waiting goes with them.
+        deletePublications(m_session.files().waitingPublications());
+        afterFoldersChanged();
     });
 }
 

@@ -1,5 +1,6 @@
 #include "ui/VolumeDialogs.h"
 
+#include "import/JournalIssues.h"
 #include "core/model/Identifiers.h"
 #include "core/model/PublicationFields.h"
 #include "core/repo/FileRepository.h"
@@ -210,6 +211,8 @@ void ContentsDialog::onHeading(int page, const ReaderHeading &heading)
                 m_numberingNote = tr("Its volume and issue numbers, %1 and %2, were read from its pages and filled in.")
                                       .arg(heading.volume, heading.issue);
             }
+            if (import::tidyJournalIssue(m_session.database(), m_volumeId))
+                m_filledNumbering = true;
         } catch (const std::exception &) {
             // Only a convenience: they can still be typed in.
         }

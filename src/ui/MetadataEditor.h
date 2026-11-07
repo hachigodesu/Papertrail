@@ -3,9 +3,13 @@
 #include "core/model/Publication.h"
 
 #include <QDialog>
+#include <QHash>
 #include <QList>
 
+#include <functional>
+
 class QComboBox;
+class QCompleter;
 class QFormLayout;
 class QLabel;
 class QLineEdit;
@@ -26,6 +30,13 @@ public:
 
     // Shows the problem and returns false if the values can't be saved.
     bool validate();
+
+    // Values already in the library that start or contain `typed`, most used first, for a field such as
+    // "container" or a people field such as "authors".
+    using Suggestions = std::function<QStringList(const QString &field, const QString &typed)>;
+    void setSuggestions(const Suggestions &suggestions);
+    // The completer offering them for a field, for tests.
+    QCompleter *completerFor(const QString &name) const;
 
     QComboBox *typeBox() const { return m_type; }
     QLineEdit *field(const QString &name) const;
@@ -53,6 +64,8 @@ private:
     void addPeople(QFormLayout *form, const QString &name, const QString &label,
                    QList<core::PersonName> core::Publication::*member, const QList<core::PublicationType> &suits);
     void updateVisibleFields();
+    void suggestFor(QLineEdit *edit, const QString &name);
+    void suggestFor(QPlainTextEdit *edit, const QString &name);
 
     core::Publication m_original;
     QComboBox *m_type = nullptr;
@@ -63,6 +76,8 @@ private:
     QLabel *m_error = nullptr;
     QList<TextField> m_textFields;
     QList<PeopleField> m_peopleFields;
+    Suggestions m_suggestions;
+    QHash<QString, QCompleter *> m_completers;
 };
 
 } // namespace papertrail::ui

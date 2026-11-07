@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Papertrail is a C++20 / Qt 6 Widgets desktop library manager and reader for academic publications, for Windows and Linux. It indexes files where they already are and stores metadata in SQLite. `docs/PLAN.md` is the approved plan (milestones M0 to M12, with M6.5 for collections before M7, and M9.5 for article summaries before M10). `docs/M*-results.md` record what each finished milestone delivered, how it differed from the plan, and what was carried forward, so read the latest one before starting a milestone.
+Papertrail is a C++20 / Qt 6 Widgets desktop library manager and reader for academic publications, for Windows and Linux. It indexes files where they already are and stores metadata in SQLite. `docs/PLAN.md` is the approved plan (milestones M0 to M12, with M6.5 for collections before M7, M9.5 for article summaries before M10, and M11.5 for features added before release). `docs/M*-results.md` record what each finished milestone delivered, how it differed from the plan, and what was carried forward, so read the latest one before starting a milestone.
 
 ## Rules
 
@@ -111,7 +111,8 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 | `papertrail_metadata` | core, import, Qt Network | Online sources, matching, the lookup engine |
 | `papertrail_summary` | core, metadata | Article summaries from Claude |
 | `papertrail_citation` | core | Citation styles, and BibTeX, RIS and CSL-JSON export |
-| `papertrail_ui` | core, import, metadata, summary, citation, QtKeychain, Qt Widgets | The library window |
+| `papertrail_transfer` | core, zlib | Library export and import between computers |
+| `papertrail_ui` | core, import, metadata, summary, citation, transfer, QtKeychain, Qt Widgets | The library window |
 | `papertrail` | ui | The app |
 | `papertrail-worker` | engine, import | The only part of the app that opens documents |
 
@@ -180,6 +181,10 @@ Rate limits differ by source and by kind of request, and OpenAlex's anonymous se
 
 `citation::citationItems` turns publications into `CitationItem`s, taking what an article or chapter lacks (its journal, book, editors, publisher) from what it's in. `Styles.cpp` holds the four styles, written out by hand rather than through CSL: Harvard (following rules the user chose, which mustn't be named or quoted anywhere), APA 7th, IEEE and Chicago author-date (18th). `formatReferences` sorts, numbers and adds 2020a/2020b letters across a list, so format a list in one call rather than item by item. Each style's output for every kind of publication is fixed in `tests/fixtures/citations/`, written by hand from the rules, and a change to a style should change those by hand too. `test_citations` also runs pdflatex, BibTeX and biber over an export where they're installed (the Ubuntu WSL distro has them). `CitationActions` is the window's side: copying with italics as HTML and plain text, and exporting on its own thread and database connection.
 
+### Library export and import
+
+A `.papertrail` file is a zip (`transfer/Zip`, on zlib) of versioned JSON, one file per kind of record, with `manifest.json` giving the version. Everything is linked by uuid, and files are described only by SHA-256, size, format and name, never by path, so add nothing path-like to it. Publications in a removed folder stay out. `importBundle` runs in one transaction: a publication is matched by uuid, or else by a file here with the same contents, in which case it takes the export's uuid and details. Where both have it, the later `updatedAt` wins, through `updateWithProvenance` so it can be undone, and merging only adds. Files are linked by hash; anything else waits in `expected_file`, and `FileRepository::linkWaitingPublication` connects it when the import hashes a matching file. Uncertain matches (same identifier, or same name and size) go in `file_proposal` for the user. Replace makes a `VACUUM INTO` backup first. `tests/fixtures/transfer/library-v1.papertrail` is an export kept so later versions must still read it: don't regenerate it, and add a new one if the format changes.
+
 ### Article summaries
 
 `src/summary` builds requests for Claude, reads replies and works out costs (`SummaryRequest`), and drives one summary with `Transport::send` (`SummaryEngine`), carrying on after `pause_turn`. It doesn't use an SDK, since there isn't one for C++. `SummaryDialog` holds the steps. Nothing about a publication goes before the user confirms, and the paper needs a confirmation of its own, so estimates are worked out locally and never by asking Anthropic. The key lives only in `ApiKeyStore` (QtKeychain, built from `cmake/Keychain.cmake`), never in the database or settings, because exports include every setting. `Transport::send` doesn't follow redirects, so a key can't reach another host. Prices are in `knownModels()`: update them and `pricesCheckedOn()` together. Never make a real API call in a test.
@@ -196,6 +201,8 @@ Document text is in `fulltext.db`, attached to a connection as `fulltext` by `at
 
 An article is a publication with `parent_id`, `page_start` and `page_end`, and no file of its own: anything reading a file goes through `coalesce(parent_id, id)`, as `kOwnerOfFile` does. Those pages are positions in the file, not printed page numbers, so they don't go in the citation `pages` field. `core/repo/VolumeArticles` works out articles from a table of contents, and `ContentsDialog` reads the contents through a `DocumentClient`, so a bad file can't take the window down. Where the contents only number an entry, the dialog reads that page's largest text and any DOI with the worker's `heading` op, which also finds the issue's printed numbers (`findIssueNumbering`). An article's cover key is its file's hash and first page (`articleCoverKey`), and `CoverCache` shows the file's cover until it's made. The code says "volume" for anything holding articles, but the journal type is `PublicationType::JournalIssue`, shown as "Journal issue" and stored as `journal_volume`, its first name.
 
+An issue's title from a file is usually its cover's largest text. `import/JournalIssues` (`tidyJournalIssue`) recognises titles that only describe an issue, fills in its numbers and journal, and retitles it from them, never touching fields set by hand. It runs on import, when a library opens, after lookups and after contents are read, so call it from anything new that changes an issue or its articles.
+
 ### Collections
 
 `CollectionRepository` holds named groupings. They're a filter like any other: `PublicationFilter::collectionIds` narrows every query, and `FilterSidebar` lists them with counts from `LibraryQuery::collectionCounts`.
@@ -205,6 +212,8 @@ An article is a publication with `parent_id`, `page_start` and `page_end`, and n
 Removing a folder (`FileRepository::hideRoot`) adds it to `removed_root` and keeps its file records, so adding the same path again (`restoreRoot`, then a scan) brings everything back. `roots()` only returns folders being indexed. Publications that are only in a removed folder, and articles inside them, go in `hidden_publication`, and `LibraryQuery` leaves those out of everything. Having no file doesn't mean hidden: a publication imported from another computer may be waiting for its file.
 
 A trigger on `publication_file` brings a hidden publication back whenever it gets a real file, so the same contents found in another folder reconnect by hash. It also drops the old location. Anything that lists what's waiting, or sends something online, has to leave hidden publications out too.
+
+Publications imported from another computer that are still waiting for their files (`expected_file`, see below) are hidden the same way, so the same trigger brings them back. `hiddenCount` and `hiddenPublications` mean only those kept for removed folders, and the export includes waiting ones.
 
 ### Database and queries
 

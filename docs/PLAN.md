@@ -21,7 +21,7 @@ The project folder is empty, so this is a new build.
 | Hosting | Private GitHub repository, made public at V1 |
 | Database | SQLite |
 | Linux support | Usable on all distros, with full testing on both Arch and Ubuntu |
-| Citation styles | Includes Harvard, alongside APA, IEEE and Chicago |
+| Citation styles | Harvard, APA (7th edition), IEEE and Chicago (author-date). Harvard references for electronic sources say [online], give the DOI or web address, and are dated as accessed on the day they're copied |
 | Later roadmap | Zotero/Mendeley/BibTeX import, OCR |
 
 ### Defaults I chose (tell me if you disagree)
@@ -347,6 +347,7 @@ Each milestone ends with something you can run.
 | **M9.5** | Article summaries: API key handling, model and effort choice, cost estimates, summaries from identifying information, accept or discard, and sending the paper as a last resort | A paper can be summarized from its identifiers alone, with the cost shown beforehand and the sources shown afterwards. Nothing is sent without confirmation, and without a key the app makes no requests to Anthropic |
 | **M10** | Citations: BibTeX, RIS, CSL-JSON export, and copying a formatted citation or reference list in Harvard, APA, IEEE or Chicago | Output imports cleanly into BibTeX and Zotero, and each style matches test fixtures for every publication type |
 | **M11** | Library export and import: bundle format, content matching, merge and replace, settings transfer, match report | A library exported from one computer restores all tags, notes and settings on another, with its files in a completely different folder structure |
+| **M11.5** | Before release: daily database backups (seven kept), removing publications from the library (remembered by content hash, and reversible), dragging publications onto collections and tags, nested collections, articles following their issue into a collection, searching highlights and notes, exporting an annotated copy of a PDF, retraction and correction warnings, finding an issue's articles without a table of contents, and summaries in batches at half price (offered alongside instant ones) | Each feature works on all three platforms, a removed publication stays removed through rescans until brought back, and the original documents are never changed |
 | **M12** | Release: first-run flow, Windows installer and portable zip, Linux AppImage, Flatpak and AUR package, performance and crash hardening, by-hand testing on a real Linux desktop, docs, making the repository public | Clean installs work on fresh Windows, Arch and Ubuntu machines, and the Linux packages pass the distro checks |
 
 ### Performance targets at 100,000 publications
@@ -369,7 +370,7 @@ These are goals to test against, not measurements yet.
 | MuPDF API changes between versions | Pinned version, with all use confined to the engine adapter |
 | Arch updates break the build, because it's a rolling distribution | The Arch CI job reports this early, and release builds are unaffected because they use a pinned base |
 | "All distros" can't be fully tested | Arch and Ubuntu get full testing. Other distros get automated checks on a representative set, and the source build covers the rest |
-| "Harvard" isn't one single standard, and universities vary | Default to the widely used Cite Them Right variant, and name it in the UI so users can check it against their university's guide. Full CSL styles on the roadmap cover other variants |
+| "Harvard" isn't one single standard, and universities vary | Follow one set of Harvard rules chosen by the user. Full CSL styles on the roadmap cover other variants |
 | Flatpak's sandbox limits file access | Request broad filesystem permission and explain why in the docs, since this is core to how Papertrail works |
 | Unsigned Windows installer shows SmartScreen warnings | Accepted for now. A code-signing certificate is a paid option to decide on at M12 |
 | The same paper exists as different files on two computers, so hashes don't match | Identifier matching proposes the link for review, and unmatched publications keep their tags until linked |
@@ -433,4 +434,18 @@ Papertrail/
 
 ## Roadmap after V1
 
-OCR for scanned documents, Zotero/Mendeley/BibTeX import, automatic article detection in volumes without a table of contents, full CSL citation styles, saved searches, a browser connector, and exporting annotated PDF copies.
+OCR for scanned documents, Zotero/Mendeley/BibTeX import, full CSL citation styles, saved searches and a browser connector. Automatic article detection and annotated PDF copies moved into M11.5.
+
+### Ideas to explore later
+
+Considered before M11.5 and kept for later:
+
+- **Saved searches:** a search and its filters kept as a sidebar entry. Small.
+- **BibTeX and RIS import:** details and tags from other managers' exports, including Zotero's and Mendeley's, matched to files by DOI or title. Medium to large.
+- **Related papers:** references and cited-by from OpenAlex, marking those already in the library. Medium to large, and uses up OpenAlex's anonymous allowance.
+- **Open-access copies:** PDFs fetched through Unpaywall for publications with no file, saved to a folder the user chooses. Unpaywall requires an email address with each request, so it would only work once one is entered.
+- **A dark mode that leaves images alone,** rather than inverting the whole page. Small to medium.
+- **Sentence-case titles** where a citation style asks for them, such as APA. Risky with names and acronyms.
+- **OCR** for scanned documents, so they can be searched and highlighted. Large.
+- **Full CSL styles** alongside the four hand-written ones. Large, as there's no mature CSL processor in C++.
+- **A browser connector** for adding what's open in the browser. Large.

@@ -1,5 +1,6 @@
 #include "metadata/Matching.h"
 
+#include "import/JournalIssues.h"
 #include "core/db/Database.h"
 #include "core/model/Identifiers.h"
 #include "core/model/PublicationFields.h"
@@ -166,6 +167,11 @@ int applyFoundRecord(Database &db, qint64 publicationId, const FoundRecord &foun
 
     // One time for all of them, so that undoing can tell which changes went together.
     publications.updateWithProvenance(*publication, found.provider, QDateTime::currentMSecsSinceEpoch());
+    // An article's lookup knows its journal, which its issue may not, and an issue's own may say more about it.
+    if (publication->parentId)
+        import::tidyJournalIssue(db, *publication->parentId, publications.get(publicationId));
+    else if (publication->type == PublicationType::JournalIssue)
+        import::tidyJournalIssue(db, publicationId);
     transaction.commit();
     return int(changes.size());
 }
