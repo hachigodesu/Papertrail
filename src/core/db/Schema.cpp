@@ -460,6 +460,24 @@ CREATE TABLE IF NOT EXISTS collection_publication (
 CREATE INDEX IF NOT EXISTS collection_publication_publication ON collection_publication(publication_id, collection_id);
 )sql";
 
+// A summary the user chose to keep, apart from the publication's details and notes, since it's generated.
+const char *const kMigration10 = R"sql(
+CREATE TABLE IF NOT EXISTS publication_summary (
+    id                      INTEGER PRIMARY KEY,
+    uuid                    TEXT NOT NULL UNIQUE,
+    publication_id          INTEGER NOT NULL UNIQUE REFERENCES publication(id) ON DELETE CASCADE,
+    model                   TEXT NOT NULL,
+    effort                  TEXT NOT NULL,
+    basis                   TEXT NOT NULL,
+    identification_unsure   INTEGER NOT NULL DEFAULT 0,
+    summary_text            TEXT NOT NULL,
+    sources_json            TEXT NOT NULL,
+    cost_dollars            REAL,
+    sent_paper              INTEGER NOT NULL DEFAULT 0,
+    created_at              INTEGER NOT NULL
+) STRICT;
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -474,6 +492,7 @@ const std::vector<Migration> &libraryMigrations()
         {7, kMigration7},
         {8, kMigration8},
         {9, kMigration9},
+        {10, kMigration10},
     };
     return migrations;
 }

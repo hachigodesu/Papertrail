@@ -39,10 +39,14 @@ add_library(papertrail_ui STATIC
     ReaderTab.h
     IndexThread.cpp
     IndexThread.h
+    ApiKeyStore.cpp
+    ApiKeyStore.h
+    SummaryDialog.cpp
+    SummaryDialog.h
     VolumeDialogs.cpp
     VolumeDialogs.h
     ReviewTab.cpp
     ReviewTab.h)
 
 target_include_directories(papertrail_ui PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(papertrail_ui PUBLIC papertrail_core papertrail_import papertrail_metadata Qt6::Widgets)
+target_link_libraries(papertrail_ui PUBLIC papertrail_summary Papertrail::Keychain papertrail_core papertrail_import papertrail_metadata Qt6::Widgets)

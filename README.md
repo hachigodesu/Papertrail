@@ -7,11 +7,15 @@
 
 A desktop library manager and reader for university students and researchers, for Windows and Linux. Papertrail indexes your journal articles, textbooks, theses, reports and standards where they already are, and never modifies your files.
 
-**Status:** early development. You can browse, filter, tag and edit your library, read PDF, EPUB, DjVu, MOBI, AZW3, XPS, CBZ and FB2 files in the built-in reader, fill in details from online sources, gather publications into collections, split volumes into articles, search inside documents, and highlight and take notes as you read. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
+**Status:** early development. You can browse, filter, tag and edit your library, read PDF, EPUB, DjVu, MOBI, AZW3, XPS, CBZ and FB2 files in the built-in reader, fill in details from online sources, gather publications into collections, split volumes into articles, search inside documents, highlight and take notes as you read, and get summaries from Claude with your own API key. See [docs/PLAN.md](docs/PLAN.md) for the full plan.
 
 ## Online lookups
 
 Papertrail stays offline until you choose otherwise. If you turn lookups on, it sends a file's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library. It never sends your files, notes or tags. Any lookup can be undone, and on Linux lookups need OpenSSL 3.
+
+## Summaries
+
+If you enter your own Claude API key, you can ask for a summary of a publication. You're shown what will be sent and an estimated cost first, and you pay Anthropic directly. It sends identifying details such as the DOI and title, and Claude looks for the paper online. Your file is only sent if you choose that, with a confirmation of its own.
 
 ## Building
 
@@ -41,12 +45,12 @@ ctest --preset windows-debug
 
 ### Linux
 
-Install Qt 6.12 or newer, MuPDF, DjVuLibre, CMake and Ninja, then use the same commands with the `linux-debug` preset.
+Install Qt 6.12 or newer, MuPDF, DjVuLibre, libsecret (so that an API key can be kept in the desktop's keyring), CMake and Ninja, then use the same commands with the `linux-debug` preset.
 
 On Arch:
 
 ```bash
-sudo pacman -S --needed base-devel cmake ninja qt6-base libmupdf djvulibre
+sudo pacman -S --needed base-devel cmake ninja qt6-base libmupdf djvulibre libsecret
 ```
 
 Ubuntu's own Qt and MuPDF packages are too old. Install Qt with [aqtinstall](https://github.com/miurahr/aqtinstall) and pass its location to CMake with `-DCMAKE_PREFIX_PATH`, and build MuPDF with `packaging/linux/install-mupdf.sh`.

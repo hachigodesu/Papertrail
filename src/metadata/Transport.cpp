@@ -30,6 +30,13 @@ int secondsToWait(const QByteArray &header)
 
 } // namespace
 
+void Transport::send(const HttpRequest &, const Callback &callback)
+{
+    TransportReply reply;
+    reply.error = QStringLiteral("this can't send requests of this kind");
+    callback(reply);
+}
+
 NetworkTransport::NetworkTransport()
     : m_network(new QNetworkAccessManager)
 {
@@ -43,6 +50,42 @@ NetworkTransport::~NetworkTransport()
 bool NetworkTransport::canUseTls()
 {
     return QSslSocket::supportsSsl();
+}
+
+void NetworkTransport::send(const HttpRequest &http, const Callback &callback)
+{
+    QNetworkRequest request(http.url);
+    const QString version = QCoreApplication::applicationVersion();
+    request.setHeader(QNetworkRequest::UserAgentHeader,
+                      QStringLiteral("Papertrail/%1 (https://github.com/hachigodesu/Papertrail)").arg(version.isEmpty() ? QStringLiteral("dev") : version));
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(http.timeoutMs);
+    for (const auto &header : http.headers)
+        request.setRawHeader(header.first, header.second);
+
+    QNetworkReply *reply = http.method == "POST" ? m_network->post(request, http.body) : m_network->get(request);
+    auto tooBig = std::make_shared<bool>(false);
+    const qint64 limit = http.maxReplyBytes;
+    QObject::connect(reply, &QNetworkReply::downloadProgress, reply, [reply, tooBig, limit](qint64 received, qint64) {
+        if (received > limit) {
+            *tooBig = true;
+            reply->abort();
+        }
+    });
+    QObject::connect(reply, &QNetworkReply::finished, reply, [reply, callback, tooBig] {
+        TransportReply result;
+        result.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (*tooBig) {
+            result.error = QStringLiteral("the answer was far too large");
+        } else {
+            result.body = reply->readAll();
+            if (reply->error() != QNetworkReply::NoError && result.status == 0)
+                result.error = reply->errorString();
+        }
+        result.retryAfterSeconds = secondsToWait(reply->rawHeader("Retry-After"));
+        reply->deleteLater();
+        callback(result);
+    });
 }
 
 void NetworkTransport::get(const QUrl &url, const Callback &callback)

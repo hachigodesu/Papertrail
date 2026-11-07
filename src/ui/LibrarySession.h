@@ -19,6 +19,8 @@
 
 namespace papertrail::ui {
 
+class ApiKeyStore;
+
 struct LibraryPaths {
     QString database;
     QString cacheDirectory; // Covers go in a folder inside this one.
@@ -30,6 +32,9 @@ struct LibraryPaths {
     // Where online sources are, and what reaches them. Only tests change these.
     metadata::ProviderUrls providerUrls;
     std::function<std::unique_ptr<metadata::Transport>()> transportFactory;
+
+    // Where the Claude API key is kept. Only tests change this.
+    std::function<std::unique_ptr<ApiKeyStore>()> keyStoreFactory;
 
     // The user's own library, using the standard folders for this platform.
     static LibraryPaths standard();

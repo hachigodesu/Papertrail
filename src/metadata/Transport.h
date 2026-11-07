@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QByteArray>
+#include <QList>
+#include <QPair>
 #include <QString>
 #include <QUrl>
 
@@ -18,6 +20,17 @@ struct TransportReply {
     int rateLimitPerSecond = 0; // What the source says its current limit is, if it says.
 };
 
+// For requests with headers of their own, which at the moment means article summaries. These don't follow redirects,
+// because a redirect would carry their headers somewhere else.
+struct HttpRequest {
+    QUrl url;
+    QByteArray method = "GET";
+    QList<QPair<QByteArray, QByteArray>> headers;
+    QByteArray body;
+    int timeoutMs = 30000;
+    qint64 maxReplyBytes = 8 * 1024 * 1024;
+};
+
 // The only way anything in Papertrail reaches the network. Offline mode never queues any work that
 // would call this, and tests swap it to prove that.
 class Transport {
@@ -25,6 +38,7 @@ public:
     virtual ~Transport() = default;
     using Callback = std::function<void(const TransportReply &)>;
     virtual void get(const QUrl &url, const Callback &callback) = 0;
+    virtual void send(const HttpRequest &request, const Callback &callback);
 };
 
 class NetworkTransport : public Transport {
@@ -33,6 +47,7 @@ public:
     ~NetworkTransport() override;
 
     void get(const QUrl &url, const Callback &callback) override;
+    void send(const HttpRequest &request, const Callback &callback) override;
 
     // Whether this build can make secure connections at all.
     static bool canUseTls();

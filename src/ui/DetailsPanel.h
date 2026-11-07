@@ -57,6 +57,10 @@ public:
     QComboBox *readStatusBox() const { return m_readStatus; }
     QCheckBox *preprintBox() const { return m_preprint; }
     QLabel *collectionsLabel() const { return m_collections; }
+    QPlainTextEdit *summaryView() const { return m_summaryView; }
+    QLabel *summaryInfo() const { return m_summaryInfo; }
+    QPushButton *summarizeButton() const { return m_summarize; }
+    QPushButton *deleteSummaryButton() const { return m_deleteSummary; }
     QWidget *matchesSection() const { return m_matchesSection; }
     QListWidget *matchList() const { return m_matchList; }
     QWidget *articlesSection() const { return m_articlesSection; }
@@ -75,6 +79,9 @@ signals:
     void openRequested(qint64 id);
     void openFileRequested(qint64 id, qint64 fileId);
     void showInFolderRequested(qint64 id);
+
+    // The user wants a summary of this publication from Claude.
+    void summarizeRequested(qint64 publicationId);
 
     // Where a search found something inside a document.
     void openMatchRequested(qint64 publicationId, qint64 fileId, int page, const QString &text);
@@ -118,6 +125,10 @@ private:
     QVBoxLayout *m_tagRows = nullptr;
     QLineEdit *m_tagEdit = nullptr;
     QCheckBox *m_preprint = nullptr;
+    QLabel *m_summaryInfo = nullptr;
+    QPlainTextEdit *m_summaryView = nullptr;
+    QPushButton *m_summarize = nullptr;
+    QPushButton *m_deleteSummary = nullptr;
     QWidget *m_matchesSection = nullptr;
     QListWidget *m_matchList = nullptr;
     QString m_contentsMatch;

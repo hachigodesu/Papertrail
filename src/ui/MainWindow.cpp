@@ -18,7 +18,10 @@
 #include "ui/OnlineLookupDialog.h"
 #include "core/repo/VolumeArticles.h"
 #include "core/query/SearchParser.h"
+#include "metadata/Transport.h"
+#include "ui/ApiKeyStore.h"
 #include "ui/IndexThread.h"
+#include "ui/SummaryDialog.h"
 #include "ui/ReviewTab.h"
 #include "ui/VolumeDialogs.h"
 #include "ui/MetadataEditor.h"
@@ -163,6 +166,8 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_bulk = new BulkChanges(session.paths().database, this);
     m_lookup = new LookupThread(session.paths(), this);
     m_index = new IndexThread(session.paths(), this);
+    m_keys = session.paths().keyStoreFactory ? session.paths().keyStoreFactory() : createSystemKeyStore();
+    m_summaryTransport = session.paths().transportFactory ? session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
 
     const QString sortSetting = session.settings().value(QStringLiteral("library.sort_field")).toString();
     m_sortField = sortFieldFromSetting(sortSetting);
@@ -486,6 +491,7 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::openFileRequested, this, &MainWindow::openPublicationFile);
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
     connect(m_details, &DetailsPanel::openMatchRequested, this, &MainWindow::openAtMatch);
+    connect(m_details, &DetailsPanel::summarizeRequested, this, &MainWindow::showSummaryDialog);
     connect(m_details, &DetailsPanel::articlesFromContentsRequested, this, &MainWindow::showContentsDialog);
     connect(m_details, &DetailsPanel::addArticleRequested, this, &MainWindow::showAddArticleDialog);
     connect(m_details, &DetailsPanel::deleteArticleRequested, this, &MainWindow::askToDeleteArticle);
@@ -579,6 +585,10 @@ void MainWindow::buildMenus()
     file->addAction(tr("Library &folders..."), this, &MainWindow::showFoldersDialog);
     file->addAction(tr("&Scan folders again"), QKeySequence(Qt::Key_F5), this, &MainWindow::rescanAll);
     file->addSeparator();
+    file->addAction(tr("Claude API key..."), this, [this] {
+        ApiKeyDialog dialog(*m_keys, this);
+        dialog.exec();
+    });
     m_indexContents = file->addAction(tr("Index document text"));
     m_indexContents->setCheckable(true);
     m_indexContents->setChecked(m_session.settings().value(QStringLiteral("library.index_contents")).toBool());
@@ -1240,6 +1250,7 @@ void MainWindow::showContextMenu(const QPoint &position)
             menu.addAction(tr("Open in another app"), this, [this, publication] { openPublicationElsewhere(publication); });
             menu.addAction(tr("Show in folder"), this, [this, publication] { showPublicationInFolder(publication); });
             menu.addAction(tr("Edit..."), this, [this, publication] { editPublication(publication); });
+            menu.addAction(tr("Summarize with Claude..."), this, [this, publication] { showSummaryDialog(publication); });
             guarded(tr("Reading the publication"), [&] {
                 const std::optional<Publication> details = m_session.publications().get(publication);
                 if (details && !details->parentId && canHoldArticles(details->type)) {
@@ -1274,6 +1285,14 @@ void MainWindow::showContextMenu(const QPoint &position)
         });
     }
     menu.exec(view->viewport()->mapToGlobal(position));
+}
+
+void MainWindow::showSummaryDialog(qint64 publicationId)
+{
+    SummaryDialog dialog(m_session, *m_keys, *m_summaryTransport, publicationId, this);
+    dialog.exec();
+    if (dialog.kept())
+        m_details->reload();
 }
 
 void MainWindow::showContentsDialog(qint64 volumeId)

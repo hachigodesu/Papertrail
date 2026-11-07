@@ -33,6 +33,7 @@ option(PAPERTRAIL_BUILD_FORMAT_PROBE "Build the document format probe tool" OFF)
 
 include(SQLite)
 include(Mobi)
+include(Keychain)
 
 add_subdirectory(src)
 add_subdirectory(tools/gen_library)

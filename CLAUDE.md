@@ -109,7 +109,8 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 | `papertrail_engine` | MuPDF, DjVuLibre | Opens and renders documents, and extracts their text |
 | `papertrail_import` | core | Scanning, the job queue, metadata extraction and classification, the worker client |
 | `papertrail_metadata` | core, import, Qt Network | Online sources, matching, the lookup engine |
-| `papertrail_ui` | core, import, metadata, Qt Widgets | The library window |
+| `papertrail_summary` | core, metadata | Article summaries from Claude |
+| `papertrail_ui` | core, import, metadata, summary, QtKeychain, Qt Widgets | The library window |
 | `papertrail` | ui | The app |
 | `papertrail-worker` | engine, import | The only part of the app that opens documents |
 
@@ -172,6 +173,10 @@ A reading place belongs to a format, not to a publication. Use `ReadingStateRepo
 Lookups are `job` rows of kind `lookup`, which belong to `LookupRepository` and not `ImportService`. `LookupEngine::decide` holds the table of what each mode does with a result. `plannedChanges` in `Matching.cpp` decides what a result may change: it leaves fields set by hand alone, only fills gaps in DOI, ISBN and abstract, and can never move anything to or from Preprint. Sources can only suggest that (`preprintHint`).
 
 Rate limits differ by source and by kind of request, and OpenAlex's anonymous searches run out at about 100 a day. A 429 blocks that source alone, and the queue only waits when no source could answer. A failure of the network or a source puts the job back without counting it as an attempt.
+
+### Article summaries
+
+`src/summary` builds requests for Claude, reads replies and works out costs (`SummaryRequest`), and drives one summary with `Transport::send` (`SummaryEngine`), carrying on after `pause_turn`. It doesn't use an SDK, since there isn't one for C++. `SummaryDialog` holds the steps. Nothing about a publication goes before the user confirms, and the paper needs a confirmation of its own, so estimates are worked out locally and never by asking Anthropic. The key lives only in `ApiKeyStore` (QtKeychain, built from `cmake/Keychain.cmake`), never in the database or settings, because exports include every setting. `Transport::send` doesn't follow redirects, so a key can't reach another host. Prices are in `knownModels()`: update them and `pricesCheckedOn()` together. Never make a real API call in a test.
 
 ### Highlights and notes
 

@@ -28,6 +28,8 @@ add_library(papertrail_core STATIC
     repo/TagRepository.h
     repo/AnnotationRepository.cpp
     repo/AnnotationRepository.h
+    repo/SummaryRepository.cpp
+    repo/SummaryRepository.h
     repo/FullTextIndex.cpp
     repo/FullTextIndex.h
     repo/VolumeArticles.cpp

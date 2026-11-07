@@ -41,6 +41,7 @@ struct ProviderUrls {
     QString openAlex = QStringLiteral("https://api.openalex.org");
     QString arxiv = QStringLiteral("https://export.arxiv.org");
     QString openLibrary = QStringLiteral("https://openlibrary.org");
+    QString anthropic = QStringLiteral("https://api.anthropic.com"); // Article summaries, and not lookups.
 };
 
 QUrl crossrefWorkUrl(const ProviderUrls &urls, const QString &doi);

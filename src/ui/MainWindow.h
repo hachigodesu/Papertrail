@@ -13,6 +13,7 @@
 #include <QPointer>
 
 #include <functional>
+#include <memory>
 #include <optional>
 
 class QAbstractItemView;
@@ -47,6 +48,7 @@ class LibrarySession;
 class PublicationListModel;
 class LookupThread;
 class ReaderTab;
+class ApiKeyStore;
 class IndexThread;
 class ReviewTab;
 
@@ -121,6 +123,9 @@ public:
     // Changes for everything selected, in the background like the others.
     void addSelectedToCollection(qint64 id);
     void removeSelectedFromCollection(qint64 id);
+
+    // Asks Claude for a summary of this. It shows what will be sent and what it may cost before anything happens.
+    void showSummaryDialog(qint64 publicationId);
 
     // Articles inside a volume. These ask what they need to first.
     void showContentsDialog(qint64 volumeId);
@@ -224,6 +229,8 @@ private:
     LibrarySession &m_session;
     ImportThread *m_import = nullptr;
     IndexThread *m_index = nullptr;
+    std::unique_ptr<ApiKeyStore> m_keys;
+    std::unique_ptr<metadata::Transport> m_summaryTransport;
     QCheckBox *m_searchInside = nullptr;
     QAction *m_indexContents = nullptr;
     QLabel *m_indexLabel = nullptr;
