@@ -19,8 +19,10 @@ jobs:
           # Ubuntu 24.04 stops unprivileged programs making sandboxes, which Flatpak's builder needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get update
-          # flatpak-builder strips programs with eu-strip, from elfutils.
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder appstream desktop-file-utils elfutils
+          # flatpak-builder strips programs with eu-strip, from elfutils, and AppStream's compose step reads the SVG icon
+          # through GDK-Pixbuf's SVG loader, from librsvg2-common, which is only recommended so isn't otherwise installed.
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder appstream desktop-file-utils elfutils \
+              librsvg2-common
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
       - uses: actions/cache@v4
         with:
@@ -33,9 +35,7 @@ jobs:
           desktop-file-validate packaging/linux/io.github.hachigodesu.Papertrail.desktop
       - name: Build
         run: |
-          # GitHub's runners can't use FUSE reliably, which the builder's overlay needs, and reading the AppStream
-          # data through it failed.
-          flatpak-builder --user --install-deps-from=flathub --force-clean --ccache --disable-rofiles-fuse --repo=repo \
+          flatpak-builder --user --install-deps-from=flathub --force-clean --ccache --repo=repo \
               build/flatpak packaging/flatpak/io.github.hachigodesu.Papertrail.yml
           flatpak build-bundle repo Papertrail.flatpak io.github.hachigodesu.Papertrail \
               --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
