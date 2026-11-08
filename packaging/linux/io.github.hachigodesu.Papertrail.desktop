@@ -6,5 +6,5 @@ Comment=Organise and read your journal articles, textbooks, theses and standards
 Exec=papertrail
 Icon=io.github.hachigodesu.Papertrail
 Terminal=false
-Categories=Office;Education;Science;Viewer;
+Categories=Office;Viewer;
 Keywords=library;pdf;epub;journal;paper;thesis;textbook;citation;

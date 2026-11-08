@@ -7,6 +7,7 @@ on:
     branches: ['**'] # Tags go through the release workflow, which runs this itself.
   pull_request:
   workflow_call: # From the release workflow.
+  workflow_dispatch: # By hand, to check the Flatpak alone.
 
 jobs:
   build:
@@ -32,7 +33,9 @@ jobs:
           desktop-file-validate packaging/linux/io.github.hachigodesu.Papertrail.desktop
       - name: Build
         run: |
-          flatpak-builder --user --install-deps-from=flathub --force-clean --ccache --repo=repo \
+          # GitHub's runners can't use FUSE reliably, which the builder's overlay needs, and reading the AppStream
+          # data through it failed.
+          flatpak-builder --user --install-deps-from=flathub --force-clean --ccache --disable-rofiles-fuse --repo=repo \
               build/flatpak packaging/flatpak/io.github.hachigodesu.Papertrail.yml
           flatpak build-bundle repo Papertrail.flatpak io.github.hachigodesu.Papertrail \
               --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
