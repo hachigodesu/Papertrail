@@ -2,7 +2,9 @@ name: AppImage
 
 on:
   push:
+    branches: ['**'] # Tags go through the release workflow, which runs this itself.
   pull_request:
+  workflow_call: # From the release workflow.
 
 jobs:
   # Built on Ubuntu 22.04 (glibc 2.35), the oldest system release AppImages support.

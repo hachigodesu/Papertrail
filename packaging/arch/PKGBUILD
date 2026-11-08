@@ -1,0 +1,62 @@
+# Maintainer: Papertrail contributors
+#
+# Papertrail for Arch, built from a release's source with Arch's own Qt, MuPDF and DjVuLibre. The libraries
+# Papertrail pins and builds itself are listed as sources, so nothing is downloaded during build().
+#
+# For a release, set pkgver and run `updpkgsums`. To try the current checkout instead, see test-pkgbuild.sh.
+
+pkgname=papertrail
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Library manager and reader for academic publications: papers, textbooks, theses and standards"
+arch=('x86_64')
+url="https://github.com/hachigodesu/Papertrail"
+license=('AGPL-3.0-or-later')
+depends=('qt6-base' 'libmupdf' 'djvulibre' 'libsecret' 'zlib' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+        "sqlite-amalgamation-3540100.zip::https://sqlite.org/2026/sqlite-amalgamation-3540100.zip"
+        "libmobi-0.12.tar.gz::https://github.com/bfabiszewski/libmobi/archive/refs/tags/v0.12.tar.gz"
+        "qtkeychain-0.15.0.tar.gz::https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz")
+noextract=("sqlite-amalgamation-3540100.zip")
+sha256sums=('SKIP'
+            '0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9'
+            '78826d161c02ce93ff1cd62838b4d749df754f52185474b82e4093badf4689c1'
+            'f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22')
+
+prepare() {
+    # Where CMake expects each, as if it had fetched them.
+    mkdir -p deps
+    bsdtar -xf sqlite-amalgamation-3540100.zip -C deps
+    rm -rf deps/sqlite deps/libmobi deps/qtkeychain
+    mv deps/sqlite-amalgamation-3540100 deps/sqlite
+    mv libmobi-0.12 deps/libmobi
+    mv qtkeychain-0.15.0 deps/qtkeychain
+    # What cmake/KeychainPatch.cmake does when CMake fetches it: QtKeychain's own tests aren't ours to run.
+    sed -i 's/add_subdirectory(autotest)//' deps/qtkeychain/CMakeLists.txt
+}
+
+build() {
+    cmake -S "Papertrail-$pkgver" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=None \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DBUILD_TESTING=OFF \
+        -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+        -DFETCHCONTENT_SOURCE_DIR_SQLITE="$srcdir/deps/sqlite" \
+        -DFETCHCONTENT_SOURCE_DIR_LIBMOBI="$srcdir/deps/libmobi" \
+        -DFETCHCONTENT_SOURCE_DIR_QTKEYCHAIN="$srcdir/deps/qtkeychain" \
+        -Wno-dev
+    cmake --build build
+}
+
+check() {
+    # Proves the build can open each kind of document through its worker, without a display or a library.
+    QT_QPA_PLATFORM=offscreen ./build/src/app/papertrail --self-test
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    # libmobi and QtKeychain are built into the program, so their licences go with it.
+    install -Dm644 deps/libmobi/COPYING "$pkgdir/usr/share/licenses/$pkgname/libmobi-COPYING"
+    install -Dm644 deps/qtkeychain/COPYING "$pkgdir/usr/share/licenses/$pkgname/qtkeychain-COPYING"
+}

@@ -5,7 +5,10 @@
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
 
+#include <QClipboard>
 #include <QDir>
+#include <QGuiApplication>
+#include <QMessageBox>
 #include <QFileDialog>
 #include <QIcon>
 #include <QInputDialog>
@@ -495,23 +498,41 @@ void ReaderTab::buildSidePanel()
     m_annotationList->setAccessibleName(tr("Highlights and notes"));
     m_annotationList->setWordWrap(true);
     m_annotationList->setContextMenuPolicy(Qt::CustomContextMenu);
+    // Several can be chosen with Ctrl and Shift, or all with Ctrl+A, and changed, copied, exported or deleted together.
+    m_annotationList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     connect(m_annotationList, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) { goToAnnotation(item->data(Qt::UserRole).toLongLong()); });
-    connect(m_annotationList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) { goToAnnotation(item->data(Qt::UserRole).toLongLong()); });
+    connect(m_annotationList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        // Choosing several shouldn't jump about: only a single choice goes there.
+        if (m_annotationList->selectedItems().size() == 1)
+            goToAnnotation(item->data(Qt::UserRole).toLongLong());
+    });
     connect(m_annotationList, &QListWidget::customContextMenuRequested, this, [this](const QPoint &position) {
         QListWidgetItem *item = m_annotationList->itemAt(position);
         if (!item)
             return;
-        const qint64 id = item->data(Qt::UserRole).toLongLong();
+        // Right-clicking one that isn't chosen chooses just it, as file managers do.
+        if (!item->isSelected()) {
+            m_annotationList->clearSelection();
+            item->setSelected(true);
+            m_annotationList->setCurrentItem(item, QItemSelectionModel::NoUpdate);
+        }
         QMenu menu(this);
-        menu.addAction(tr("Edit note..."), this, [this, id] { askToEditNote(id); });
-        addColourMenu(&menu, id);
-        menu.addSeparator();
-        menu.addAction(tr("Delete"), this, [this, id] { deleteAnnotation(id); });
+        addChosenAnnotationActions(&menu);
         menu.exec(m_annotationList->viewport()->mapToGlobal(position));
     });
+    auto *copyChosen = new QAction(tr("Copy"), m_annotationList);
+    copyChosen->setShortcut(QKeySequence::Copy);
+    copyChosen->setShortcutContext(Qt::WidgetShortcut);
+    connect(copyChosen, &QAction::triggered, this, [this] { copyAnnotations(chosenAnnotations()); });
+    m_annotationList->addAction(copyChosen);
+    auto *deleteChosen = new QAction(tr("Delete"), m_annotationList);
+    deleteChosen->setShortcut(QKeySequence::Delete);
+    deleteChosen->setShortcutContext(Qt::WidgetShortcut);
+    connect(deleteChosen, &QAction::triggered, this, [this] { askToDeleteAnnotations(chosenAnnotations()); });
+    m_annotationList->addAction(deleteChosen);
     notes->addWidget(m_annotationList, 1);
     auto *exportButton = new QPushButton(tr("Export to Markdown..."), m_annotationPanel);
-    connect(exportButton, &QPushButton::clicked, this, &ReaderTab::askToExportAnnotations);
+    connect(exportButton, &QPushButton::clicked, this, [this] { askToExportAnnotations(); });
     notes->addWidget(exportButton);
     m_side->addTab(m_annotationPanel, tr("Notes"));
 }
@@ -1013,6 +1034,7 @@ void ReaderTab::refreshAnnotationList()
     };
 
     const QSignalBlocker blocker(m_annotationList);
+    const QList<qint64> chosenBefore = chosenAnnotations();
     m_annotationList->clear();
     for (const Annotation &annotation : std::as_const(m_annotations)) {
         int page = annotation.firstPage();
@@ -1038,6 +1060,11 @@ void ReaderTab::refreshAnnotationList()
     for (const Annotation &annotation : std::as_const(m_annotationsElsewhere)) {
         auto *item = new QListWidgetItem(swatch(annotation.colour), tr("From another copy or format\n") + describe(annotation), m_annotationList);
         item->setData(Qt::UserRole, annotation.id);
+    }
+    for (int row = 0; row < m_annotationList->count(); ++row) {
+        QListWidgetItem *item = m_annotationList->item(row);
+        if (chosenBefore.contains(item->data(Qt::UserRole).toLongLong()))
+            item->setSelected(true);
     }
     if (m_side)
         m_side->setTabText(m_side->indexOf(m_annotationPanel),
@@ -1167,8 +1194,24 @@ void ReaderTab::setAnnotationNote(qint64 id, const QString &note)
 
 void ReaderTab::setAnnotationColour(qint64 id, const QString &colour)
 {
+    setAnnotationsColour({id}, colour);
+}
+
+void ReaderTab::deleteAnnotation(qint64 id)
+{
+    deleteAnnotations({id});
+}
+
+void ReaderTab::setAnnotationsColour(const QList<qint64> &ids, const QString &colour)
+{
+    if (ids.isEmpty())
+        return;
     try {
-        AnnotationRepository(m_session.database()).setColour(id, colour);
+        Transaction transaction(m_session.database());
+        AnnotationRepository annotations(m_session.database());
+        for (const qint64 id : ids)
+            annotations.setColour(id, colour);
+        transaction.commit();
     } catch (const std::exception &error) {
         emit statusMessage(tr("That couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
         return;
@@ -1177,10 +1220,16 @@ void ReaderTab::setAnnotationColour(qint64 id, const QString &colour)
     emit annotationsChanged();
 }
 
-void ReaderTab::deleteAnnotation(qint64 id)
+void ReaderTab::deleteAnnotations(const QList<qint64> &ids)
 {
+    if (ids.isEmpty())
+        return;
     try {
-        AnnotationRepository(m_session.database()).remove(id);
+        Transaction transaction(m_session.database());
+        AnnotationRepository annotations(m_session.database());
+        for (const qint64 id : ids)
+            annotations.remove(id);
+        transaction.commit();
     } catch (const std::exception &error) {
         emit statusMessage(tr("That couldn't be deleted: %1").arg(QString::fromUtf8(error.what())));
         return;
@@ -1189,7 +1238,87 @@ void ReaderTab::deleteAnnotation(qint64 id)
     emit annotationsChanged();
 }
 
-bool ReaderTab::exportAnnotations(const QString &path)
+QList<qint64> ReaderTab::chosenAnnotations() const
+{
+    QList<qint64> ids;
+    for (int row = 0; row < m_annotationList->count(); ++row) {
+        const QListWidgetItem *item = m_annotationList->item(row);
+        if (item->isSelected())
+            ids << item->data(Qt::UserRole).toLongLong();
+    }
+    return ids;
+}
+
+QString ReaderTab::annotationsAsText(const QList<qint64> &ids) const
+{
+    QHash<qint64, const Annotation *> byId;
+    for (const QList<Annotation> *list : {&m_annotations, &m_annotationsElsewhere}) {
+        for (const Annotation &annotation : *list)
+            byId.insert(annotation.id, &annotation);
+    }
+    QStringList parts;
+    for (const qint64 id : ids) {
+        const Annotation *annotation = byId.value(id);
+        if (!annotation)
+            continue;
+        QStringList lines;
+        const QString words = annotation->selectedText().simplified();
+        const int page = annotation->firstPage();
+        if (!words.isEmpty())
+            lines << (page >= 0 ? tr("\u201C%1\u201D (page %2)").arg(words).arg(page + 1) : tr("\u201C%1\u201D").arg(words));
+        else if (page >= 0)
+            lines << tr("Page %1").arg(page + 1);
+        if (!annotation->note.isEmpty())
+            lines << annotation->note;
+        if (!lines.isEmpty())
+            parts << lines.join(u'\n');
+    }
+    return parts.join(QStringLiteral("\n\n"));
+}
+
+void ReaderTab::copyAnnotations(const QList<qint64> &ids) const
+{
+    const QString text = annotationsAsText(ids);
+    if (!text.isEmpty())
+        QGuiApplication::clipboard()->setText(text);
+}
+
+void ReaderTab::askToDeleteAnnotations(const QList<qint64> &ids)
+{
+    if (ids.isEmpty())
+        return;
+    // One at a time goes straight away, as before. Several are asked about, since that's harder to undo by hand.
+    if (ids.size() > 1) {
+        QMessageBox box(QMessageBox::Question, tr("Delete highlights and notes"),
+                        tr("Delete these %1 highlights and notes? This can't be undone.").arg(ids.size()),
+                        QMessageBox::Yes | QMessageBox::Cancel, this);
+        box.setTextFormat(Qt::PlainText);
+        box.setDefaultButton(QMessageBox::Cancel);
+        box.button(QMessageBox::Yes)->setText(tr("Delete %1").arg(ids.size()));
+        if (box.exec() != QMessageBox::Yes)
+            return;
+    }
+    deleteAnnotations(ids);
+}
+
+void ReaderTab::addChosenAnnotationActions(QMenu *menu)
+{
+    const QList<qint64> ids = chosenAnnotations();
+    if (ids.isEmpty())
+        return;
+    if (ids.size() == 1) {
+        const qint64 id = ids.first();
+        menu->addAction(tr("Edit note..."), this, [this, id] { askToEditNote(id); });
+    }
+    addColourMenu(menu, ids);
+    menu->addAction(ids.size() == 1 ? tr("Copy") : tr("Copy %1").arg(ids.size()), this, [this, ids] { copyAnnotations(ids); });
+    menu->addAction(ids.size() == 1 ? tr("Export to Markdown...") : tr("Export %1 to Markdown...").arg(ids.size()), this,
+                    [this, ids] { askToExportAnnotations(ids); });
+    menu->addSeparator();
+    menu->addAction(ids.size() == 1 ? tr("Delete") : tr("Delete %1...").arg(ids.size()), this, [this, ids] { askToDeleteAnnotations(ids); });
+}
+
+bool ReaderTab::exportAnnotations(const QString &path, const QList<qint64> &only)
 {
     try {
         const std::optional<Publication> publication = m_session.publications().get(m_publicationId);
@@ -1197,6 +1326,8 @@ bool ReaderTab::exportAnnotations(const QString &path)
             return false;
         QList<Annotation> all = m_annotations;
         all += m_annotationsElsewhere;
+        if (!only.isEmpty())
+            all.removeIf([&only](const Annotation &annotation) { return !only.contains(annotation.id); });
         QSaveFile file(path);
         if (!file.open(QIODevice::WriteOnly))
             return false;
@@ -1207,7 +1338,7 @@ bool ReaderTab::exportAnnotations(const QString &path)
     }
 }
 
-void ReaderTab::askToExportAnnotations()
+void ReaderTab::askToExportAnnotations(const QList<qint64> &only)
 {
     const std::optional<Publication> publication = m_session.publications().get(m_publicationId);
     QString name = publication ? publication->title.simplified() : tr("Notes");
@@ -1216,7 +1347,7 @@ void ReaderTab::askToExportAnnotations()
                                                       tr("Markdown (*.md)"));
     if (path.isEmpty())
         return;
-    emit statusMessage(exportAnnotations(path) ? tr("Exported to %1").arg(QDir::toNativeSeparators(path)) : tr("That couldn't be saved."));
+    emit statusMessage(exportAnnotations(path, only) ? tr("Exported to %1").arg(QDir::toNativeSeparators(path)) : tr("That couldn't be saved."));
 }
 
 void ReaderTab::askForNoteAndAnnotate()
@@ -1268,13 +1399,26 @@ QStringList ReaderTab::colourNames()
 
 QMenu *ReaderTab::addColourMenu(QMenu *menu, qint64 id)
 {
+    return addColourMenu(menu, QList<qint64>{id});
+}
+
+QMenu *ReaderTab::addColourMenu(QMenu *menu, const QList<qint64> &ids)
+{
+    // Ticked only if every one chosen has it.
     QString current;
+    bool same = true;
     for (const QList<Annotation> *list : {&m_annotations, &m_annotationsElsewhere}) {
         for (const Annotation &annotation : *list) {
-            if (annotation.id == id)
+            if (!ids.contains(annotation.id))
+                continue;
+            if (current.isEmpty())
                 current = annotation.colour;
+            else if (annotation.colour.compare(current, Qt::CaseInsensitive) != 0)
+                same = false;
         }
     }
+    if (!same)
+        current.clear();
 
     QMenu *colours = menu->addMenu(tr("Colour"));
     auto *group = new QActionGroup(colours);
@@ -1283,7 +1427,7 @@ QMenu *ReaderTab::addColourMenu(QMenu *menu, qint64 id)
     for (int i = 0; i < annotationColours().size(); ++i) {
         const QString colour = annotationColours().at(i);
         QAction *action = colours->addAction(colourSwatch(colour), names.at(i), this,
-                                             [this, id, colour] { setAnnotationColour(id, colour); });
+                                             [this, ids, colour] { setAnnotationsColour(ids, colour); });
         action->setCheckable(true);
         action->setChecked(colour.compare(current, Qt::CaseInsensitive) == 0);
         group->addAction(action);

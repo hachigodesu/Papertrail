@@ -49,7 +49,7 @@ Run one test function. On Windows, QtTest prints nothing to the console unless `
 QT_FORCE_STDERR_LOGGING=1 ./build/windows-debug/test_import.exe functionName
 ```
 
-`-functions` lists a program's test functions. Windows executables land in the root of `build/<preset>/`. On Linux they're in `src/app/` (the app and its worker), `tests/` and `tools/<name>/` under the build folder. Don't run `papertrail` itself to test something: it opens the user's real library. Tests and `ui-preview` use their own.
+`-functions` lists a program's test functions. Windows executables land in the root of `build/<preset>/`. On Linux they're in `src/app/` (the app and its worker), `tests/` and `tools/<name>/` under the build folder. Don't run `papertrail` itself to test something: it opens the user's real library. Tests and `ui-preview` use their own, `papertrail --library FOLDER` opens one kept in FOLDER, and `papertrail --self-test` (optionally `--report FILE`) checks a build can read each format through its worker and make a library, in a temporary folder, then exits.
 
 ### Linux (WSL2)
 
@@ -97,7 +97,18 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 - `ui-preview --db X --cache Y --out DIR` saves pictures of the window, for checking how it looks. Use `QT_QPA_PLATFORM=offscreen`, which gives a poor fallback font but no window on the user's screen.
 - `-DPAPERTRAIL_BUILD_FORMAT_PROBE=ON` adds `format-probe`, which tests document formats against the engines.
 - `tests/make_import_samples.py OUTPUT_DIR` generates the documents in `tests/samples/`. They're committed as binary because tests depend on their exact bytes, so don't regenerate them all: write only a new one. The exception is `kf8_frankenstein.azw3`, a real Project Gutenberg book, because nothing here can make a KF8 file. `tests/KindleSamples.h` builds joint and DRM-marked Kindle files from it at test time.
-- `packaging/linux/build-appimage.sh` builds the AppImage, and `smoke-test-appimage.sh` tests it.
+- `packaging/linux/build-appimage.sh` builds the AppImage, and `smoke-test-appimage.sh` tests it, including its self-test.
+
+### Packages and releases
+
+- **Windows:** `packaging/windows/build-package.sh [OUTPUT_DIR]`, run in an MSYS2 UCRT64 login shell (`MSYSTEM=UCRT64 /c/msys64/usr/bin/bash -lc 'cd <repo> && packaging/windows/build-package.sh'`, since the Bash tool's own shell isn't one), with NSIS installed. It deploys Qt with `windeployqt6`, copies every MSYS2 DLL anything needs, collects each one's licence from its MSYS2 package (`packaging/windows/licenses/` holds those MSYS2 lacks), runs the self-test with only Windows' folders on PATH, then makes `Papertrail-<version>-portable.zip` and `Papertrail-<version>-setup.exe` (`papertrail.nsi`). The installer asks for just this user or everyone, and its uninstaller deletes only the files it listed, never the folder wholesale or the library. Secure connections use Qt's Schannel plugin there, not OpenSSL.
+- **Portable:** a `portable.txt` beside the program makes `LibraryPaths::forThisCopy` keep the library in `Papertrail library` beside it.
+- **Flatpak:** `packaging/flatpak/io.github.hachigodesu.Papertrail.yml`, on the KDE 6.12 runtime, with read-only access to the host's files. Flatpak builds can't download, so SQLite, libmobi and QtKeychain are listed as sources and passed as `FETCHCONTENT_SOURCE_DIR_*`: change their versions there, in `packaging/arch/PKGBUILD` and in `cmake/` together.
+- **AUR:** `packaging/arch/PKGBUILD` builds against Arch's own MuPDF and DjVuLibre. `test-pkgbuild.sh` builds it from the checkout.
+- **App id:** `io.github.hachigodesu.Papertrail` names the desktop file, icon and AppStream file in every Linux package, and `setDesktopFileName` uses it.
+- **Icon:** `packaging/make_icons.py` draws the `.ico` and window PNGs from the same shapes as the SVG, with plain Python.
+- **Licences:** every package installs `LICENSE` and `packaging/THIRD-PARTY.md` beside the bundled libraries' own licence texts, and **About** finds them with `MainWindow::licencesFolder`.
+- **CI:** `windows-package.yml` (with a silent install, self-test and uninstall), `flatpak.yml`, `appimage.yml` and `sanitizers.yml` run on every branch push. Pushing a `v*` tag runs `release.yml`, which checks the tag matches `CMakeLists.txt`, the PKGBUILD and the AppStream file, builds everything, and makes a **draft** release with `docs/release-notes.md`. Publishing it is the user's to do.
 
 ## Architecture
 
@@ -123,6 +134,8 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 Parsing unknown files will eventually crash a parser, so it happens in a separate process. `WorkerClient` drives `papertrail-worker` with `QProcess`, using line-delimited JSON over stdin and stdout (ops: `hash`, `inspect`, `pagetext`, `cover`, `markedcopy`), and restarts it after a crash or timeout. A file that keeps failing is listed as unreadable under its file name, so it isn't lost.
 
 This is a real risk: Arch's MuPDF hits a double free on `tests/samples/truncated.pdf`, while Ubuntu's and MSYS2's builds don't. Don't assume a clean Windows run means a file is safe.
+
+`test_damaged_files` damages every sample in many ways and runs each copy through the worker and the reader, which must carry on whatever the file is. `PAPERTRAIL_DAMAGE_ROUNDS` and `PAPERTRAIL_DAMAGE_SEED` make a larger or different run.
 
 `__crash__` and `__hang__` in a file name trigger faults in the worker, only when `PAPERTRAIL_WORKER_TEST_FAULTS` is set. For the reader, so do `__crashpageN__` and `__hangpageN__`, on page N.
 

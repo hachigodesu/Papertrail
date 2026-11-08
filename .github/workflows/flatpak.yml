@@ -1,0 +1,46 @@
+name: Flatpak
+
+# The Flatpak, built from packaging/flatpak with nothing downloaded during the build, then installed and
+# self-tested inside its sandbox.
+on:
+  push:
+    branches: ['**'] # Tags go through the release workflow, which runs this itself.
+  pull_request:
+  workflow_call: # From the release workflow.
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Flatpak
+        run: |
+          # Ubuntu 24.04 stops unprivileged programs making sandboxes, which Flatpak's builder needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder appstream desktop-file-utils
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - uses: actions/cache@v4
+        with:
+          path: .flatpak-builder
+          key: flatpak-builder-${{ hashFiles('packaging/flatpak/*.yml') }}
+          restore-keys: flatpak-builder-
+      - name: Check the metadata
+        run: |
+          appstreamcli validate --no-net packaging/linux/io.github.hachigodesu.Papertrail.metainfo.xml
+          desktop-file-validate packaging/linux/io.github.hachigodesu.Papertrail.desktop
+      - name: Build
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --force-clean --ccache --repo=repo \
+              build/flatpak packaging/flatpak/io.github.hachigodesu.Papertrail.yml
+          flatpak build-bundle repo Papertrail.flatpak io.github.hachigodesu.Papertrail \
+              --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Install and self-test
+        run: |
+          flatpak install --user --noninteractive --bundle Papertrail.flatpak
+          QT_QPA_PLATFORM=offscreen flatpak run --env=QT_QPA_PLATFORM=offscreen io.github.hachigodesu.Papertrail --self-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: Papertrail.flatpak
+          if-no-files-found: error

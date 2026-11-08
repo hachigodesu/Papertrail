@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(Papertrail
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "Library manager and reader for academic publications"
     LANGUAGES C CXX)
 
@@ -28,6 +28,21 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+# Where the source is, which the About box links to, as the AGPL asks of anything distributed.
+set(PAPERTRAIL_SOURCE_URL "https://github.com/hachigodesu/Papertrail")
+add_compile_definitions(PAPERTRAIL_SOURCE_URL="${PAPERTRAIL_SOURCE_URL}")
+
+# Papertrail's licence and a list of what packages bundle, which About can show. Packages add the licence
+# texts of the libraries they bundle beside these.
+install(FILES LICENSE packaging/THIRD-PARTY.md DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/papertrail)
+
+# What Linux desktops and software centres need, named by the app id.
+if(UNIX AND NOT APPLE)
+    install(FILES packaging/linux/io.github.hachigodesu.Papertrail.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES packaging/linux/io.github.hachigodesu.Papertrail.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+    install(FILES packaging/linux/io.github.hachigodesu.Papertrail.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
+endif()
 
 option(PAPERTRAIL_BUILD_FORMAT_PROBE "Build the document format probe tool" OFF)
 

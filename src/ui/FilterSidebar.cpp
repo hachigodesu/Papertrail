@@ -52,7 +52,6 @@ Facet facetFor(FilterSidebar::Section section)
     case FilterSidebar::Journals: return Facet::Journal;
     case FilterSidebar::Publishers: return Facet::Publisher;
     case FilterSidebar::Conferences: return Facet::Conference;
-    case FilterSidebar::Institutions: return Facet::Institution;
     case FilterSidebar::Languages: return Facet::Language;
     case FilterSidebar::Formats: return Facet::Format;
     default: return Facet::ReadStatus;
@@ -224,7 +223,6 @@ void FilterSidebar::buildSections()
     add(Journals, tr("Journal"));
     add(Publishers, tr("Publisher"));
     add(Conferences, tr("Conference"));
-    add(Institutions, tr("Institution"));
     add(Languages, tr("Language"));
     add(Formats, tr("Format"));
     add(ReadStatuses, tr("Read status"));
@@ -249,7 +247,6 @@ void FilterSidebar::applyTo(PublicationFilter &filter) const
     filter.journals = strings(Journals);
     filter.publishers = strings(Publishers);
     filter.conferences = strings(Conferences);
-    filter.institutions = strings(Institutions);
     filter.languages = strings(Languages);
     filter.formats = strings(Formats);
 

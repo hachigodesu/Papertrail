@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- What software centres show about Papertrail. The Flatpak is named by this id. -->
+<component type="desktop-application">
+  <id>io.github.hachigodesu.Papertrail</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>Papertrail</name>
+  <summary>Organise and read your papers, textbooks, theses and standards</summary>
+  <developer id="io.github.hachigodesu">
+    <name>Papertrail contributors</name>
+  </developer>
+  <description>
+    <p>
+      Papertrail is a library manager and reader for university students and researchers. It indexes your
+      journal articles, textbooks, theses, reports and standards where they already are, and never changes them.
+    </p>
+    <ul>
+      <li>Browse, filter, tag and search a library of tens of thousands of publications</li>
+      <li>Read PDF, EPUB, DjVu, MOBI, AZW3, XPS, CBZ and FB2 files in the built-in reader</li>
+      <li>Highlight and take notes as you read, and search them later</li>
+      <li>Fill in details from Crossref, OpenAlex, arXiv and Open Library, if you choose to</li>
+      <li>Split journal issues into their articles, and gather publications into collections</li>
+      <li>Search inside your documents</li>
+      <li>Copy references in Harvard, APA, IEEE or Chicago style, and export BibTeX, RIS or CSL-JSON</li>
+      <li>Move your library to another computer, even with your files in different folders</li>
+      <li>Get summaries from Claude with your own API key, if you choose to</li>
+    </ul>
+    <p>
+      Papertrail stays offline until you choose otherwise, and only ever sends identifiers and titles to look up
+      details, never your files, notes or tags.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.hachigodesu.Papertrail.desktop</launchable>
+  <url type="homepage">https://github.com/hachigodesu/Papertrail</url>
+  <url type="bugtracker">https://github.com/hachigodesu/Papertrail/issues</url>
+  <url type="vcs-browser">https://github.com/hachigodesu/Papertrail</url>
+  <categories>
+    <category>Office</category>
+    <category>Education</category>
+    <category>Science</category>
+  </categories>
+  <keywords>
+    <keyword>library</keyword>
+    <keyword>pdf</keyword>
+    <keyword>epub</keyword>
+    <keyword>djvu</keyword>
+    <keyword>reference manager</keyword>
+    <keyword>citation</keyword>
+  </keywords>
+  <provides>
+    <binary>papertrail</binary>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.0" date="2026-11-09">
+      <description>
+        <p>The first release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

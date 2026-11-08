@@ -1,0 +1,61 @@
+name: Windows package
+
+# The installer and portable zip, built as a release would be, so packaging problems show up before one.
+on:
+  push:
+    branches: ['**'] # Tags go through the release workflow, which runs this itself.
+  pull_request:
+  workflow_call: # From the release workflow.
+
+jobs:
+  package:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-libmupdf
+            mingw-w64-ucrt-x86_64-djvulibre
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-nsis
+            bsdtar
+      # The preset expects MSYS2 at C:/msys64, which the action's isn't, so the package script is told to configure
+      # without it.
+      - run: bash packaging/windows/build-package.sh "$PWD/dist"
+        env:
+          PAPERTRAIL_CONFIGURE_WITHOUT_PRESET: '1'
+      # A silent install for this user, the program's self-test from where it was installed, and a silent uninstall
+      # that must leave nothing behind.
+      - name: Install, test and uninstall
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/Papertrail-*-setup.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP 'Papertrail installed'
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/S', '/CurrentUser', "/D=$dir"
+          if (-not (Test-Path "$dir/papertrail.exe")) { throw 'The installer put nothing in place' }
+          $env:PATH = 'C:\Windows\System32;C:\Windows'
+          $report = Join-Path $env:RUNNER_TEMP 'self-test.txt'
+          $test = Start-Process -Wait -PassThru -FilePath "$dir/papertrail.exe" -ArgumentList '--self-test', '--report', "`"$report`""
+          Get-Content $report
+          if ($test.ExitCode -ne 0) { throw 'The installed program failed its self-test' }
+          Start-Process -Wait -FilePath "$dir/uninstall.exe" -ArgumentList '/S', '/CurrentUser', "_?=$dir"
+          Remove-Item "$dir/uninstall.exe" -ErrorAction SilentlyContinue  # _?= leaves the uninstaller itself.
+          $left = Get-ChildItem -Recurse $dir -ErrorAction SilentlyContinue
+          if ($left) { $left | ForEach-Object { $_.FullName }; throw 'The uninstaller left files behind' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: |
+            dist/Papertrail-*-setup.exe
+            dist/Papertrail-*-portable.zip
+          if-no-files-found: error

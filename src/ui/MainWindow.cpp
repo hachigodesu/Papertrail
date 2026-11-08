@@ -658,6 +658,25 @@ void MainWindow::buildCentre()
     messageColumn->addWidget(m_message);
     m_messageButton = new QPushButton(m_messagePage);
     messageColumn->addWidget(m_messageButton, 0, Qt::AlignCenter);
+    // Only on a library with nothing in it yet: starting from an export, and where the library is kept.
+    m_welcomeImport = new QPushButton(tr("Import a library from another computer..."), m_messagePage);
+    m_welcomeImport->setToolTip(tr("Brings in a .papertrail file exported from Papertrail elsewhere, with its tags, notes and settings."));
+    connect(m_welcomeImport, &QPushButton::clicked, this, [this] { m_transfer->askAndImport([this] { prepareForImport(); }); });
+    messageColumn->addWidget(m_welcomeImport, 0, Qt::AlignCenter);
+    m_welcomePlace = new QLabel(m_messagePage);
+    m_welcomePlace->setTextFormat(Qt::PlainText);
+    m_welcomePlace->setAlignment(Qt::AlignCenter);
+    m_welcomePlace->setWordWrap(true);
+    m_welcomePlace->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    {
+        const QString folder = QDir::toNativeSeparators(QFileInfo(m_session.paths().database).absolutePath());
+        const bool portable = QFileInfo(m_session.paths().database).absolutePath()
+            == QDir(QCoreApplication::applicationDirPath()).filePath(QString::fromLatin1(LibraryPaths::kPortableFolder));
+        m_welcomePlace->setText(portable ? tr("This is a portable copy, so its library is kept beside it, in %1.").arg(folder)
+                                         : tr("Your library is kept in %1.").arg(folder));
+    }
+    messageColumn->addSpacing(12);
+    messageColumn->addWidget(m_welcomePlace);
     messageColumn->addStretch();
     connect(m_messageButton, &QPushButton::clicked, this, [this] {
         if (m_session.files().roots().isEmpty()) {
@@ -1170,16 +1189,19 @@ void MainWindow::updateStack()
         m_stack->setCurrentWidget(activeView());
         return;
     }
+    bool welcome = false;
     if (m_sidebar->onlyCollectionsChosen() && m_search->text().isEmpty() && m_tabs->currentIndex() == 0) {
         m_message->setText(tr("Nothing has been added to this yet.\n\nSelect some publications in the library, "
                               "right-click them and choose Add to collection."));
         m_messageButton->setText(tr("Clear search and filters"));
         m_messageButton->show();
     } else if (m_session.files().roots().isEmpty()) {
-        m_message->setText(tr("Your library is empty.\n\nAdd a folder of papers and books. "
-                              "They stay where they are, and Papertrail never changes them."));
+        m_message->setText(tr("Welcome to Papertrail.\n\nAdd a folder of papers and books to start your library. "
+                              "They stay where they are, and Papertrail never changes them.\n\n"
+                              "Or bring in a library you've exported from Papertrail on another computer."));
         m_messageButton->setText(tr("Add folder..."));
         m_messageButton->show();
+        welcome = true;
     } else if (m_import->isBusy() && !m_sidebar->hasSelection() && m_search->text().isEmpty()) {
         m_message->setText(tr("Importing your files. They'll appear here as they're found."));
         m_messageButton->hide();
@@ -1188,6 +1210,8 @@ void MainWindow::updateStack()
         m_messageButton->setText(tr("Clear search and filters"));
         m_messageButton->show();
     }
+    m_welcomeImport->setVisible(welcome);
+    m_welcomePlace->setVisible(welcome);
     m_stack->setCurrentWidget(m_messagePage);
 }
 
@@ -2729,14 +2753,43 @@ void MainWindow::onImportFinished(const import::ImportReport &report)
     statusBar()->showMessage(tr("Import finished: %1.").arg(parts.join(QStringLiteral(", "))), 15000);
 }
 
+QString MainWindow::licencesFolder()
+{
+    // Beside the program on Windows, and under share in Linux packages, wherever they're installed.
+    const QDir program(QCoreApplication::applicationDirPath());
+    for (const QString &candidate : {QStringLiteral("licenses"), QStringLiteral("../share/licenses/papertrail")}) {
+        const QString folder = QDir::cleanPath(program.filePath(candidate));
+        if (QFileInfo::exists(QDir(folder).filePath(QStringLiteral("THIRD-PARTY.md"))))
+            return folder;
+    }
+    return QString();
+}
+
 void MainWindow::showAbout()
 {
-    QMessageBox::about(this, tr("About Papertrail"),
-                       tr("<h3>Papertrail %1</h3>"
-                          "<p>A library manager and reader for academic publications.</p>"
-                          "<p>Licensed under the GNU Affero General Public License, version 3 or later. "
-                          "It comes with no warranty.</p>")
-                           .arg(QCoreApplication::applicationVersion().toHtmlEscaped()));
+    QMessageBox box(this);
+    box.setWindowTitle(tr("About Papertrail"));
+    box.setIconPixmap(windowIcon().pixmap(64, 64));
+    box.setTextFormat(Qt::RichText);
+    box.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    box.setText(tr("<h3>Papertrail %1</h3>"
+                   "<p>A library manager and reader for academic publications.</p>"
+                   "<p>Free software under the GNU Affero General Public License, version 3 or later. "
+                   "It comes with no warranty. The source code is at <a href=\"%2\">%2</a>.</p>"
+                   "<p>It includes Qt, MuPDF, DjVuLibre, libmobi, SQLite, QtKeychain and zlib, among others, "
+                   "each under its own licence.</p>")
+                    .arg(QCoreApplication::applicationVersion().toHtmlEscaped(), QStringLiteral(PAPERTRAIL_SOURCE_URL)));
+    const QString licences = licencesFolder();
+    QPushButton *show = nullptr;
+    if (!licences.isEmpty())
+        show = box.addButton(tr("Show licences"), QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Close);
+    // Links in the text open in the browser, without closing the box.
+    if (auto *label = box.findChild<QLabel *>(QStringLiteral("qt_msgbox_label")))
+        label->setOpenExternalLinks(true);
+    box.exec();
+    if (show && box.clickedButton() == show)
+        QDesktopServices::openUrl(QUrl::fromLocalFile(licences));
 }
 
 } // namespace papertrail::ui

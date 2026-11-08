@@ -41,6 +41,16 @@ target_compile_definitions(test_import PRIVATE
     PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples")
 add_dependencies(test_import papertrail-worker)
 
+# Every sample, damaged in many ways, through the import's worker and the reader's process.
+qt_add_executable(test_damaged_files test_damaged_files.cpp)
+target_link_libraries(test_damaged_files PRIVATE papertrail_ui Qt6::Test)
+target_compile_definitions(test_damaged_files PRIVATE
+    PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
+    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples")
+add_dependencies(test_damaged_files papertrail-worker)
+add_test(NAME test_damaged_files COMMAND test_damaged_files)
+set_tests_properties(test_damaged_files PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 1200)
+
 qt_add_executable(test_reader test_reader.cpp)
 target_link_libraries(test_reader PRIVATE papertrail_ui Qt6::Test)
 target_compile_definitions(test_reader PRIVATE

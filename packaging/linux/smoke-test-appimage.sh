@@ -14,6 +14,13 @@ export QT_QPA_PLATFORM=offscreen
 grep PRETTY_NAME /etc/os-release
 ldd --version 2>&1 | head -1
 
+# Reads a PDF, an EPUB and a DjVu through the bundled worker, makes and searches a library in a temporary
+# folder, and checks secure connections can be made.
+if ! timeout 120 "$image" --self-test; then
+    echo "FAILED: the self-test"
+    exit 1
+fi
+
 # A GUI app runs until stopped, so being stopped by the timeout (124) is the pass.
 status=0
 timeout 15 "$image" || status=$?

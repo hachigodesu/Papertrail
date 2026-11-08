@@ -28,6 +28,8 @@
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QtTest>
 
 #include <memory>
@@ -475,6 +477,101 @@ private slots:
         QVERIFY(!annotations.get(annotation).has_value());
         QVERIFY(reader->pageView()->marksOn(1).isEmpty());
         QCOMPARE(reader->annotationList()->count(), 0);
+    }
+
+    void severalCanBeChosenAndChangedTogether()
+    {
+        const qint64 id = importSample(QStringLiteral("reader_doc.pdf"));
+        ReaderTab *reader = openReader(id);
+        const auto [page, rect] = findWord(reader, QStringLiteral("findme"));
+        AnnotationRepository annotations(m_session->database());
+        for (const QString &note : {QStringLiteral("First note"), QStringLiteral("Second note"), QStringLiteral("Third note")}) {
+            selectRect(reader, page, rect);
+            QSignalSpy changed(reader, &ReaderTab::annotationsChanged);
+            reader->annotateSelection(AnnotationType::Highlight, note);
+            QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), kLongWaitMs);
+        }
+        QListWidget *list = reader->annotationList();
+        QTRY_COMPARE_WITH_TIMEOUT(list->count(), 3, kLongWaitMs);
+        QCOMPARE(list->selectionMode(), QAbstractItemView::ExtendedSelection);
+
+        // Choose the first and third, by their notes, as Ctrl-clicking would.
+        const auto rowWith = [list](const QString &note) {
+            for (int row = 0; row < list->count(); ++row) {
+                if (list->item(row)->text().contains(note))
+                    return row;
+            }
+            return -1;
+        };
+        const auto idWith = [&](const QString &note) { return list->item(rowWith(note))->data(Qt::UserRole).toLongLong(); };
+        const qint64 first = idWith(QStringLiteral("First note"));
+        const qint64 second = idWith(QStringLiteral("Second note"));
+        const qint64 third = idWith(QStringLiteral("Third note"));
+        list->clearSelection();
+        list->item(rowWith(QStringLiteral("First note")))->setSelected(true);
+        list->item(rowWith(QStringLiteral("Third note")))->setSelected(true);
+        QList<qint64> chosen = reader->chosenAnnotations();
+        std::sort(chosen.begin(), chosen.end());
+        QList<qint64> expected{first, third};
+        std::sort(expected.begin(), expected.end());
+        QCOMPARE(chosen, expected);
+
+        // The menu offers what makes sense for several, and no editing of one note.
+        QMenu menu;
+        reader->addChosenAnnotationActions(&menu);
+        QStringList offered;
+        for (QAction *action : menu.actions())
+            offered << action->text();
+        QVERIFY(!offered.contains(QStringLiteral("Edit note...")));
+        QVERIFY(offered.contains(QStringLiteral("Colour")));
+        QVERIFY(offered.contains(QStringLiteral("Copy 2")));
+        QVERIFY(offered.contains(QStringLiteral("Export 2 to Markdown...")));
+        QVERIFY(offered.contains(QStringLiteral("Delete 2...")));
+
+        // A colour for both, which leaves the other alone and keeps them chosen.
+        const QString before = annotations.get(second)->colour;
+        QMenu *colours = nullptr;
+        for (QAction *action : menu.actions()) {
+            if (action->menu())
+                colours = action->menu();
+        }
+        QVERIFY(colours);
+        colours->actions().at(3)->trigger();
+        QCOMPARE(annotations.get(first)->colour.toLower(), annotationColours().at(3).toLower());
+        QCOMPARE(annotations.get(third)->colour.toLower(), annotationColours().at(3).toLower());
+        QCOMPARE(annotations.get(second)->colour, before);
+        QCOMPARE(reader->chosenAnnotations().size(), 2);
+        QMenu again;
+        reader->addChosenAnnotationActions(&again);
+        for (QAction *action : again.actions()) {
+            if (action->menu())
+                QVERIFY(action->menu()->actions().at(3)->isChecked());
+        }
+
+        // Copying and exporting take only the chosen ones.
+        const QString text = reader->annotationsAsText(reader->chosenAnnotations());
+        QVERIFY(text.contains(QStringLiteral("First note")));
+        QVERIFY(text.contains(QStringLiteral("Third note")));
+        QVERIFY(!text.contains(QStringLiteral("Second note")));
+        QVERIFY(text.contains(QStringLiteral("findme")));
+        reader->copyAnnotations(reader->chosenAnnotations());
+        QCOMPARE(QGuiApplication::clipboard()->text(), text);
+        const QString out = m_dir->filePath(QStringLiteral("chosen.md"));
+        QVERIFY(reader->exportAnnotations(out, reader->chosenAnnotations()));
+        QFile file(out);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QString exported = QString::fromUtf8(file.readAll());
+        QVERIFY(exported.contains(QStringLiteral("First note")));
+        QVERIFY(exported.contains(QStringLiteral("Third note")));
+        QVERIFY(!exported.contains(QStringLiteral("Second note")));
+
+        // And deleting them leaves the other.
+        reader->deleteAnnotations(reader->chosenAnnotations());
+        QVERIFY(!annotations.get(first).has_value());
+        QVERIFY(!annotations.get(third).has_value());
+        QVERIFY(annotations.get(second).has_value());
+        QCOMPARE(list->count(), 1);
+        QVERIFY(list->item(0)->text().contains(QStringLiteral("Second note")));
     }
 
     void exportingToMarkdownWritesTheChosenFileOnly()

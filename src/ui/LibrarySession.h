@@ -44,6 +44,13 @@ struct LibraryPaths {
 
     // The user's own library, using the standard folders for this platform.
     static LibraryPaths standard();
+    // A library kept in one folder, with its cache inside it.
+    static LibraryPaths inFolder(const QString &folder);
+    // A portable copy, with a file named portable.txt beside the program, keeps its library in a folder beside it,
+    // so it can be carried on a USB stick. Any other copy uses the standard folders.
+    static LibraryPaths forThisCopy();
+    static constexpr const char *kPortableMarker = "portable.txt";
+    static constexpr const char *kPortableFolder = "Papertrail library";
 };
 
 // Thrown when another copy of Papertrail already has this library open.

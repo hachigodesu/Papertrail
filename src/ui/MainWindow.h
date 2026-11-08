@@ -191,6 +191,9 @@ public:
     // Summaries on their way, to review, and what they've cost, opened at one publication's if it's given.
     void showSummariesDialog(std::optional<qint64> publicationId = std::nullopt);
     QPushButton *summaryStatusButton() const { return m_summaryStatus; }
+    // What an empty library says, for tests.
+    QPushButton *welcomeImportButton() const { return m_welcomeImport; }
+    QLabel *welcomePlaceLabel() const { return m_welcomePlace; }
 
     // Every highlight and note in the library, each opening its document there.
     void showNotesDialog();
@@ -286,6 +289,8 @@ public:
 
 private:
     void showAbout();
+    // Where the licence texts of everything bundled were installed, or nothing in a build that isn't installed.
+    static QString licencesFolder();
     void showLookupSettings();
     void askAndLookUpLibrary();
     void askAndLookUpSelected();
@@ -357,6 +362,8 @@ private:
     QWidget *m_messagePage = nullptr;
     QLabel *m_message = nullptr;
     QPushButton *m_messageButton = nullptr;
+    QPushButton *m_welcomeImport = nullptr;
+    QLabel *m_welcomePlace = nullptr;
     DetailsPanel *m_details = nullptr;
     QItemSelectionModel *m_selection = nullptr;
 

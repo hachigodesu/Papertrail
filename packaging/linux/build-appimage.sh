@@ -46,8 +46,8 @@ com_err="$(ldconfig -p | awk '/libcom_err\.so\.2 / {print $NF; exit}')"
 cd "$work"
 linuxdeploy-x86_64.AppImage \
     --appdir "$work/AppDir" \
-    --desktop-file "$src/packaging/linux/papertrail.desktop" \
-    --icon-file "$src/packaging/linux/papertrail.svg" \
+    --desktop-file "$src/packaging/linux/io.github.hachigodesu.Papertrail.desktop" \
+    --icon-file "$src/packaging/linux/io.github.hachigodesu.Papertrail.svg" \
     --executable "$work/AppDir/usr/bin/papertrail" \
     --executable "$work/AppDir/usr/bin/papertrail-worker" \
     --library "$com_err" \

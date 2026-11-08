@@ -1,0 +1,96 @@
+# Papertrail as a Flatpak, for distros the AppImage doesn't reach and for anyone who prefers one.
+#
+# Build and install it from the repository's root with:
+#   flatpak-builder --user --install --force-clean --install-deps-from=flathub \
+#       build/flatpak packaging/flatpak/io.github.hachigodesu.Papertrail.yml
+#
+# Nothing is downloaded while building, so every library's source is listed here, pinned to the same versions
+# and hashes as the other builds use.
+id: io.github.hachigodesu.Papertrail
+runtime: org.kde.Platform
+runtime-version: '6.12'
+sdk: org.kde.Sdk
+command: papertrail
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Online lookups and summaries, only when the user turns them on.
+  - --share=network
+  # Papertrail indexes papers and books wherever they already are, so it needs to read every folder the user
+  # might add. Read-only, since it never changes them: exports and highlighted copies are saved through the
+  # desktop's own file chooser.
+  - --filesystem=host:ro
+  # The Claude API key is kept in the desktop's keyring.
+  - --talk-name=org.freedesktop.secrets
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - '*.a'
+  - /share/man
+
+modules:
+  - name: mupdf
+    buildsystem: simple
+    build-commands:
+      - make -j"$FLATPAK_BUILDER_N_JOBS" build=release shared=yes prefix=/app HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no
+        HAVE_LEPTONICA=no HAVE_TESSERACT=no libs
+      - make build=release shared=yes prefix=/app HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_LEPTONICA=no
+        HAVE_TESSERACT=no install-libs
+      - install -Dm644 COPYING /app/share/licenses/mupdf/COPYING
+    sources:
+      - type: archive
+        url: https://casper.mupdf.com/downloads/archive/mupdf-1.28.5-source.tar.gz
+        sha256: 98a5c10cda20c3992cdf76ff6b2a1149c32bd79cc796d3f703230b1185b7e934
+
+  - name: djvulibre
+    config-opts:
+      - --disable-desktopfiles
+    sources:
+      - type: archive
+        url: https://downloads.sourceforge.net/project/djvu/DjVuLibre/3.5.30/djvulibre-3.5.30.tar.gz
+        sha256: ee5e457d4cfebe566f94b99e5e3d3cc7f5c79ddb741c2ac2ba2e456f00329644
+    post-install:
+      - install -Dm644 COPYING /app/share/licenses/djvulibre/COPYING
+    cleanup:
+      - /bin
+      - /share/djvu
+
+  - name: papertrail
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_TESTING=OFF
+      # The libraries CMake would otherwise download, from the sources below.
+      - -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+      - -DFETCHCONTENT_SOURCE_DIR_SQLITE=/run/build/papertrail/deps/sqlite
+      - -DFETCHCONTENT_SOURCE_DIR_LIBMOBI=/run/build/papertrail/deps/libmobi
+      - -DFETCHCONTENT_SOURCE_DIR_QTKEYCHAIN=/run/build/papertrail/deps/qtkeychain
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - build
+          - .git
+      - type: archive
+        url: https://sqlite.org/2026/sqlite-amalgamation-3540100.zip
+        sha256: 0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9
+        dest: deps/sqlite
+      - type: archive
+        url: https://github.com/bfabiszewski/libmobi/archive/refs/tags/v0.12.tar.gz
+        sha256: 78826d161c02ce93ff1cd62838b4d749df754f52185474b82e4093badf4689c1
+        dest: deps/libmobi
+      - type: archive
+        url: https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz
+        sha256: f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22
+        dest: deps/qtkeychain
+      # What cmake/KeychainPatch.cmake does when CMake fetches it: QtKeychain's own tests aren't ours to run.
+      - type: shell
+        commands:
+          - sed -i 's/add_subdirectory(autotest)//' deps/qtkeychain/CMakeLists.txt
+    post-install:
+      - install -Dm644 /run/build/papertrail/deps/libmobi/COPYING /app/share/licenses/libmobi/COPYING
+      - install -Dm644 /run/build/papertrail/deps/qtkeychain/COPYING /app/share/licenses/qtkeychain/COPYING

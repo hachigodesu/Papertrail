@@ -1,0 +1,31 @@
+name: Sanitizers
+
+# Every test, with AddressSanitizer and UndefinedBehaviorSanitizer built into Papertrail's own code, so memory
+# errors and undefined behaviour fail the run rather than going unnoticed. The libraries it uses aren't built with
+# them, so a parser's own faults, which the worker exists to contain, still show as the worker crashing.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - run: pacman -Syu --noconfirm base-devel cmake git ninja qt6-base libmupdf djvulibre libsecret zlib
+      - uses: actions/checkout@v4
+      - run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+      - run: cmake --build build
+      # Leaks in Qt's and fontconfig's own start-up aren't Papertrail's, so only errors count. The tests that
+      # crash or hang the worker on purpose still pass, since that's what they check is survived.
+      - run: ctest --test-dir build -LE perf --output-on-failure --timeout 1800
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1

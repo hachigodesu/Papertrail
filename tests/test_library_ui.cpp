@@ -235,6 +235,11 @@ private slots:
         QTreeWidgetItem *hooke = authorItem(QStringLiteral("Hooke"));
         QCOMPARE(hooke->text(1), QStringLiteral("2"));
 
+        // Institutions aren't a filter: they only mean something for theses, and the search box can find them.
+        QTreeWidget *tree = m_window->sidebar()->tree();
+        for (int i = 0; i < tree->topLevelItemCount(); ++i)
+            QVERIFY(tree->topLevelItem(i)->text(0) != QStringLiteral("Institution"));
+
         hooke->setCheckState(0, Qt::Checked);
         QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
 
@@ -279,6 +284,12 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(m_window->model()->hasResults(), kLongWaitMs);
         QVERIFY(!qobject_cast<QAbstractItemView *>(m_window->viewStack()->currentWidget()));
 
+        // A new library is welcomed: a folder to add, or a library from another computer, and where it's kept.
+        QVERIFY(m_window->welcomeImportButton()->isVisibleTo(m_window.get()));
+        QVERIFY(m_window->welcomePlaceLabel()->isVisibleTo(m_window.get()));
+        QVERIFY(m_window->welcomePlaceLabel()->text().contains(
+            QDir::toNativeSeparators(QFileInfo(m_session->paths().database).absolutePath())));
+
         addPublication(QStringLiteral("One"), PublicationType::JournalArticle);
         m_window->applyFiltersNow();
         QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
@@ -287,6 +298,17 @@ private slots:
         m_window->searchBox()->setText(QStringLiteral("nothingmatchesthisword"));
         QTRY_COMPARE_WITH_TIMEOUT(rows(), 0, kLongWaitMs);
         QVERIFY(!qobject_cast<QAbstractItemView *>(m_window->viewStack()->currentWidget()));
+    }
+
+    void aLibraryCanBeKeptInAFolderOfItsOwn()
+    {
+        const LibraryPaths paths = LibraryPaths::inFolder(m_dir->filePath(QStringLiteral("carried/../elsewhere")));
+        QCOMPARE(QFileInfo(paths.database).fileName(), QStringLiteral("library.db"));
+        QCOMPARE(QFileInfo(paths.database).absolutePath(), QDir::cleanPath(m_dir->filePath(QStringLiteral("elsewhere"))));
+        QCOMPARE(paths.cacheDirectory, QDir::cleanPath(m_dir->filePath(QStringLiteral("elsewhere/cache"))));
+        QVERIFY(QFileInfo(paths.workerPath).fileName().startsWith(QStringLiteral("papertrail-worker")));
+        // Without the portable marker beside the program, which tests never have, the standard folders are used.
+        QCOMPARE(LibraryPaths::forThisCopy().database, LibraryPaths::standard().database);
     }
 
     // ---- Selection and changes ----

@@ -13,19 +13,46 @@
 
 namespace papertrail::ui {
 
+namespace {
+
+QString installedWorker()
+{
+#ifdef Q_OS_WIN
+    const QString workerName = QStringLiteral("papertrail-worker.exe");
+#else
+    const QString workerName = QStringLiteral("papertrail-worker");
+#endif
+    return QDir(QCoreApplication::applicationDirPath()).filePath(workerName);
+}
+
+} // namespace
+
 LibraryPaths LibraryPaths::standard()
 {
     LibraryPaths paths;
     paths.database = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
                          .filePath(QStringLiteral("library.db"));
     paths.cacheDirectory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-#ifdef Q_OS_WIN
-    const QString workerName = QStringLiteral("papertrail-worker.exe");
-#else
-    const QString workerName = QStringLiteral("papertrail-worker");
-#endif
-    paths.workerPath = QDir(QCoreApplication::applicationDirPath()).filePath(workerName);
+    paths.workerPath = installedWorker();
     return paths;
+}
+
+LibraryPaths LibraryPaths::inFolder(const QString &folder)
+{
+    LibraryPaths paths;
+    const QDir dir(QDir::cleanPath(QDir(folder).absolutePath()));
+    paths.database = dir.filePath(QStringLiteral("library.db"));
+    paths.cacheDirectory = dir.filePath(QStringLiteral("cache"));
+    paths.workerPath = installedWorker();
+    return paths;
+}
+
+LibraryPaths LibraryPaths::forThisCopy()
+{
+    const QDir program(QCoreApplication::applicationDirPath());
+    if (QFileInfo::exists(program.filePath(QString::fromLatin1(kPortableMarker))))
+        return inFolder(program.filePath(QString::fromLatin1(kPortableFolder)));
+    return standard();
 }
 
 LibrarySession::LibrarySession(const LibraryPaths &paths)

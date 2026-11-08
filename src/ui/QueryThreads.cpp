@@ -151,9 +151,8 @@ void SidebarQueryThread::run()
         openError = QString::fromUtf8(error.what());
     }
 
-    static const QList<Facet> facets = {Facet::Author,      Facet::Journal,  Facet::Publisher,
-                                        Facet::Conference,  Facet::Institution, Facet::Language,
-                                        Facet::Format,      Facet::ReadStatus};
+    static const QList<Facet> facets = {Facet::Author,     Facet::Journal,  Facet::Publisher, Facet::Conference,
+                                        Facet::Language,   Facet::Format,   Facet::ReadStatus};
 
     while (true) {
         SidebarData data;

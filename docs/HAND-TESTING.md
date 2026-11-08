@@ -1,83 +1,61 @@
-# Testing M11.5 by hand
+# Testing M12 by hand
 
-M11.5 was built and tested automatically on Windows, Arch and Ubuntu, with nobody using it. This list is what only a person can check, most important first. Details are in `docs/M11.5-results.md`.
+M12 makes Papertrail into packages you can install. These were built and tested automatically, but nobody has installed them by hand yet. This list covers Windows. [LINUX-CHECKLIST.md](LINUX-CHECKLIST.md) covers your Linux machine.
 
-Nothing from M11.5 is committed yet.
+Nothing from M12 is committed yet.
 
 ## Before you start
 
-Close Papertrail if it's open, then build it with the Bash shell:
+Close Papertrail if it's open. The packages are in `build/package-output`:
 
-```bash
-export PATH="/c/msys64/ucrt64/bin:$PATH"
-```
+- `Papertrail-1.0.0-setup.exe`
+- `Papertrail-1.0.0-portable.zip`
 
-```bash
-cmake --build --preset windows-debug -j 8
-```
+The installed copy opens the same library as the one you've been testing with, in `%APPDATA%\Papertrail`, so nothing needs moving. It doesn't change the library's layout, so the build you've been using can still open it afterwards.
 
-```bash
-tools/windows/run-debug.cmd
-```
+## 1. Installing just for you
 
-**Opening your library with this build upgrades it** (tables for removed files, nested collections, searching notes, retraction notices and batches). It makes a backup first, in a `backups` folder beside the library, so you have a way back without copying it yourself.
+1. Open `Papertrail-1.0.0-setup.exe`. Windows will probably say "Windows protected your PC", since it isn't signed: choose **More info**, then **Run anyway**. Note whether it does.
+2. Read each page: the welcome, the licence (which you don't have to accept), and the choice of **Only for me** or **Anyone who uses this computer**. Choose **Only for me**. It shouldn't ask for administrator rights.
+3. Leave the folder as suggested, tick **Desktop shortcut** if you'd like one, and install.
+4. Leave **Open Papertrail** ticked and finish. Your library should open as usual.
+5. Check the icon in the taskbar, the Start menu entry, and **Help > About Papertrail**, which should say 1.0.0, link to the source, and open a folder of licences with **Show licences**.
+6. Open a few documents of different kinds, and look something up online if you use that.
 
-## 1. Backups
+## 2. Uninstalling
 
-1. After opening, check **File > Backups...** lists a backup from before the upgrade, and a daily one about 10 seconds later.
-2. Choose **Back up now**, change a publication's title, then restore that backup. The title should go back, and a "Before a backup was restored" one should appear, which undoes it if restored.
-3. Untick the daily backups, and tick them again.
+1. Open **Settings > Apps**, find Papertrail, and uninstall it. Read what it says will be kept.
+2. Check the Start menu entry has gone, and that `%LOCALAPPDATA%\Programs\Papertrail` is gone or empty.
+3. Check your library is still there by opening it with the build you've been using (`tools/windows/run-debug.cmd`).
 
-## 2. Removing publications
+## 3. Installing for everyone
 
-1. Choose a publication and press **Delete**. Read the question, and remove it.
-2. Choose **Scan again** in **Library folders**. It shouldn't come back.
-3. In **Library folders**, choose **Bring back...**, bring it back, and check it returns after the scan.
+1. Run the installer again and choose **Anyone who uses this computer**. It should ask for administrator rights, and suggest `C:\Program Files\Papertrail`.
+2. Check it opens your library as before.
+3. Uninstall it again from **Settings > Apps**.
 
-## 3. Dragging, and collections inside collections
+## 4. The portable zip
 
-1. Choose several covers, then press on one of them and drag onto a collection in the sidebar. Then onto a tag.
-2. Check that pressing on a cover that isn't chosen and dragging still chooses, including a short last row.
-3. Right-click a collection, make one inside it, and use **Move...**. Choosing the outer one should show what's in both.
-4. Add an issue with articles to a collection, and check its articles are in it too.
+1. Unzip it somewhere, such as your desktop or a USB stick, and open `papertrail.exe` inside.
+2. It should start with the welcome page and an empty library, since it keeps its own in `Papertrail library` beside it. The welcome page says so.
+3. Add a small folder, close it, open it again, and check it remembered. Then delete the unzipped folder.
 
-## 4. Highlights and notes
+## 5. The welcome page
 
-1. Search `note:` and a word from one of your highlights or notes, then the word on its own.
-2. Open **View > Highlights and notes...** (Ctrl+Shift+N), search it, and open one. It should go to its page.
+With the portable copy, before adding anything, check the welcome page reads well. Its **Import a library from another computer...** button should ask for a `.papertrail` file.
 
-## 5. Retractions
+## 6. Several notes at once
 
-With online lookups on, leave Papertrail open for a few minutes. If anything in your library has been retracted, **Retracted or of concern** appears in the filters, and its details say so near the top. If nothing has, that's the expected result. **File > Online lookups...** has the setting to turn checking off.
-
-## 6. An issue without contents
-
-If you have an issue with no table of contents, choose **Create articles from contents...** on it. Check what it proposes: the titles, the page ranges, and that the issue's own pages aren't offered as articles. Nothing is made until you choose to.
-
-## 7. A copy with highlights
-
-Right-click a PDF you've highlighted, choose **Save a copy with highlights...**, and open the copy in another PDF reader, such as a web browser or Acrobat. Check the highlights, underlines and notes are where they should be, and that the original is unchanged.
-
-## 8. Summaries at half price
-
-This costs a little, so only if you're willing:
-
-1. Choose two publications, one with a summary already, and choose **Summarize 2 later at half price...**. Read the dialog and its estimate, and send.
-2. Check the details panel says the summary is on its way, and the status bar says how many. Click either to open **Summaries from Claude**.
-3. Close Papertrail for a while, then open it again. Within the hour, usually, the status bar should say a summary is waiting to be reviewed.
-4. Review it under **To review**, and keep it. It should then be in the details panel.
-5. Check **Spending** shows what it cost, along with any summary you asked for straight away.
-
-The batch you sent before this change carries over. If it hadn't arrived, it's listed as on its way. If it had, it's already the publication's summary.
+In the build you've been using, open a publication with a few highlights, and open **Notes** in the reader's side panel. Choose several with Ctrl-click, Shift-click or Ctrl+A, then right-click them: change their colour, copy them and paste somewhere, export them, and delete them. Deleting several asks first.
 
 ## Things I decided that you may want to change
 
-- **Batches never send the paper,** only identifying details, since sending a paper needs its own confirmation.
-- **Retraction checks are on by default** when lookups are online.
-- **Collection names are unique across the library,** not just among those in the same collection.
-- **The suggested place for a highlighted copy is Documents,** since a copy in a library folder would be added as a publication of its own.
-- **Deleting a collection deletes the ones inside it,** as with tags.
+- **The icon is still the placeholder** stack of pages from M0. A designed one can replace it: `packaging/make_icons.py` draws the Windows and window sizes from simple shapes, so a new design would need an SVG and new PNG and ICO files.
+- **The installer's licence page** shows the AGPL with a **Next** button, not "I agree", since free software licences don't need accepting.
+- **The portable copy keeps its library beside itself,** which is what "portable" usually means, so it doesn't share your installed library.
+- **Uninstalling keeps your library,** notes, highlights and backups, as most apps do. Delete `%APPDATA%\Papertrail` by hand to remove them.
+- **Deleting one highlight from the Notes list still goes straight away,** as before, and only several are asked about.
 
 ## When it looks right
 
-Tell me, and I'll commit M11.5 as one signed commit, and push when you say.
+Tell me, along with what you found on Linux, and I'll commit M12. Pushing a `v1.0.0` tag then makes a draft release on GitHub with every package, which stays private until you publish it.

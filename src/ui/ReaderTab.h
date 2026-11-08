@@ -97,8 +97,19 @@ public:
     void setAnnotationNote(qint64 id, const QString &note);
     void setAnnotationColour(qint64 id, const QString &colour);
     void deleteAnnotation(qint64 id);
-    bool exportAnnotations(const QString &path);
+    // `only`, if given, limits it to those highlights and notes.
+    bool exportAnnotations(const QString &path, const QList<qint64> &only = {});
     QListWidget *annotationList() const { return m_annotationList; }
+
+    // Several chosen in the Notes list at once. Each change is made in one go, and the choice is kept afterwards.
+    QList<qint64> chosenAnnotations() const; // In the list's order.
+    void setAnnotationsColour(const QList<qint64> &ids, const QString &colour);
+    void deleteAnnotations(const QList<qint64> &ids);
+    // Their words and notes as plain text, in the list's order, as copying puts them on the clipboard.
+    QString annotationsAsText(const QList<qint64> &ids) const;
+    void copyAnnotations(const QList<qint64> &ids) const;
+    // What right-clicking the Notes list offers for what's chosen there.
+    void addChosenAnnotationActions(QMenu *menu);
     QList<int> markedPages() const;
 
 signals:
@@ -153,7 +164,9 @@ public:
 private:
     void askForNoteAndAnnotate();
     void askToEditNote(qint64 id);
-    void askToExportAnnotations();
+    void askToExportAnnotations(const QList<qint64> &only = {});
+    void askToDeleteAnnotations(const QList<qint64> &ids);
+    QMenu *addColourMenu(QMenu *menu, const QList<qint64> &ids);
 
     std::optional<std::pair<int, QString>> m_pendingMatch;
     std::optional<qint64> m_pendingAnnotation;

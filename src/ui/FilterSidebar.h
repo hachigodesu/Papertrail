@@ -36,7 +36,6 @@ public:
         Journals,
         Publishers,
         Conferences,
-        Institutions,
         Languages,
         Formats,
         ReadStatuses,
