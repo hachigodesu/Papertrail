@@ -2,9 +2,13 @@
 
 #include "core/repo/CollectionRepository.h"
 #include "core/repo/TagRepository.h"
+#include "ui/GridView.h"
 #include "ui/Labels.h"
 
 #include <QColorDialog>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -39,6 +43,7 @@ const QLatin1StringView kFlagNoText("no_text");
 const QLatin1StringView kFlagNoFile("no_file");
 const QLatin1StringView kFlagMissing("missing");
 const QLatin1StringView kFlagUnreadable("unreadable");
+const QLatin1StringView kFlagRetracted("retracted");
 
 Facet facetFor(FilterSidebar::Section section)
 {
@@ -187,6 +192,9 @@ FilterSidebar::FilterSidebar(TagRepository &tags, CollectionRepository &collecti
     m_tree->setSelectionMode(QAbstractItemView::NoSelection);
     m_tree->setUniformRowHeights(true);
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    // Publications dragged from the library can be dropped on a collection or tag.
+    m_tree->viewport()->setAcceptDrops(true);
+    m_tree->viewport()->installEventFilter(this);
     m_tree->setAccessibleName(tr("Filters"));
     auto *checks = new VisibleChecksStyle;
     checks->setParent(m_tree);
@@ -257,6 +265,7 @@ void FilterSidebar::applyTo(PublicationFilter &filter) const
     filter.noFile = flags.contains(kFlagNoFile);
     filter.missingOrOffline = flags.contains(kFlagMissing);
     filter.unreadable = flags.contains(kFlagUnreadable);
+    filter.retracted = flags.contains(kFlagRetracted);
 
     filter.yearMin = m_yearFrom->text().isEmpty() ? std::nullopt : std::optional<int>(m_yearFrom->text().toInt());
     filter.yearMax = m_yearTo->text().isEmpty() ? std::nullopt : std::optional<int>(m_yearTo->text().toInt());
@@ -376,7 +385,7 @@ void FilterSidebar::setData(const SidebarData &data)
         updateTags(data.tags);
 
         QSet<QString> collections;
-        for (const FacetValue &collection : data.collections)
+        for (const CollectionCount &collection : data.collections)
             collections.insert(collection.key);
         for (const QString &key : QSet<QString>(m_chosen[Collections])) {
             if (!collections.contains(key)) {
@@ -392,6 +401,7 @@ void FilterSidebar::setData(const SidebarData &data)
         updateFlag(kFlagNoFile, tr("No file linked"), data.flags.noFile);
         updateFlag(kFlagMissing, tr("Missing or offline"), data.flags.missingOrOffline);
         updateFlag(kFlagUnreadable, tr("Can't be read"), data.flags.unreadable);
+        updateFlag(kFlagRetracted, tr("Retracted or of concern"), data.flags.retracted);
         bool anyFlag = false;
         for (int i = 0; i < m_sections[Status]->childCount(); ++i)
             anyFlag = anyFlag || !m_sections[Status]->child(i)->isHidden();
@@ -462,83 +472,149 @@ void FilterSidebar::updateFacet(Section section, const QList<FacetValue> &values
     node->setHidden(rows.isEmpty());
 }
 
-void FilterSidebar::updateCollections(const QList<FacetValue> &collections)
+void FilterSidebar::updateCollections(const QList<CollectionCount> &collections)
 {
-    updateFacet(Collections, collections);
-    QTreeWidgetItem *node = m_sections[Collections];
-    if (node->childCount() == 0) {
-        auto *hint = new QTreeWidgetItem(node, {tr("Collections you add appear here.")});
-        hint->setFlags(Qt::ItemIsEnabled);
-        hint->setData(0, kSectionRole, kNoSection);
-        hint->setForeground(0, palette().color(QPalette::PlaceholderText));
-    }
-    node->setHidden(false); // It's how anyone finds out about them.
+    QList<TreeValue> values;
+    for (const CollectionCount &collection : collections)
+        values << TreeValue{collection.key.toLongLong(), collection.label, collection.parentId, std::nullopt, collection.count};
+    updateTree(Collections, values, m_collectionSignature, tr("Collections you add appear here."));
+    m_sections[Collections]->setHidden(false); // It's how anyone finds out about them.
 }
 
 void FilterSidebar::updateTags(const QList<TagCount> &tags)
 {
-    QTreeWidgetItem *node = m_sections[Tags];
+    QList<TreeValue> values;
+    for (const TagCount &tag : tags)
+        values << TreeValue{tag.tagId, tag.name, tag.parentId, tag.colour, tag.count};
+    updateTree(Tags, values, m_tagSignature, tr("Tags you add appear here."));
+}
 
-    QString signature = QStringLiteral("tags\n");
-    for (const TagCount &tag : tags) {
-        signature += QStringLiteral("%1|%2|%3|%4\n")
-                         .arg(tag.tagId)
-                         .arg(tag.name)
-                         .arg(tag.parentId.value_or(0))
-                         .arg(tag.colour);
+void FilterSidebar::updateTree(Section section, const QList<TreeValue> &values, QString &signature, const QString &hint)
+{
+    QTreeWidgetItem *node = m_sections[section];
+
+    QString now = QString::number(int(section)) + u'\n';
+    for (const TreeValue &value : values) {
+        now += QStringLiteral("%1|%2|%3|%4\n")
+                   .arg(value.id)
+                   .arg(value.name)
+                   .arg(value.parentId.value_or(0))
+                   .arg(value.colour.value_or(QString()));
     }
 
-    QHash<qint64, QTreeWidgetItem *> items;
-    if (signature != m_tagSignature) {
-        m_tagSignature = signature;
+    // Everything under the section, at any depth. Its hint, when there is one, is all it holds.
+    const auto inSection = [node, section]() {
+        QList<QTreeWidgetItem *> found;
+        QList<QTreeWidgetItem *> waiting = {node};
+        while (!waiting.isEmpty()) {
+            QTreeWidgetItem *item = waiting.takeFirst();
+            for (int i = 0; i < item->childCount(); ++i) {
+                QTreeWidgetItem *child = item->child(i);
+                if (child->data(0, kSectionRole).toInt() == int(section)) {
+                    found << child;
+                    waiting << child;
+                }
+            }
+        }
+        return found;
+    };
 
+    QHash<qint64, QTreeWidgetItem *> items;
+    if (now != signature) {
+        signature = now;
         QSet<QString> expanded;
-        QTreeWidgetItemIterator it(node);
-        while (*it && (*it == node || (*it)->data(0, kSectionRole).toInt() == Tags)) {
-            if (*it != node && (*it)->isExpanded())
-                expanded.insert((*it)->data(0, kKeyRole).toString());
-            ++it;
+        for (const QTreeWidgetItem *item : inSection()) {
+            if (item->isExpanded())
+                expanded.insert(item->data(0, kKeyRole).toString());
         }
         qDeleteAll(node->takeChildren());
 
-        for (const TagCount &tag : tags) {
+        for (const TreeValue &value : values) {
             auto *item = new QTreeWidgetItem;
             item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
-            item->setText(0, tag.name);
-            item->setToolTip(0, tag.name);
-            item->setIcon(0, colourSwatch(tag.colour));
-            item->setData(0, kKeyRole, QString::number(tag.tagId));
-            item->setData(0, kSectionRole, int(Tags));
-            item->setCheckState(0, m_chosen[Tags].contains(QString::number(tag.tagId)) ? Qt::Checked : Qt::Unchecked);
-            items.insert(tag.tagId, item);
+            item->setText(0, value.name);
+            item->setToolTip(0, value.name);
+            if (value.colour)
+                item->setIcon(0, colourSwatch(*value.colour));
+            const QString key = QString::number(value.id);
+            item->setData(0, kKeyRole, key);
+            item->setData(0, kSectionRole, int(section));
+            item->setCheckState(0, m_chosen[section].contains(key) ? Qt::Checked : Qt::Unchecked);
+            items.insert(value.id, item);
         }
-        for (const TagCount &tag : tags) {
-            QTreeWidgetItem *parent = tag.parentId ? items.value(*tag.parentId, node) : node;
-            parent->addChild(items.value(tag.tagId));
+        for (const TreeValue &value : values) {
+            QTreeWidgetItem *parent = value.parentId ? items.value(*value.parentId, node) : node;
+            parent->addChild(items.value(value.id));
         }
-        for (const TagCount &tag : tags) {
-            if (expanded.contains(QString::number(tag.tagId)))
-                items.value(tag.tagId)->setExpanded(true);
+        for (const TreeValue &value : values) {
+            if (expanded.contains(QString::number(value.id)))
+                items.value(value.id)->setExpanded(true);
         }
     } else {
-        QTreeWidgetItemIterator it(node);
-        while (*it && (*it == node || (*it)->data(0, kSectionRole).toInt() == Tags)) {
-            if (*it != node)
-                items.insert((*it)->data(0, kKeyRole).toLongLong(), *it);
-            ++it;
+        for (QTreeWidgetItem *item : inSection())
+            items.insert(item->data(0, kKeyRole).toLongLong(), item);
+    }
+
+    for (const TreeValue &value : values) {
+        if (QTreeWidgetItem *item = items.value(value.id))
+            setCount(item, value.count);
+    }
+
+    if (values.isEmpty() && node->childCount() == 0) {
+        auto *note = new QTreeWidgetItem(node, {hint});
+        note->setFlags(Qt::ItemIsEnabled);
+        note->setData(0, kSectionRole, kNoSection);
+        note->setForeground(0, palette().color(QPalette::PlaceholderText));
+    }
+}
+
+QTreeWidgetItem *FilterSidebar::dropTarget(const QPoint &position) const
+{
+    QTreeWidgetItem *item = m_tree->itemAt(position);
+    if (!item || !(item->flags() & Qt::ItemIsUserCheckable))
+        return nullptr;
+    const int section = item->data(0, kSectionRole).toInt();
+    return section == Tags || section == Collections ? item : nullptr;
+}
+
+bool FilterSidebar::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched != m_tree->viewport())
+        return QWidget::eventFilter(watched, event);
+    switch (event->type()) {
+    case QEvent::DragEnter:
+    case QEvent::DragMove: {
+        auto *drag = static_cast<QDragMoveEvent *>(event);
+        QTreeWidgetItem *target = drag->mimeData()->hasFormat(QString::fromLatin1(kPublicationDragMime))
+            ? dropTarget(drag->position().toPoint())
+            : nullptr;
+        if (target) {
+            drag->setDropAction(Qt::CopyAction);
+            drag->accept();
+            m_tree->setCurrentItem(target); // Shows where they'd go.
+        } else if (event->type() == QEvent::DragEnter && drag->mimeData()->hasFormat(QString::fromLatin1(kPublicationDragMime))) {
+            drag->accept(); // Over the tree, though not yet over a collection or tag.
+        } else {
+            drag->ignore();
         }
+        return true;
     }
-
-    for (const TagCount &tag : tags) {
-        if (QTreeWidgetItem *item = items.value(tag.tagId))
-            setCount(item, tag.count);
+    case QEvent::Drop: {
+        auto *drop = static_cast<QDropEvent *>(event);
+        QTreeWidgetItem *target = drop->mimeData()->hasFormat(QString::fromLatin1(kPublicationDragMime))
+            ? dropTarget(drop->position().toPoint())
+            : nullptr;
+        if (!target) {
+            drop->ignore();
+            return true;
+        }
+        drop->setDropAction(Qt::CopyAction);
+        drop->accept();
+        emit publicationsDropped(Section(target->data(0, kSectionRole).toInt()), target->data(0, kKeyRole).toLongLong());
+        return true;
     }
-
-    if (tags.isEmpty() && node->childCount() == 0) {
-        auto *hint = new QTreeWidgetItem(node, {tr("Tags you add appear here.")});
-        hint->setFlags(Qt::ItemIsEnabled);
-        hint->setData(0, kSectionRole, kNoSection);
-        hint->setForeground(0, palette().color(QPalette::PlaceholderText));
+    default:
+        return QWidget::eventFilter(watched, event);
     }
 }
 
@@ -564,11 +640,14 @@ void FilterSidebar::showContextMenu(const QPoint &position)
     const bool isCollection = item->data(0, kSectionRole).toInt() == Collections;
     if (item == m_sections[Collections] || isCollection || (item->parent() == m_sections[Collections])) {
         QMenu menu(this);
-        menu.addAction(tr("New collection..."), this, &FilterSidebar::newCollection);
+        menu.addAction(tr("New collection..."), this, [this] { newCollection(); });
         if (isCollection) {
             const qint64 id = item->data(0, kKeyRole).toLongLong();
+            menu.addAction(tr("New collection inside this one..."), this, [this, id] { newCollection(id); });
             menu.addSeparator();
             menu.addAction(tr("Rename..."), this, [this, id] { renameCollection(id); });
+            menu.addAction(tr("Move..."), this, [this, id] { moveCollection(id); });
+            menu.addSeparator();
             menu.addAction(tr("Delete..."), this, [this, id] { deleteCollection(id); });
         }
         menu.exec(m_tree->viewport()->mapToGlobal(position));
@@ -594,14 +673,14 @@ void FilterSidebar::showContextMenu(const QPoint &position)
     menu.exec(m_tree->viewport()->mapToGlobal(position));
 }
 
-void FilterSidebar::newCollection()
+void FilterSidebar::newCollection(std::optional<qint64> parent)
 {
     bool ok = false;
     const QString name = QInputDialog::getText(this, tr("New collection"), tr("Name:"), QLineEdit::Normal, QString(), &ok);
     if (!ok || name.trimmed().isEmpty())
         return;
     try {
-        m_collections.create(name);
+        m_collections.create(name, parent);
         emit collectionsChanged();
     } catch (const std::exception &error) {
         QMessageBox::warning(this, tr("New collection"), tr("That collection couldn't be created: %1").arg(QString::fromUtf8(error.what())));
@@ -630,9 +709,11 @@ void FilterSidebar::deleteCollection(qint64 id)
     const auto collection = m_collections.get(id);
     if (!collection)
         return;
-    QMessageBox box(QMessageBox::Question, tr("Delete collection"),
-                    tr("Delete the collection \"%1\"? The publications in it stay in the library.").arg(collection->name),
-                    QMessageBox::Yes | QMessageBox::Cancel, this);
+    const qsizetype inside = m_collections.withInside(id).size() - 1;
+    const QString question = inside > 0
+        ? tr("Delete the collection \"%1\" and the %2 inside it? The publications in them stay in the library.").arg(collection->name).arg(inside)
+        : tr("Delete the collection \"%1\"? The publications in it stay in the library.").arg(collection->name);
+    QMessageBox box(QMessageBox::Question, tr("Delete collection"), question, QMessageBox::Yes | QMessageBox::Cancel, this);
     box.setTextFormat(Qt::PlainText);
     box.setDefaultButton(QMessageBox::Cancel);
     if (box.exec() != QMessageBox::Yes)
@@ -645,6 +726,30 @@ void FilterSidebar::deleteCollection(qint64 id)
     if (wasChosen) {
         updateClearButton();
         emit filterChanged();
+    }
+}
+
+void FilterSidebar::moveCollection(qint64 id)
+{
+    const QList<qint64> own = m_collections.withInside(id);
+    QStringList paths = {tr("(Top level)")};
+    QList<qint64> ids = {0};
+    for (const Collection &collection : m_collections.all()) {
+        if (!own.contains(collection.id)) {
+            paths << collection.path;
+            ids << collection.id;
+        }
+    }
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(this, tr("Move collection"), tr("Move to:"), paths, 0, false, &ok);
+    if (!ok)
+        return;
+    const qint64 target = ids.at(paths.indexOf(chosen));
+    try {
+        m_collections.move(id, target == 0 ? std::nullopt : std::optional<qint64>(target));
+        emit collectionsChanged();
+    } catch (const std::exception &error) {
+        QMessageBox::warning(this, tr("Move collection"), tr("That collection couldn't be moved: %1").arg(QString::fromUtf8(error.what())));
     }
 }
 

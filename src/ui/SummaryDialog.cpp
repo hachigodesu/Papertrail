@@ -8,6 +8,7 @@
 #include "ui/ApiKeyStore.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
+#include "summary/SummarySpending.h"
 
 #include <QComboBox>
 #include <QDesktopServices>
@@ -25,6 +26,7 @@
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QThread>
+#include <QUuid>
 #include <QVBoxLayout>
 
 namespace papertrail::ui {
@@ -46,6 +48,20 @@ QLabel *wrappedLabel(QWidget *parent, const QString &text = QString())
     return label;
 }
 
+} // namespace
+
+QLabel *consoleLabel(QWidget *parent, const QString &text, const char *url)
+{
+    auto *label = new QLabel(parent);
+    label->setTextFormat(Qt::RichText);
+    label->setWordWrap(true);
+    label->setOpenExternalLinks(true); // Only ever this fixed address of Anthropic's.
+    label->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    label->setText(text.toHtmlEscaped().arg(QStringLiteral("<a href=\"%1\">%2</a>")
+                                                .arg(QString::fromLatin1(url), QObject::tr("Claude Console").toHtmlEscaped())));
+    return label;
+}
+
 QString basisDescription(SummaryBasis basis, bool unsure, bool cutOff)
 {
     QString text;
@@ -62,8 +78,6 @@ QString basisDescription(SummaryBasis basis, bool unsure, bool cutOff)
         text += QObject::tr(" It reached the longest answer allowed, so the end may be missing.");
     return text;
 }
-
-} // namespace
 
 SummaryDialog::SummaryDialog(LibrarySession &session, ApiKeyStore &keys, metadata::Transport &transport, qint64 publicationId, QWidget *parent)
     : QDialog(parent), m_session(session), m_keys(keys)
@@ -146,6 +160,7 @@ void SummaryDialog::buildChoosing()
     m_keyEdit->setAccessibleName(tr("Claude API key"));
     connect(m_keyEdit, &QLineEdit::textChanged, this, [this] { m_generate->setEnabled(!m_keyEdit->text().trimmed().isEmpty() || !m_key.isEmpty()); });
     keyLayout->addRow(tr("API key"), m_keyEdit);
+    keyLayout->addRow(QString(), consoleLabel(m_keyRow, tr("Make a key in the %1, and keep it somewhere safe."), kConsoleKeysUrl));
     column->addWidget(m_keyRow);
 
     auto *form = new QFormLayout;
@@ -357,6 +372,13 @@ void SummaryDialog::generate()
 
 void SummaryDialog::addToSpent(const QString &model, const Usage &usage)
 {
+    // Noted in the library too, since it's charged for whether or not the summary is kept.
+    try {
+        recordSpend(m_session.database(), QStringLiteral("instant:") + QUuid::createUuid().toString(QUuid::WithoutBraces), m_publication.id,
+                    model, SpendKind::Instant, usage);
+    } catch (const std::exception &) {
+        // Only the record of spending is lost, and the dialog still says what this cost.
+    }
     if (const std::optional<double> cost = costOf(model, usage))
         m_spent += *cost;
     else if (usage.inputTokens > 0 || usage.outputTokens > 0)
@@ -589,8 +611,9 @@ ApiKeyDialog::ApiKeyDialog(ApiKeyStore &keys, QWidget *parent)
 {
     setWindowTitle(tr("Claude API key"));
     auto *column = new QVBoxLayout(this);
-    column->addWidget(wrappedLabel(this, tr("Summaries use your own API key, from the Claude Console, and you're charged for them by Anthropic. "
-                                            "It's kept in this computer's credential store, and never in Papertrail's database, settings or exports.")));
+    column->addWidget(consoleLabel(this, tr("Summaries use your own API key, from the %1, and you're charged for them by Anthropic. "
+                                            "It's kept in this computer's credential store, and never in Papertrail's database, settings or exports."),
+                                   kConsoleKeysUrl));
     m_edit = new QLineEdit(this);
     m_edit->setEchoMode(QLineEdit::Password);
     m_edit->setAccessibleName(tr("Claude API key"));

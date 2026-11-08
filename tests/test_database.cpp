@@ -1,5 +1,9 @@
+#include "core/db/Backups.h"
 #include "core/db/Database.h"
 #include "core/db/Schema.h"
+#include "core/repo/PublicationRepository.h"
+
+#include <QFile>
 
 #include <QTemporaryDir>
 #include <QtTest>
@@ -167,8 +171,181 @@ private slots:
         QVERIFY_THROWS_EXCEPTION(DbError, db.exec("INSERT INTO publication_tag VALUES (999, 999)"));
     }
 
+    void backupsAreMadeListedAndNamedForWhy()
+    {
+        Database db(path());
+        migrateLibrary(db);
+        addPublication(db, QStringLiteral("Kept"));
+        const QDateTime morning(QDate(2026, 3, 4), QTime(9, 30, 0));
+        QVERIFY(dailyBackupDue(path(), morning.date()));
+        const QString daily = makeBackup(db, path(), BackupKind::Daily, morning);
+        QCOMPARE(QFileInfo(daily).absolutePath(), backupFolder(path()));
+        QCOMPARE(QFileInfo(daily).fileName(), QStringLiteral("library-daily-2026-03-04-093000.db"));
+        QVERIFY(!dailyBackupDue(path(), morning.date()));
+        QVERIFY(dailyBackupDue(path(), morning.date().addDays(1)));
+
+        // Two in the same second don't overwrite each other.
+        const QString first = makeBackup(db, path(), BackupKind::ByHand, morning.addSecs(60));
+        const QString second = makeBackup(db, path(), BackupKind::ByHand, morning.addSecs(60));
+        QVERIFY(first != second);
+
+        // Anything else in the folder is left out.
+        QFile other(QDir(backupFolder(path())).filePath(QStringLiteral("notes.db")));
+        QVERIFY(other.open(QIODevice::WriteOnly));
+        other.close();
+
+        const QList<BackupInfo> found = backups(path());
+        QCOMPARE(found.size(), 3);
+        QCOMPARE(found.last().path, daily);
+        QCOMPARE(found.last().kind, BackupKind::Daily);
+        QCOMPARE(found.last().made, morning);
+        QVERIFY(found.last().size > 0);
+        QCOMPARE(found.first().kind, BackupKind::ByHand);
+
+        // Each is a whole library on its own.
+        Database copy(daily);
+        QCOMPARE(publicationCount(copy), 1);
+        QVERIFY(checkBackup(daily).usable);
+    }
+
+    void onlyTheNewestBackupsAreKept()
+    {
+        Database db(path());
+        migrateLibrary(db);
+        const QDateTime start(QDate(2026, 1, 1), QTime(12, 0, 0));
+        for (int day = 0; day < 10; ++day)
+            makeBackup(db, path(), BackupKind::Daily, start.addDays(day));
+        for (int n = 0; n < 5; ++n) {
+            makeBackup(db, path(), BackupKind::BeforeImport, start.addSecs(n));
+            makeBackup(db, path(), BackupKind::ByHand, start.addSecs(n));
+        }
+        pruneBackups(path());
+        QHash<int, QList<QDateTime>> kept;
+        for (const BackupInfo &backup : backups(path()))
+            kept[int(backup.kind)] << backup.made;
+        QCOMPARE(kept.value(int(BackupKind::Daily)).size(), kDailyBackupsKept);
+        QCOMPARE(kept.value(int(BackupKind::Daily)).last(), start.addDays(3)); // The oldest three went.
+        QCOMPARE(kept.value(int(BackupKind::BeforeImport)).size(), kOtherBackupsKept);
+        QCOMPARE(kept.value(int(BackupKind::ByHand)).size(), 5); // Never removed automatically.
+    }
+
+    void restoringReplacesTheLibraryAndCanBeUndone()
+    {
+        Database db(path());
+        migrateLibrary(db);
+        addPublication(db, QStringLiteral("Before"));
+        const QString backup = makeBackup(db, path(), BackupKind::ByHand);
+        addPublication(db, QStringLiteral("After"));
+        QCOMPARE(publicationCount(db), 2);
+
+        // Another connection, as the window's threads have, is reading the library too.
+        Database other(path());
+        QCOMPARE(publicationCount(other), 2);
+        const QByteArray stamp = db.changeStamp();
+
+        const QString before = restoreBackup(db, path(), backup);
+        QCOMPARE(publicationCount(db), 1);
+        QCOMPARE(publicationCount(other), 1);
+        QVERIFY(db.changeStamp() != stamp); // So anything cached from before is looked at again.
+        auto mode = db.prepare("PRAGMA journal_mode");
+        QVERIFY(mode->step());
+        QCOMPARE(mode->textAt(0), QStringLiteral("wal"));
+        mode.reset();
+        addPublication(db, QStringLiteral("Later")); // Still usable as ever.
+        QCOMPARE(publicationCount(other), 2);
+
+        // The library as it was is kept, and restoring it undoes the restore.
+        QCOMPARE(backups(path()).first().kind, BackupKind::BeforeRestore);
+        {
+            Database kept(before);
+            QCOMPARE(publicationCount(kept), 2);
+        }
+        restoreBackup(db, path(), before);
+        QCOMPARE(publicationCount(db), 2);
+    }
+
+    void anOlderBackupIsBroughtUpToDate()
+    {
+        const QString older = m_dir->filePath(QStringLiteral("older.db"));
+        {
+            Database db(older);
+            const std::vector<Migration> &all = libraryMigrations();
+            migrate(db, std::vector<Migration>(all.begin(), all.end() - 1));
+            QCOMPARE(db.userVersion(), all.back().version - 1);
+        }
+        QVERIFY(checkBackup(older).usable);
+        Database db(path());
+        migrateLibrary(db);
+        restoreBackup(db, path(), older);
+        QCOMPARE(db.userVersion(), libraryMigrations().back().version);
+    }
+
+    void unusableBackupsAreRefusedWithoutChangingTheLibrary()
+    {
+        Database db(path());
+        migrateLibrary(db);
+        addPublication(db, QStringLiteral("Mine"));
+
+        const QString text = m_dir->filePath(QStringLiteral("text.db"));
+        QFile file(text);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("not a database at all, only some text that is long enough to look like something");
+        file.close();
+        const QString notLibrary = m_dir->filePath(QStringLiteral("other.db"));
+        {
+            Database other(notLibrary);
+            other.exec("CREATE TABLE t (x INTEGER)");
+            other.setUserVersion(3);
+        }
+        const QString newer = m_dir->filePath(QStringLiteral("newer.db"));
+        {
+            Database other(newer);
+            migrateLibrary(other);
+            other.setUserVersion(9999);
+        }
+        for (const QString &bad : {text, notLibrary, newer, m_dir->filePath(QStringLiteral("missing.db"))}) {
+            const BackupCheck check = checkBackup(bad);
+            QVERIFY2(!check.usable, qPrintable(bad));
+            QVERIFY(!check.problem.isEmpty());
+            QVERIFY_THROWS_EXCEPTION(DbError, restoreBackup(db, path(), bad));
+        }
+        QCOMPARE(publicationCount(db), 1);
+        QVERIFY(backups(path()).isEmpty()); // Nothing was backed up for a restore that didn't happen.
+    }
+
+    void anUpgradeIsBackedUpFirst()
+    {
+        Database db(path());
+        QVERIFY(!backUpBeforeUpgrade(db, path())); // A new library has nothing to keep.
+        const std::vector<Migration> &all = libraryMigrations();
+        migrate(db, std::vector<Migration>(all.begin(), all.end() - 1));
+        const std::optional<QString> made = backUpBeforeUpgrade(db, path());
+        QVERIFY(made);
+        QCOMPARE(backups(path()).first().kind, BackupKind::BeforeUpgrade);
+        {
+            Database copy(*made);
+            QCOMPARE(copy.userVersion(), all.back().version - 1);
+        }
+        migrateLibrary(db);
+        QVERIFY(!backUpBeforeUpgrade(db, path())); // Up to date.
+    }
+
 private:
     QString path() const { return m_dir->filePath(QStringLiteral("test.db")); }
+
+    static void addPublication(Database &db, const QString &title)
+    {
+        Publication p;
+        p.title = title;
+        PublicationRepository(db).create(p);
+    }
+
+    static int publicationCount(Database &db)
+    {
+        auto select = db.prepare("SELECT count(*) FROM publication");
+        select->step();
+        return select->intAt(0);
+    }
 
     static int rowCount(Database &db)
     {

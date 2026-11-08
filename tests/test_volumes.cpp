@@ -9,6 +9,7 @@
 #include "core/repo/TagRepository.h"
 #include "core/repo/VolumeArticles.h"
 #include "import/ImportService.h"
+#include "import/JournalIssues.h"
 #include "ui/CitationActions.h"
 #include "ui/DetailsPanel.h"
 #include "ui/Labels.h"
@@ -495,10 +496,22 @@ private slots:
         tagged.tagIds = {tag};
         QCOMPARE(m_session->query().ids(tagged, {}), QList<qint64>{article});
 
-        // Adding a volume to a collection adds only the volume.
+        // Adding a volume to a collection brings its articles, and taking it out takes them too.
         const qint64 collection = m_session->collections().create(QStringLiteral("Project"));
         m_session->collections().add(collection, {volumeId});
+        QVERIFY(m_session->collections().contains(collection, article));
+        m_session->collections().removeFrom(collection, {volumeId});
         QVERIFY(!m_session->collections().contains(collection, article));
+
+        // An article made later joins the collections its volume is in.
+        m_session->collections().add(collection, {volumeId});
+        ArticleDraft later;
+        later.title = QStringLiteral("Added Later");
+        later.firstPage = 3;
+        later.lastPage = 3;
+        const QList<qint64> made = createArticles(m_session->database(), volumeId, {later}, false);
+        QCOMPARE(made.size(), 1);
+        QVERIFY(m_session->collections().contains(collection, made.first()));
     }
 
     void deletingAVolumesDetailsTakesItsArticlesToo()
@@ -703,6 +716,66 @@ private slots:
         dialog.table()->item(1, 2)->setData(Qt::EditRole, 1);
         QVERIFY(!dialog.createChosen());
         QVERIFY(m_session->publications().childIds(volume).isEmpty());
+    }
+
+    void articlesAreFoundFromTheirFirstPagesWithoutContents()
+    {
+        using import::PageHeading;
+        const QList<PageHeading> pages = {
+            {0, QStringLiteral("Journal of Imaginary Findings"), {}},
+            {1, QStringLiteral("Publication Information"), {}},
+            {2, QStringLiteral("A First Made-Up Article"), {QStringLiteral("10.5555/X.1")}},
+            {3, QStringLiteral("Journal of Imaginary Findings, vol. 3, no. 4"), {}}, // A running header.
+            {4, QStringLiteral("More of it"), {QStringLiteral("10.5555/x.1"), QStringLiteral("10.9999/cited.elsewhere")}},
+            {5, QStringLiteral("A Second Made-Up Article"), {QStringLiteral("doi:10.5555/x.2"), QStringLiteral("10.5555/cited")}},
+            {6, QString(), {}},
+            {7, QStringLiteral("Information for Authors"), {}},
+            {8, QStringLiteral("Table of Contents"), {QStringLiteral("10.5555/x.toc")}},
+        };
+        const QList<ArticleDraft> drafts = import::draftsFromPages(pages, 10);
+        QCOMPARE(drafts.size(), 3);
+        QCOMPARE(drafts.at(0).title, QStringLiteral("A First Made-Up Article"));
+        QCOMPARE(drafts.at(0).firstPage, 3);
+        QCOMPARE(drafts.at(0).lastPage, 5);
+        QCOMPARE(drafts.at(0).doi, QStringLiteral("10.5555/x.1"));
+        QVERIFY(drafts.at(0).titleFromPage);
+        QVERIFY(!drafts.at(0).likelyNotAnArticle);
+        QCOMPARE(drafts.at(1).firstPage, 6);
+        QCOMPARE(drafts.at(1).lastPage, 7); // Up to the issue's own page for authors.
+        QCOMPARE(drafts.at(1).doi, QStringLiteral("10.5555/x.2"));
+        QVERIFY(drafts.at(2).likelyNotAnArticle); // The issue's contents page, offered but not chosen.
+        QCOMPARE(drafts.at(2).lastPage, 10);
+        QVERIFY(import::draftsFromPages({}, 4).isEmpty());
+    }
+
+    void anIssueWithoutContentsHasItsPagesRead()
+    {
+        const qint64 volume = importVolume(QStringLiteral("issue_without_contents.pdf"));
+        ContentsDialog dialog(*m_session, volume);
+        QSignalSpy ready(&dialog, &ContentsDialog::contentsReady);
+        QTRY_VERIFY2_WITH_TIMEOUT(!ready.isEmpty() || !dialog.table()->isEnabled(), qPrintable(dialog.messageLabel()->text()), kLongWaitMs);
+        QVERIFY2(!ready.isEmpty(), qPrintable(dialog.messageLabel()->text()));
+        QVERIFY(dialog.foundFromPages());
+        QVERIFY(dialog.messageLabel()->text().contains(QStringLiteral("no table of contents")));
+        QCOMPARE(dialog.table()->rowCount(), 2);
+        QCOMPARE(dialog.table()->item(0, 0)->text(), QStringLiteral("A Pretend Survey of Tidal Gardens"));
+        QCOMPARE(dialog.table()->item(1, 0)->text(), QStringLiteral("Invented Notes on Paper Boats"));
+        QString problem;
+        const QList<ArticleDraft> chosen = dialog.chosenDrafts(&problem);
+        QVERIFY2(problem.isEmpty(), qPrintable(problem));
+        QCOMPARE(chosen.size(), 2);
+        QCOMPARE(chosen.at(0).firstPage, 3);
+        QCOMPARE(chosen.at(0).lastPage, 4);
+        QCOMPARE(chosen.at(1).firstPage, 5);
+        QCOMPARE(chosen.at(1).lastPage, 6); // Not the information for authors after it.
+
+        QVERIFY(dialog.createChosen());
+        const QList<qint64> articles = m_session->publications().childIds(volume);
+        QCOMPARE(articles.size(), 2);
+        QSet<QString> dois;
+        for (const qint64 id : articles)
+            dois.insert(m_session->publications().get(id)->doi);
+        QCOMPARE(dois, (QSet<QString>{QStringLiteral("10.5555/imaginary.2026.0401"), QStringLiteral("10.5555/imaginary.2026.0402")}));
     }
 
     void aFileWithNoContentsSaysSo()

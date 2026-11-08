@@ -39,7 +39,8 @@ struct ReaderLink {
 // What's printed on a page that starts an article: see DocumentClient::requestHeading.
 struct ReaderHeading {
     QString title;
-    QString doi;
+    QString doi;       // The page's DOI, if it has only one.
+    QStringList dois;  // Every DOI on it, in order.
     QString volume; // As printed in a running header or on a cover, such as "VOL. 7, NO. 11".
     QString issue;
     int month = 0;

@@ -1,6 +1,9 @@
 // Tests of the library window, working on real libraries and the real worker, with no screen.
 
+#include "core/db/Backups.h"
 #include "core/model/Publication.h"
+#include "core/repo/RemovedContent.h"
+#include "ui/BackupsDialog.h"
 #include "ui/BulkChanges.h"
 #include "ui/CitationActions.h"
 #include "ui/TransferDialogs.h"
@@ -24,6 +27,7 @@
 #include <QClipboard>
 #include <QCompleter>
 #include <QStringListModel>
+#include <QMenuBar>
 #include <QMimeData>
 #include <QComboBox>
 #include <QCryptographicHash>
@@ -1072,6 +1076,57 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs); // The book left, and the shared paper stayed.
     }
 
+    void aPublicationCanBeRemovedAndBroughtBack()
+    {
+        const QString folder = m_dir->filePath(QStringLiteral("Papers"));
+        QDir().mkpath(folder);
+        QVERIFY(QFile::copy(sample(QStringLiteral("article.pdf")), QDir(folder).filePath(QStringLiteral("paper.pdf"))));
+        QVERIFY(QFile::copy(sample(QStringLiteral("book.epub")), QDir(folder).filePath(QStringLiteral("book.epub"))));
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
+
+        // Delete in the view asks first, then removes what's chosen.
+        m_window->setViewMode(MainWindow::ViewMode::List);
+        m_window->listView()->setFocus();
+        m_window->listView()->setCurrentIndex(m_window->model()->index(0, 0));
+        QCOMPARE(m_window->selectedCount(), 1);
+        m_boxWatcher->stop();
+        QString asked;
+        QTimer::singleShot(100, this, [&] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                asked = box->text();
+                box->findChild<QPushButton *>(QStringLiteral("removePublications"))->click();
+            }
+        });
+        QTest::keyClick(m_window->listView(), Qt::Key_Delete);
+        m_boxWatcher->start(100);
+        QVERIFY2(asked.contains(QStringLiteral("won't be added again")), qPrintable(asked));
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QCOMPARE(RemovedContent(m_session->database()).count(), qint64(1));
+
+        // A scan doesn't bring it back.
+        m_window->rescanAll();
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+        QTest::qWait(300);
+        QCOMPARE(rows(), 1);
+
+        // Library folders says so, and it can be brought back.
+        LibraryFoldersDialog folders(*m_session);
+        QVERIFY(folders.showRemovedButton()->isVisibleTo(&folders));
+        RemovedPublicationsDialog removed(*m_session);
+        QCOMPARE(removed.list()->topLevelItemCount(), 1);
+        QVERIFY(!removed.bringBackButton()->isEnabled());
+        removed.list()->topLevelItem(0)->setSelected(true);
+        QVERIFY(removed.bringBackButton()->isEnabled());
+        removed.bringBackChosen();
+        QCOMPARE(removed.filesBroughtBack(), 1);
+        QCOMPARE(RemovedContent(m_session->database()).count(), qint64(0));
+        m_window->rescanAll();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
+    }
+
     void aFolderWithNothingToLoseIsntAskedAbout()
     {
         const QString folder = copySamples({});
@@ -1512,7 +1567,7 @@ private slots:
         transfer::ImportOptions replace;
         replace.mode = transfer::ImportMode::Replace;
         replace.backupPath = transfer->newBackupPath();
-        QCOMPARE(QFileInfo(replace.backupPath).absolutePath(), QFileInfo(m_session->paths().database).absolutePath());
+        QCOMPARE(QFileInfo(replace.backupPath).absolutePath(), core::backupFolder(m_session->paths().database));
         transfer->startImport(*bundle, replace);
         QTRY_COMPARE_WITH_TIMEOUT(imported.size(), 2, kLongWaitMs);
         QVERIFY(imported.at(1).at(0).toBool());
@@ -1734,6 +1789,119 @@ private slots:
         QCOMPARE(m_window->selectedCount(), qint64(across));
     }
 
+    void publicationsCanBeDraggedOntoACollectionOrTag()
+    {
+        addMany(4);
+        const qint64 project = m_session->collections().create(QStringLiteral("Project"));
+        const qint64 chapter = m_session->collections().create(QStringLiteral("Chapter"), project);
+        const qint64 reading = m_session->tags().create(QStringLiteral("Reading"), std::nullopt);
+        openWindow();
+        m_window->resize(1200, 800);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 4, kLongWaitMs);
+        FilterSidebar *sidebar = m_window->sidebar();
+
+        // The inner collection sits inside the outer one.
+        QTRY_VERIFY_WITH_TIMEOUT(sidebar->findValue(FilterSidebar::Collections, QString::number(chapter)), kLongWaitMs);
+        QTreeWidgetItem *inner = sidebar->findValue(FilterSidebar::Collections, QString::number(chapter));
+        QCOMPARE(inner->parent(), sidebar->findValue(FilterSidebar::Collections, QString::number(project)));
+
+        // Pressing on a card that isn't chosen chooses by dragging, as before. On a chosen one, it drags them.
+        auto *grid = qobject_cast<GridView *>(m_window->gridView());
+        QTest::qWait(200);
+        const QPoint onFirst = grid->visualRect(m_window->model()->index(0, PublicationListModel::TitleColumn)).center();
+        grid->clearSelection();
+        QTest::mousePress(grid->viewport(), Qt::LeftButton, Qt::NoModifier, onFirst);
+        QVERIFY(!grid->dragEnabled());
+        QTest::mouseRelease(grid->viewport(), Qt::LeftButton, Qt::NoModifier, onFirst);
+        grid->selectAll();
+        QTest::mousePress(grid->viewport(), Qt::LeftButton, Qt::NoModifier, onFirst);
+        QVERIFY(grid->dragEnabled());
+        QCOMPARE(m_window->selectedCount(), 4); // Pressing on a chosen card keeps the others chosen.
+        QTest::mouseRelease(grid->viewport(), Qt::LeftButton, Qt::NoModifier, onFirst);
+        grid->selectAll();
+        QCOMPARE(m_window->selectedCount(), 4);
+
+        // Dropping them on a collection adds them all, and on a tag tags them.
+        QWidget *viewport = sidebar->tree()->viewport();
+        const auto dropOn = [&](QTreeWidgetItem *item, const QMimeData &data) {
+            sidebar->tree()->scrollToItem(item);
+            const QPoint at = sidebar->tree()->visualItemRect(item).center();
+            QDragEnterEvent enter(QPointF(at), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(viewport, &enter);
+            QDragMoveEvent move(QPointF(at), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(viewport, &move);
+            QDropEvent drop(QPointF(at), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(viewport, &drop);
+            return drop.isAccepted();
+        };
+        QMimeData publications;
+        publications.setData(QString::fromLatin1(kPublicationDragMime), "4");
+        QVERIFY(dropOn(inner, publications));
+        QTRY_COMPARE_WITH_TIMEOUT(m_session->collections().get(chapter)->count, qint64(4), kLongWaitMs);
+        QVERIFY(dropOn(sidebar->findValue(FilterSidebar::Tags, QString::number(reading)), publications));
+        QTRY_VERIFY_WITH_TIMEOUT(publicationsTagged(reading) == 4, kLongWaitMs);
+
+        // Anything else dragged there, such as files from elsewhere, is refused.
+        QMimeData other;
+        other.setText(QStringLiteral("something else"));
+        QVERIFY(!dropOn(inner, other));
+
+        // Choosing the outer collection shows what's in the one inside it.
+        grid->clearSelection();
+        sidebar->setValueChosen(FilterSidebar::Collections, QString::number(project), true);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 4, kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(sidebar->findValue(FilterSidebar::Collections, QString::number(project))->text(1), QStringLiteral("4"),
+                                  kLongWaitMs);
+    }
+
+    void theLibraryIsBackedUpDailyAndCanBeRestored()
+    {
+        addMany(3);
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+        const QString library = m_session->paths().database;
+
+        // The day's backup is made in the background, once.
+        m_window->startDailyBackup();
+        QVERIFY(m_window->dailyBackupThread());
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->dailyBackupThread()->isFinished(), kLongWaitMs);
+        QCOMPARE(core::backups(library).size(), 1);
+        QCOMPARE(core::backups(library).first().kind, core::BackupKind::Daily);
+        m_window->startDailyBackup();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->dailyBackupThread()->isFinished(), kLongWaitMs);
+        QCOMPARE(core::backups(library).size(), 1);
+
+        BackupsDialog dialog(*m_session);
+        QCOMPARE(dialog.list()->topLevelItemCount(), 1);
+        QVERIFY(dialog.dailyBox()->isChecked());
+        dialog.dailyBox()->setChecked(false);
+        QCOMPARE(m_session->settings().value(QStringLiteral("library.daily_backups")).toBool(), false);
+        dialog.dailyBox()->setChecked(true);
+
+        // One made by hand, then a change, then that backup restored.
+        dialog.backUpButton()->click();
+        QCOMPARE(dialog.list()->topLevelItemCount(), 2);
+        QCOMPARE(dialog.list()->currentItem(), dialog.list()->topLevelItem(0));
+        addPublication(QStringLiteral("Added after the backup"), PublicationType::Book);
+        m_window->refreshNow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 4, kLongWaitMs);
+        connect(&dialog, &BackupsDialog::restoreRequested, m_window.get(), &MainWindow::restoreBackup);
+        dialog.restoreChosen(false);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+        QCOMPARE(dialog.list()->topLevelItemCount(), 3);
+        QCOMPARE(core::backups(library).first().kind, core::BackupKind::BeforeRestore);
+
+        // The window carries on with the restored library.
+        addPublication(QStringLiteral("Added after restoring"), PublicationType::Book);
+        m_window->refreshNow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 4, kLongWaitMs);
+
+        bool listed = false;
+        for (QAction *action : m_window->menuBar()->actions().first()->menu()->actions())
+            listed = listed || action->text() == QStringLiteral("&Backups...");
+        QVERIFY(listed);
+    }
+
     void theEditorSuggestsWhatsAlreadyInTheLibrary()
     {
         addCitable(QStringLiteral("Dent"), QStringLiteral("Carla"), QStringLiteral("Why Do Models Fail"), 2019);
@@ -1908,6 +2076,14 @@ private:
                 return section->child(i);
         }
         return nullptr;
+    }
+
+    qint64 publicationsTagged(qint64 tagId)
+    {
+        auto select = m_session->database().prepare("SELECT count(*) FROM publication_tag WHERE tag_id = ?");
+        select->bind(1, tagId);
+        select->step();
+        return select->int64At(0);
     }
 
     qint64 addCitable(const QString &family, const QString &given, const QString &title, int year)

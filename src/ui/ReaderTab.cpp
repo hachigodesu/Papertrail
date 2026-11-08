@@ -533,6 +533,8 @@ void ReaderTab::connectClient()
             restorePlace();
             applyPendingMatch();
             loadAnnotations();
+            if (m_pendingAnnotation)
+                goToAnnotation(*std::exchange(m_pendingAnnotation, std::nullopt));
         }
     });
     connect(m_client, &DocumentClient::pageRendered, m_view, &PageView::setPageImage);
@@ -1294,6 +1296,14 @@ void ReaderTab::showMatch(int page, const QString &text)
     m_pendingMatch = std::make_pair(page, text);
     if (m_ready)
         applyPendingMatch();
+}
+
+void ReaderTab::showAnnotation(qint64 id)
+{
+    if (m_ready)
+        goToAnnotation(id);
+    else
+        m_pendingAnnotation = id;
 }
 
 void ReaderTab::applyPendingMatch()

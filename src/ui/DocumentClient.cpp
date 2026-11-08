@@ -301,6 +301,8 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
         if (ok) {
             heading.title = reply.value(QStringLiteral("title")).toString();
             heading.doi = reply.value(QStringLiteral("doi")).toString();
+            for (const QJsonValue &doi : reply.value(QStringLiteral("dois")).toArray())
+                heading.dois << doi.toString().left(300);
             heading.volume = reply.value(QStringLiteral("volume")).toString();
             heading.issue = reply.value(QStringLiteral("issue")).toString();
             heading.month = reply.value(QStringLiteral("month")).toInt();

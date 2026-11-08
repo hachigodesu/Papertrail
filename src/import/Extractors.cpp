@@ -300,6 +300,12 @@ QString findDoi(const QString &text)
 
 QString articleDoiOnPage(const QString &pageText)
 {
+    const QStringList dois = doisOnPage(pageText);
+    return dois.size() == 1 ? dois.first() : QString();
+}
+
+QStringList doisOnPage(const QString &pageText)
+{
     QString text = pageText;
     // A heading such as "References" or "7. Bibliography". Text extraction often joins it to the line before
     // or after, so it counts at either end of a line.
@@ -311,14 +317,11 @@ QString articleDoiOnPage(const QString &pageText)
         text.truncate(heading.capturedStart());
 
     static const QRegularExpression pattern(QStringLiteral("\\b10\\.\\d{4,9}/[^\\s\"<>]+"));
-    QString found;
+    QStringList found;
     for (auto it = pattern.globalMatch(text); it.hasNext();) {
         const QString doi = findDoi(it.next().captured(0));
-        if (doi.isEmpty() || doi == found)
-            continue;
-        if (!found.isEmpty())
-            return {};
-        found = doi;
+        if (!doi.isEmpty() && !found.contains(doi))
+            found << doi;
     }
     return found;
 }

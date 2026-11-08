@@ -23,6 +23,15 @@ namespace papertrail::ui {
 class ApiKeyStore;
 class LibrarySession;
 
+// What a summary is based on, said plainly, since it's generated and could be wrong.
+QString basisDescription(summary::SummaryBasis basis, bool unsure, bool cutOff);
+
+// The Claude Console, where keys are made and the bill is kept. Wherever it's mentioned, it's a link.
+inline constexpr const char *kConsoleKeysUrl = "https://platform.claude.com/settings/keys";
+inline constexpr const char *kConsoleBillingUrl = "https://platform.claude.com/settings/billing";
+// `text` is plain text with %1 where the Console is named, which becomes a link to `url`.
+QLabel *consoleLabel(QWidget *parent, const QString &text, const char *url);
+
 // Everything about getting one summary from Claude. Each step that costs money says what it may cost first, and
 // the paper itself only ever goes after a confirmation of its own.
 class SummaryDialog : public QDialog {

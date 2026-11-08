@@ -35,9 +35,17 @@ class QTableView;
 class QTimer;
 class QToolButton;
 
+namespace papertrail::summary {
+class SummaryBatches;
+}
+
 namespace papertrail::ui {
 
+class BackupsDialog;
 class BulkChanges;
+class DailyBackupThread;
+class MarkedCopyActions;
+class RemovedPublicationsDialog;
 class CoverCache;
 class DetailsPanel;
 class FilterSidebar;
@@ -162,6 +170,42 @@ public:
     // Exports citations for what's selected, or everything shown if nothing is.
     void exportCitations();
 
+    // Looks at the library afresh, as after a change made elsewhere.
+    void refreshNow();
+    // Scans every library folder for new, changed and missing files.
+    void rescanAll();
+
+    // Removes publications from the library after asking. Their files aren't touched, and are kept out when
+    // found again, until brought back.
+    void askToRemoveSelected();
+    void removePublications(const QList<qint64> &ids);
+    void showRemovedPublications();
+    RemovedPublicationsDialog *removedDialog() const { return m_removedDialog; }
+
+    MarkedCopyActions *markedCopy() const { return m_markedCopy; }
+
+    // Summaries at half price for what's chosen, after confirming, and collecting them as they come back.
+    void showBatchSummaryDialog();
+    void checkSummaryBatches();
+    summary::SummaryBatches *summaryBatches() const { return m_batches; }
+    // Summaries on their way, to review, and what they've cost, opened at one publication's if it's given.
+    void showSummariesDialog(std::optional<qint64> publicationId = std::nullopt);
+    QPushButton *summaryStatusButton() const { return m_summaryStatus; }
+
+    // Every highlight and note in the library, each opening its document there.
+    void showNotesDialog();
+    // Opens the document a highlight or note is in, at its place. Returns whether it could.
+    bool openAnnotation(qint64 annotationId);
+
+    // Lists backups, makes one, and restores one.
+    void showBackupsDialog();
+    BackupsDialog *backupsDialog() const { return m_backupsDialog; }
+    // Replaces the library with a backup's contents, after quietening everything else. Returns whether it did.
+    bool restoreBackup(const QString &backupPath);
+    // Makes the day's backup in the background, if it's wanted and not yet made.
+    void startDailyBackup();
+    DailyBackupThread *dailyBackupThread() const { return m_dailyBackup; }
+
     LibraryTransferActions *libraryTransfer() const { return m_transfer; }
     // Quietens everything else that writes to the library, and closes open documents, before an import.
     void prepareForImport();
@@ -208,7 +252,6 @@ private:
     core::PublicationSort currentSort() const;
     void applyFilters();
     void scheduleRefresh();
-    void refreshNow();
     void onResultsChanged();
     void onRowsLoaded();
     void onSelectionChanged();
@@ -222,7 +265,6 @@ private:
     void showContextMenu(const QPoint &position);
     void showFoldersDialog();
     void chooseFolderToAdd();
-    void rescanAll();
     void changeRootLocation(qint64 rootId);
     void confirmForgetHidden();
     void afterFoldersChanged();
@@ -266,6 +308,14 @@ private:
     ImportThread *m_import = nullptr;
     IndexThread *m_index = nullptr;
     CitationActions *m_citations = nullptr;
+    DailyBackupThread *m_dailyBackup = nullptr;
+    MarkedCopyActions *m_markedCopy = nullptr;
+    summary::SummaryBatches *m_batches = nullptr;
+    QTimer *m_batchTimer = nullptr;
+    QPushButton *m_summaryStatus = nullptr;
+    void refreshSummaryStatus();
+    BackupsDialog *m_backupsDialog = nullptr;
+    RemovedPublicationsDialog *m_removedDialog = nullptr;
     QToolButton *m_searchHelp = nullptr;
     LibraryTransferActions *m_transfer = nullptr;
     QAction *m_checkSuggestedFiles = nullptr;

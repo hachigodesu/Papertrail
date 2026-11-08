@@ -2,6 +2,7 @@
 #include "core/db/Schema.h"
 #include "core/query/LibraryQuery.h"
 #include "core/repo/FileRepository.h"
+#include "core/repo/RemovedContent.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/VolumeArticles.h"
 #include "core/settings/SettingsStore.h"
@@ -270,6 +271,39 @@ private slots:
         QCOMPARE(m_from->count(), publications);
     }
 
+    void whatWasRemovedStaysOutOnTheOtherComputer()
+    {
+        const std::optional<qint64> thesis = m_from->idOfFile(QStringLiteral("Papers/thesis.pdf"));
+        QVERIFY(thesis);
+        const qint64 before = m_from->count();
+        RemovedContent(*m_from->db).remove({*thesis}, 1000);
+        ExportReport exported;
+        const std::optional<Bundle> bundle = readBundle(buildBundle(*m_from->db, exported), nullptr);
+        QVERIFY(bundle);
+        QCOMPARE(exported.removed, qint64(1));
+        QCOMPARE(exported.publications, before - 1);
+
+        // A new library keeps it out once its folder's scanned.
+        Library to;
+        for (const QString &name : kSamples)
+            to.put(name, QStringLiteral("Elsewhere/") + name);
+        const ImportReport report = importBundle(*to.db, *bundle, {});
+        QCOMPARE(report.removedAdded, qint64(1));
+        to.scan();
+        QCOMPARE(to.count(), before - 1);
+        QVERIFY(!to.idOfFile(QStringLiteral("Elsewhere/thesis.pdf")));
+        QCOMPARE(RemovedContent(*to.db).entries().first().fileName, QStringLiteral("thesis.pdf"));
+
+        // One that still has it keeps it: merging never takes anything away.
+        Library keeping;
+        for (const QString &name : kSamples)
+            keeping.put(name, name);
+        keeping.scan();
+        QCOMPARE(importBundle(*keeping.db, *bundle, {}).removedAdded, qint64(0));
+        QVERIFY(keeping.idOfFile(QStringLiteral("thesis.pdf")));
+        QCOMPARE(RemovedContent(*keeping.db).count(), qint64(0));
+    }
+
     void theMoreRecentlyEditedWins()
     {
         Library to;
@@ -452,9 +486,8 @@ private slots:
         importBundle(*to.db, *readBundle(buildBundle(*m_from->db, exported), nullptr), {});
         to.db->exec("DELETE FROM hidden_publication");
         QCOMPARE(to.count(), m_from->count());
-        to.db->setUserVersion(11);
-        migrateLibrary(*to.db);
-        QCOMPARE(to.db->userVersion(), 12);
+        to.db->exec(libraryMigrations().at(11).sql); // Version 12, which hides them.
+        QCOMPARE(libraryMigrations().at(11).version, 12);
         QCOMPARE(to.count(), qint64(0));
         for (const QString &name : kSamples)
             to.put(name, QStringLiteral("Later/") + name);

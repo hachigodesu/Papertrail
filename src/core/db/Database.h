@@ -91,10 +91,16 @@ public:
     int userVersion();
     void setUserVersion(int version);
 
+    // Replaces this connection's main database with a copy of the database at `path`, page by page, while other
+    // connections wait. Their later reads see the new contents. Throws DbError if it can't, leaving this one as
+    // it was.
+    void replaceWith(const QString &path);
+
     sqlite3 *handle() const { return m_db; }
 
 private:
     sqlite3 *m_db = nullptr;
+    qint64 m_replaced = 0; // Counted in changeStamp, since replacing isn't counted as a change.
     std::unordered_map<std::string, std::unique_ptr<Statement>> m_cache;
 };
 

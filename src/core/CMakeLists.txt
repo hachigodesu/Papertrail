@@ -1,4 +1,6 @@
 add_library(papertrail_core STATIC
+    db/Backups.cpp
+    db/Backups.h
     db/Database.cpp
     db/Database.h
     db/Schema.cpp
@@ -18,11 +20,15 @@ add_library(papertrail_core STATIC
     repo/FileRepository.h
     repo/LookupRepository.cpp
     repo/LookupRepository.h
+    repo/NoticeRepository.cpp
+    repo/NoticeRepository.h
     repo/PublicationMerge.cpp
     repo/PublicationMerge.h
     repo/PublicationRepository.cpp
     repo/PublicationRepository.h
     repo/ReadingStateRepository.cpp
+    repo/RemovedContent.cpp
+    repo/RemovedContent.h
     repo/ReadingStateRepository.h
     repo/TagRepository.cpp
     repo/TagRepository.h

@@ -36,6 +36,7 @@ struct PublicationFilter {
     bool noFile = false;
     bool missingOrOffline = false;
     bool unreadable = false;
+    bool retracted = false; // Retracted, withdrawn, or with an expression of concern.
 };
 
 enum class SortField { Relevance, Title, FirstAuthor, Year, Added };

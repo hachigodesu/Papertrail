@@ -127,6 +127,17 @@ WorkerClient::Cover WorkerClient::pageCover(const QString &path, const QString &
     return Cover{reply.failure, reply.error};
 }
 
+WorkerClient::MarkedCopy WorkerClient::markedCopy(const QString &path, const QString &out, const QJsonArray &marks, int timeoutMs)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("op"), QStringLiteral("markedcopy"));
+    request.insert(QStringLiteral("path"), path);
+    request.insert(QStringLiteral("out"), out);
+    request.insert(QStringLiteral("marks"), marks);
+    const Reply reply = call(request, timeoutMs);
+    return MarkedCopy{reply.failure, reply.error};
+}
+
 WorkerClient::Inspection WorkerClient::inspect(const QString &path, const QString &coverPath, const QString &convertedPath,
                                                int timeoutMs)
 {

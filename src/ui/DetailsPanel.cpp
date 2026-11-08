@@ -2,8 +2,10 @@
 
 #include "core/repo/AnnotationRepository.h"
 #include "core/repo/FullTextIndex.h"
+#include "core/repo/NoticeRepository.h"
 #include "core/repo/SummaryRepository.h"
 #include "core/repo/VolumeArticles.h"
+#include "summary/SummaryBatches.h"
 #include "summary/SummaryRequest.h"
 
 #include "core/repo/PublicationMerge.h"
@@ -226,6 +228,19 @@ void DetailsPanel::buildSinglePage()
 
     // A summary from Claude, kept apart from everything else here because it's generated.
     column->addWidget(sectionHeading(tr("Summary")));
+    // One asked for at half price, on its way or back and waiting to be reviewed.
+    m_summaryPending = plainLabel();
+    m_summaryPending->setWordWrap(true);
+    column->addWidget(m_summaryPending);
+    m_summaries = new QPushButton;
+    connect(m_summaries, &QPushButton::clicked, this, [this] {
+        if (m_id)
+            emit summariesRequested(*m_id);
+    });
+    auto *pendingRow = new QHBoxLayout;
+    pendingRow->addWidget(m_summaries);
+    pendingRow->addStretch();
+    column->addLayout(pendingRow);
     m_summaryInfo = plainLabel();
     m_summaryInfo->setWordWrap(true);
     column->addWidget(m_summaryInfo);
@@ -376,6 +391,13 @@ void DetailsPanel::buildSinglePage()
 
     m_preprintHint = plainLabel();
     column->addWidget(m_preprintHint);
+
+    // A retraction or the like, said plainly near the top, since it changes how the work can be relied on.
+    m_noticeWarning = plainLabel();
+    QFont warningFont = m_noticeWarning->font();
+    warningFont.setBold(true);
+    m_noticeWarning->setFont(warningFont);
+    column->addWidget(m_noticeWarning);
 
     m_undoRow = new QWidget;
     auto *undoLayout = new QHBoxLayout(m_undoRow);
@@ -541,6 +563,30 @@ void DetailsPanel::reload()
     m_preprintHint->setText(tr("%1 lists this as a preprint.").arg(metadata::providerLabel(hintSource)));
     m_preprintHint->setVisible(!hintSource.isEmpty() && p.type != PublicationType::Preprint);
 
+    QList<Notice> notices;
+    try {
+        notices = NoticeRepository(m_session.database()).forPublication(p.id);
+    } catch (const std::exception &) {
+    }
+    QStringList warnings;
+    for (const Notice &notice : std::as_const(notices)) {
+        if (!notice.isWarning())
+            continue;
+        const QString when = notice.date.left(4);
+        if (notice.kind == QLatin1StringView("expression_of_concern"))
+            warnings << (when.isEmpty() ? tr("Concerns have been raised about this.") : tr("Concerns were raised about this in %1.").arg(when));
+        else if (notice.kind == QLatin1StringView("withdrawal") || notice.kind == QLatin1StringView("removal"))
+            warnings << (when.isEmpty() ? tr("This has been withdrawn.") : tr("This was withdrawn in %1.").arg(when));
+        else if (notice.kind == QLatin1StringView("partial_retraction"))
+            warnings << (when.isEmpty() ? tr("Part of this has been retracted.") : tr("Part of this was retracted in %1.").arg(when));
+        else
+            warnings << (when.isEmpty() ? tr("This has been retracted.") : tr("This was retracted in %1.").arg(when));
+    }
+    warnings.removeDuplicates();
+    m_noticeWarning->setText(warnings.join(u' '));
+    m_noticeWarning->setToolTip(tr("From Crossref, which lists notices published about a work. Each is listed below."));
+    m_noticeWarning->setVisible(!warnings.isEmpty());
+
     const QString undoSource = metadata::undoableSource(m_session.database(), p.id);
     m_undoLabel->setText(tr("Details from %1.").arg(metadata::providerLabel(undoSource)));
     m_undoRow->setVisible(!undoSource.isEmpty());
@@ -583,6 +629,11 @@ void DetailsPanel::reload()
 
     if (!p.doi.isEmpty())
         addLink(tr("DOI"), p.doi, doiLink(p.doi));
+    for (const Notice &notice : std::as_const(notices)) {
+        // Labels come from Crossref, so they're only ever shown as text.
+        const QString text = notice.date.isEmpty() ? notice.noticeDoi : tr("%1, %2").arg(notice.date, notice.noticeDoi);
+        addLink(notice.label.isEmpty() ? tr("Notice") : notice.label, text, doiLink(notice.noticeDoi));
+    }
     addFact(tr("ISBN"), p.isbn13.isEmpty() ? p.isbn10 : p.isbn13);
     addFact(tr("ISSN"), p.issn.isEmpty() ? p.eissn : p.issn);
     if (!p.arxivId.isEmpty()) {
@@ -624,6 +675,34 @@ void DetailsPanel::reload()
     m_collections->setVisible(!collections.isEmpty());
 
     const std::optional<StoredSummary> stored = SummaryRepository(m_session.database()).forPublication(p.id);
+    std::optional<summary::BatchEntry> pending;
+    try {
+        pending = summary::SummaryBatches::entryFor(m_session.database(), p.id);
+    } catch (const std::exception &) {
+        // It's a help, not what's being looked at.
+    }
+    m_summaryPending->setVisible(pending.has_value());
+    m_summaries->setVisible(pending.has_value());
+    if (pending) {
+        const QString sent = QLocale().toString(QDateTime::fromMSecsSinceEpoch(pending->sentAt), QLocale::ShortFormat);
+        switch (pending->state) {
+        case summary::BatchEntry::State::Arrived:
+            m_summaryPending->setText(tr("A summary from Claude, asked for at half price, has arrived. It's kept for you to review, "
+                                         "and only replaces anything here if you keep it."));
+            m_summaries->setText(tr("Review summary..."));
+            break;
+        case summary::BatchEntry::State::Failed:
+            m_summaryPending->setText(tr("A summary asked for at half price on %1 couldn't be made: %2").arg(sent, pending->problem));
+            m_summaries->setText(tr("Summaries from Claude..."));
+            break;
+        default:
+            m_summaryPending->setText(tr("A summary is on its way from Claude, asked for at half price on %1. It usually arrives "
+                                         "within the hour while Papertrail is open, and waits for you to review it.")
+                                          .arg(sent));
+            m_summaries->setText(tr("Summaries from Claude..."));
+            break;
+        }
+    }
     m_summaryInfo->setVisible(stored.has_value());
     m_summaryView->setVisible(stored.has_value());
     m_deleteSummary->setVisible(stored.has_value());

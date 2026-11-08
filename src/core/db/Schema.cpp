@@ -514,6 +514,171 @@ INSERT OR IGNORE INTO hidden_publication (publication_id)
 SELECT p.id FROM publication p WHERE coalesce(p.parent_id, p.id) IN (SELECT publication_id FROM expected_file) AND coalesce(p.parent_id, p.id) NOT IN (SELECT publication_id FROM publication_file);
 )sql";
 
+// Publications the user removed: their files are remembered, so they aren't added back when found again.
+// By contents where known; by the file itself for one that couldn't be read, or an empty one.
+const char *const kMigration13 = R"sql(
+CREATE TABLE IF NOT EXISTS removed_content (
+    id          INTEGER PRIMARY KEY,
+    sha256      TEXT UNIQUE,
+    file_id     INTEGER UNIQUE REFERENCES file(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    file_name   TEXT NOT NULL,
+    removed_at  INTEGER NOT NULL,
+    CHECK (sha256 IS NOT NULL OR file_id IS NOT NULL)
+) STRICT;
+)sql";
+
+// Collections can sit inside others, as tags can, with which one each is inside kept beside them so this can be
+// run again. An issue's articles go wherever their issue is.
+const char *const kMigration14 = R"sql(
+CREATE TABLE IF NOT EXISTS collection_parent (
+    collection_id   INTEGER PRIMARY KEY REFERENCES collection(id) ON DELETE CASCADE,
+    parent_id       INTEGER NOT NULL REFERENCES collection(id) ON DELETE CASCADE
+) STRICT;
+CREATE INDEX IF NOT EXISTS collection_parent_parent ON collection_parent(parent_id);
+INSERT OR IGNORE INTO collection_publication (collection_id, publication_id, added_at)
+SELECT cp.collection_id, p.id, cp.added_at FROM collection_publication cp JOIN publication p ON p.parent_id = cp.publication_id;
+)sql";
+
+// Highlights, notes on pages and each publication's own notes can be searched. Kept up to date by triggers, and
+// filled from what's there already, so this can be run again.
+const char *const kMigration15 = R"sql(
+CREATE VIRTUAL TABLE IF NOT EXISTS annotation_fts USING fts5(text, note, tokenize = "unicode61 remove_diacritics 2");
+CREATE VIRTUAL TABLE IF NOT EXISTS publication_note_fts USING fts5(notes, tokenize = "unicode61 remove_diacritics 2");
+
+CREATE TRIGGER IF NOT EXISTS annotation_fts_insert AFTER INSERT ON annotation BEGIN
+    INSERT INTO annotation_fts (rowid, text, note) VALUES (new.id, coalesce(new.selected_text, ''), coalesce(new.note, ''));
+END;
+CREATE TRIGGER IF NOT EXISTS annotation_fts_update AFTER UPDATE OF selected_text, note ON annotation BEGIN
+    DELETE FROM annotation_fts WHERE rowid = old.id;
+    INSERT INTO annotation_fts (rowid, text, note) VALUES (new.id, coalesce(new.selected_text, ''), coalesce(new.note, ''));
+END;
+CREATE TRIGGER IF NOT EXISTS annotation_fts_delete AFTER DELETE ON annotation BEGIN
+    DELETE FROM annotation_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS publication_note_fts_insert AFTER INSERT ON publication WHEN coalesce(new.notes, '') <> '' BEGIN
+    INSERT INTO publication_note_fts (rowid, notes) VALUES (new.id, new.notes);
+END;
+CREATE TRIGGER IF NOT EXISTS publication_note_fts_update AFTER UPDATE OF notes ON publication BEGIN
+    DELETE FROM publication_note_fts WHERE rowid = old.id;
+    INSERT INTO publication_note_fts (rowid, notes) SELECT new.id, new.notes WHERE coalesce(new.notes, '') <> '';
+END;
+CREATE TRIGGER IF NOT EXISTS publication_note_fts_delete AFTER DELETE ON publication BEGIN
+    DELETE FROM publication_note_fts WHERE rowid = old.id;
+END;
+
+INSERT INTO annotation_fts (rowid, text, note)
+SELECT id, coalesce(selected_text, ''), coalesce(note, '') FROM annotation WHERE id NOT IN (SELECT rowid FROM annotation_fts);
+INSERT INTO publication_note_fts (rowid, notes)
+SELECT id, notes FROM publication WHERE coalesce(notes, '') <> '' AND id NOT IN (SELECT rowid FROM publication_note_fts);
+)sql";
+
+// Notices published about works after they came out, such as retractions, found by checking DOIs with Crossref,
+// and when each publication was last checked.
+const char *const kMigration16 = R"sql(
+CREATE TABLE IF NOT EXISTS publication_notice (
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    notice_doi      TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    label           TEXT NOT NULL,
+    notice_date     TEXT NOT NULL,
+    source          TEXT NOT NULL,
+    found_at        INTEGER NOT NULL,
+    PRIMARY KEY (publication_id, notice_doi, kind)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS publication_notice_kind ON publication_notice(kind, publication_id);
+
+CREATE TABLE IF NOT EXISTS notice_check (
+    publication_id  INTEGER PRIMARY KEY REFERENCES publication(id) ON DELETE CASCADE,
+    checked_at      INTEGER NOT NULL
+) STRICT;
+)sql";
+
+// Summaries asked for in batches at half price, which come back later: what was sent, and what's come back so far
+// for any that paused and were carried on in another batch.
+const char *const kMigration17 = R"sql(
+CREATE TABLE IF NOT EXISTS summary_batch (
+    id          TEXT PRIMARY KEY,
+    model       TEXT NOT NULL,
+    effort      TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    status      TEXT NOT NULL CHECK (status IN ('waiting', 'collected'))
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS summary_batch_item (
+    batch_id        TEXT NOT NULL REFERENCES summary_batch(id) ON DELETE CASCADE,
+    custom_id       TEXT NOT NULL,
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    request         TEXT NOT NULL,
+    content_so_far  TEXT NOT NULL,
+    text_so_far     TEXT NOT NULL,
+    sources         TEXT NOT NULL,
+    usage           TEXT NOT NULL,
+    continuations   INTEGER NOT NULL DEFAULT 0,
+    state           TEXT NOT NULL CHECK (state IN ('waiting', 'saved', 'failed', 'continued')),
+    problem         TEXT,
+    PRIMARY KEY (batch_id, custom_id)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS summary_batch_item_waiting ON summary_batch_item(state, publication_id);
+)sql";
+
+// Summaries from batches wait to be reviewed rather than replacing what a publication has, and those that paused wait
+// to be sent on, both kept here so closing Papertrail loses neither. Batch items move to a table that allows those
+// states, since a check can't be changed in place. And what asking Claude has cost, kept even when a summary isn't.
+const char *const kMigration18 = R"sql(
+CREATE TABLE IF NOT EXISTS summary_request (
+    batch_id        TEXT NOT NULL REFERENCES summary_batch(id) ON DELETE CASCADE,
+    custom_id       TEXT NOT NULL,
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    request         TEXT NOT NULL,
+    content_so_far  TEXT NOT NULL,
+    text_so_far     TEXT NOT NULL,
+    sources         TEXT NOT NULL,
+    usage           TEXT NOT NULL,
+    continuations   INTEGER NOT NULL DEFAULT 0,
+    state           TEXT NOT NULL CHECK (state IN ('waiting', 'to_continue', 'arrived', 'kept', 'discarded', 'failed',
+                                                   'dismissed', 'continued')),
+    problem         TEXT,
+    cost_dollars    REAL,
+    sent_at         INTEGER NOT NULL,
+    arrived_at      INTEGER,
+    PRIMARY KEY (batch_id, custom_id)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS summary_request_state ON summary_request(state, publication_id);
+
+INSERT OR IGNORE INTO summary_request (batch_id, custom_id, publication_id, request, content_so_far, text_so_far, sources, usage,
+                                       continuations, state, problem, sent_at)
+SELECT i.batch_id, i.custom_id, i.publication_id, i.request, i.content_so_far, i.text_so_far, i.sources, i.usage, i.continuations,
+       CASE i.state WHEN 'saved' THEN 'kept' ELSE i.state END, i.problem, b.created_at
+FROM summary_batch_item i JOIN summary_batch b ON b.id = i.batch_id;
+DROP TABLE IF EXISTS summary_batch_item;
+
+CREATE TABLE IF NOT EXISTS summary_spend (
+    key             TEXT PRIMARY KEY,
+    spent_at        INTEGER NOT NULL,
+    publication_id  INTEGER REFERENCES publication(id) ON DELETE SET NULL,
+    title           TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('instant', 'batch')),
+    cost_dollars    REAL,
+    input_tokens    INTEGER NOT NULL DEFAULT 0,
+    output_tokens   INTEGER NOT NULL DEFAULT 0,
+    web_searches    INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX IF NOT EXISTS summary_spend_time ON summary_spend(spent_at);
+
+-- What was spent before this was kept: the summaries kept so far. Only until something's been noted as it was spent,
+-- since a summary kept later is already counted.
+INSERT OR IGNORE INTO summary_spend (key, spent_at, publication_id, title, model, kind, cost_dollars)
+SELECT 'summary:' || s.uuid, s.created_at, s.publication_id, p.title, s.model,
+       CASE WHEN EXISTS (SELECT 1 FROM summary_request r WHERE r.publication_id = s.publication_id AND r.state = 'kept')
+            THEN 'batch' ELSE 'instant' END,
+       s.cost_dollars
+FROM publication_summary s JOIN publication p ON p.id = s.publication_id
+WHERE NOT EXISTS (SELECT 1 FROM summary_spend WHERE key NOT LIKE 'summary:%');
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -531,6 +696,12 @@ const std::vector<Migration> &libraryMigrations()
         {10, kMigration10},
         {11, kMigration11},
         {12, kMigration12},
+        {13, kMigration13},
+        {14, kMigration14},
+        {15, kMigration15},
+        {16, kMigration16},
+        {17, kMigration17},
+        {18, kMigration18},
     };
     return migrations;
 }

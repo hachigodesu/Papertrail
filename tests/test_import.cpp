@@ -5,6 +5,7 @@
 #include "core/query/LibraryQuery.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
+#include "core/repo/RemovedContent.h"
 #include "import/ImportService.h"
 #include "import/JournalIssues.h"
 #include "core/repo/VolumeArticles.h"
@@ -632,6 +633,69 @@ private slots:
         QCOMPARE(m_service->pendingJobs(), qint64(0));
         QCOMPARE(report.unreadable, 1);
         QCOMPARE(m_query->count({}), qint64(2));
+    }
+
+    void aRemovedPublicationStaysOutUntilBroughtBack()
+    {
+        copySample("article.pdf", "paper.pdf");
+        copySample("thesis.pdf");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_query->count({}), qint64(2));
+        const QMap<QString, QByteArray> before = folderHashes(docs());
+
+        qint64 paper = 0;
+        for (const qint64 id : m_query->ids({}, {})) {
+            if (m_files->filesFor(id).first().relativePath == QLatin1StringView("paper.pdf"))
+                paper = id;
+        }
+        QVERIFY(paper > 0);
+        RemovedContent removed(*m_db);
+        removed.remove({paper}, 1000);
+        QCOMPARE(m_query->count({}), qint64(1));
+        QCOMPARE(removed.count(), qint64(1));
+        QCOMPARE(removed.entries().first().fileName, QStringLiteral("paper.pdf"));
+        QCOMPARE(folderHashes(docs()), before); // The file itself is never touched.
+
+        // Scanning again, or finding the same contents somewhere else, doesn't bring it back.
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QDir(docs()).mkpath(QStringLiteral("elsewhere"));
+        copySample("article.pdf", "elsewhere/renamed copy.pdf");
+        m_service->scan(m_root);
+        const ImportReport again = m_service->processQueue();
+        QCOMPARE(again.keptOut, 1);
+        QCOMPARE(again.publicationsCreated, 0);
+        QCOMPARE(m_query->count({}), qint64(1));
+
+        // Brought back, both copies come back as one publication.
+        QCOMPARE(removed.bringBack({removed.entries().first().id}), 2);
+        QCOMPARE(removed.count(), qint64(0));
+        m_service->scan(m_root);
+        const ImportReport back = m_service->processQueue();
+        QCOMPARE(back.publicationsCreated, 1);
+        QCOMPARE(m_query->count({}), qint64(2));
+        const QMap<QString, QByteArray> after = folderHashes(docs());
+        for (auto file = before.cbegin(); file != before.cend(); ++file)
+            QCOMPARE(after.value(file.key()), file.value());
+    }
+
+    void anUnreadableRemovedFileStaysOut()
+    {
+        copySample("garbage.pdf");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_query->count({}), qint64(1));
+        RemovedContent(*m_db).remove(m_query->ids({}, {}), 1000);
+        QCOMPARE(m_query->count({}), qint64(0));
+        // However often it's tried again, it isn't listed again.
+        for (int i = 0; i < 2; ++i) {
+            QFile::remove(docs() + QStringLiteral("/garbage.pdf"));
+            copySample("garbage.pdf");
+            m_service->scan(m_root);
+            m_service->processQueue();
+        }
+        QCOMPARE(m_query->count({}), qint64(0));
     }
 
     void duplicatesBecomeOnePublicationWithTwoLocations()
@@ -1284,6 +1348,18 @@ private slots:
     }
 
 private:
+    // Each file's contents, by its place in the folder.
+    static QMap<QString, QByteArray> folderHashes(const QString &folder)
+    {
+        QMap<QString, QByteArray> hashes;
+        QDirIterator it(folder, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString path = it.next();
+            hashes.insert(QDir(folder).relativeFilePath(path), hashOf(path));
+        }
+        return hashes;
+    }
+
     static QByteArray hashOf(const QString &path)
     {
         QFile file(path);

@@ -9,6 +9,7 @@
 #include "import/ImportService.h"
 #include "metadata/LookupEngine.h"
 #include "metadata/Matching.h"
+#include "metadata/NoticeChecker.h"
 #include "metadata/Providers.h"
 #include "metadata/Transport.h"
 #include "ui/DetailsPanel.h"
@@ -207,6 +208,119 @@ private slots:
         QCOMPARE(p.abstract, QStringLiteral("Abstract A made-up abstract about steel."));
         QCOMPARE(record->type.value(), PublicationType::JournalArticle);
         QVERIFY(!record->preprintHint);
+    }
+
+    void readsCrossrefNotices()
+    {
+        // As Crossref answers, with made-up works: a notice can be listed by the publisher and by Retraction Watch.
+        const QByteArray body = R"({"status":"ok","message":{"items":[
+            {"DOI":"10.1000/notice.1","update-to":[
+                {"DOI":"10.1000/Paper.ONE","type":"retraction","label":"Retraction","source":"publisher",
+                 "updated":{"date-parts":[[2021,3,9]]}},
+                {"DOI":"10.1000/paper.one","type":"retraction","label":"Retraction","source":"retraction-watch",
+                 "updated":{"date-parts":[[2021,3,9]]}}]},
+            {"DOI":"10.1000/notice.2","update-to":[
+                {"DOI":"10.1000/paper.two","type":"expression-of-concern","updated":{"date-parts":[[2019]]}},
+                {"DOI":"10.1000/paper.two","type":"<b>odd</b>","label":"Odd"},
+                {"type":"correction"}]},
+            {"title":["No DOI of its own"],"update-to":[{"DOI":"10.1000/paper.three","type":"correction"}]}]}})";
+        bool readable = false;
+        const QHash<QString, QList<Notice>> found = parseCrossrefNotices(body, &readable);
+        QVERIFY(readable);
+        QCOMPARE(found.size(), 2);
+        QCOMPARE(found.value(QStringLiteral("10.1000/paper.one")).size(), 1);
+        const Notice retraction = found.value(QStringLiteral("10.1000/paper.one")).first();
+        QCOMPARE(retraction.kind, QStringLiteral("retraction"));
+        QCOMPARE(retraction.noticeDoi, QStringLiteral("10.1000/notice.1"));
+        QCOMPARE(retraction.date, QStringLiteral("2021-03-09"));
+        QVERIFY(retraction.isWarning());
+        const QList<Notice> concern = found.value(QStringLiteral("10.1000/paper.two"));
+        QCOMPARE(concern.size(), 1);
+        QCOMPARE(concern.first().kind, QStringLiteral("expression_of_concern"));
+        QCOMPARE(concern.first().label, QStringLiteral("Expression of concern"));
+        QCOMPARE(concern.first().date, QStringLiteral("2019"));
+
+        QVERIFY(parseCrossrefNotices("not json", &readable).isEmpty());
+        QVERIFY(!readable);
+    }
+
+    void noticesAreCheckedInBatchesSendingOnlyDois()
+    {
+        const qint64 one = addPublication(QStringLiteral("Made Up Study One"), QStringLiteral("10.1000/One.1"), false);
+        const qint64 two = addPublication(QStringLiteral("Made Up Study Two"), QStringLiteral("10.1000/two.2"), false);
+        const qint64 three = addPublication(QStringLiteral("Made Up Study Three"), QStringLiteral("10.1000/three.3"), false);
+        const qint64 comma = addPublication(QStringLiteral("Made Up Study Four"), QStringLiteral("10.1000/four,4"), false);
+        addPublication(QStringLiteral("Made Up Study Five"), QString(), false);
+        m_fake->answer(QStringLiteral("updates"), R"({"message":{"items":[
+            {"DOI":"10.1000/n1","update-to":[{"DOI":"10.1000/one.1","type":"retraction","label":"Retraction","updated":{"date-parts":[[2022,1,2]]}}]},
+            {"DOI":"10.1000/n3","update-to":[{"DOI":"10.1000/three.3","type":"correction","label":"Correction"}]}]}})");
+
+        NoticeChecker checker(*m_db, *m_transport);
+        checker.setBatchSize(2);
+        checker.setIntervalMs(0);
+        QSignalSpy finished(&checker, &NoticeChecker::finished);
+        QSignalSpy changed(&checker, &NoticeChecker::noticesChanged);
+        QSignalSpy problem(&checker, &NoticeChecker::problem);
+        checker.start();
+        QVERIFY(finished.wait(kWaitMs));
+        QVERIFY2(problem.isEmpty(), qPrintable(problem.isEmpty() ? QString() : problem.first().first().toString() + u' ' + m_fake->asked.join(u' ')));
+        QCOMPARE(finished.first().at(0).toInt(), 4);
+        QCOMPARE(finished.first().at(1).toInt(), 1); // Only the retraction is a warning.
+
+        // Two requests: the first two, then the third alone, since a comma can't be asked about. Only DOIs went.
+        QCOMPARE(m_fake->count(), 2);
+        const QString asked = m_fake->asked.join(u'\n');
+        QVERIFY2(asked.contains(QStringLiteral("updates:10.1000/one.1,updates:10.1000/two.2")), qPrintable(asked));
+        QVERIFY(!asked.contains(QStringLiteral("four")));
+        QVERIFY(!asked.contains(QStringLiteral("Made")));
+        QVERIFY(!asked.contains(QStringLiteral("mailto")));
+
+        NoticeRepository notices(*m_db);
+        QCOMPARE(notices.forPublication(one).size(), 1);
+        QCOMPARE(notices.forPublication(one).first().date, QStringLiteral("2022-01-02"));
+        QCOMPARE(notices.forPublication(two).size(), 0);
+        QCOMPARE(notices.forPublication(three).first().kind, QStringLiteral("correction"));
+        QCOMPARE(notices.forPublication(comma).size(), 0);
+        QCOMPARE(notices.warningCount(), qint64(1));
+        QVERIFY(changed.first().first().value<QList<qint64>>().contains(one));
+        PublicationFilter retracted;
+        retracted.retracted = true;
+        QCOMPARE(LibraryQuery(*m_db).ids(retracted, {}), QList<qint64>{one});
+        QCOMPARE(LibraryQuery(*m_db).flagCounts({}).retracted, qint64(1));
+
+        // Checked, so not asked about again for a while.
+        finished.clear();
+        checker.start();
+        QVERIFY(finished.wait(kWaitMs));
+        QCOMPARE(finished.first().at(0).toInt(), 0);
+        QCOMPARE(m_fake->count(), 2);
+
+        // A notice that's gone when checked again is gone here too.
+        m_fake->answers.clear();
+        m_fake->answer(QStringLiteral("updates"), R"({"message":{"items":[]}})");
+        checker.setRecheckAfterDays(0);
+        checker.setContactEmail(QStringLiteral("someone@example.org"));
+        finished.clear();
+        checker.start();
+        QVERIFY(finished.wait(kWaitMs));
+        QCOMPARE(notices.warningCount(), qint64(0));
+        QVERIFY(m_fake->asked.last().contains(QStringLiteral("mailto")));
+    }
+
+    void aFailedNoticeCheckIsTriedAgainLater()
+    {
+        const qint64 one = addPublication(QStringLiteral("Made Up Study One"), QStringLiteral("10.1000/one.1"), false);
+        m_fake->answer(QStringLiteral("updates"), QByteArray(), 503);
+        NoticeChecker checker(*m_db, *m_transport);
+        checker.setIntervalMs(0);
+        QSignalSpy finished(&checker, &NoticeChecker::finished);
+        QSignalSpy problem(&checker, &NoticeChecker::problem);
+        checker.start();
+        QVERIFY(finished.wait(kWaitMs));
+        QCOMPARE(problem.size(), 1);
+        QCOMPARE(finished.first().at(0).toInt(), 0);
+        QCOMPARE(NoticeRepository(*m_db).dueForCheck(10, 0).size(), 1);
+        QCOMPARE(NoticeRepository(*m_db).dueForCheck(10, 0).first().first, one);
     }
 
     void aPreprintIsOnlyEverAHint()
@@ -1028,6 +1142,59 @@ private slots:
         m_window->setLookupMode(QStringLiteral("online_review"), QString());
         m_window->lookUp(m_session->query().ids({}, {}));
         QTRY_VERIFY_WITH_TIMEOUT(server.connections.load() > 0, kWaitMs);
+    }
+
+    void noticesAreOnlyCheckedOnlineAndWhenWanted()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        openWindow(&server);
+        addSessionPublication(QStringLiteral("Made Up Study"), QStringLiteral("10.1000/made.up"));
+
+        // No choice made yet, which is offline.
+        m_window->lookupThread()->checkNotices();
+        QTest::qWait(400);
+        QCOMPARE(server.connections.load(), 0);
+
+        // Online, but not wanted.
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        m_session->settings().setValue(QStringLiteral("metadata.check_notices"), false);
+        m_window->lookupThread()->checkNotices();
+        QTest::qWait(400);
+        QCOMPARE(server.connections.load(), 0);
+
+        // Both: it asks, with the real network code, about the DOI and nothing else.
+        m_session->settings().setValue(QStringLiteral("metadata.check_notices"), true);
+        m_window->lookupThread()->checkNotices();
+        QTRY_VERIFY_WITH_TIMEOUT(server.connections.load() > 0, kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!server.requests.isEmpty(), kWaitMs);
+        QVERIFY2(server.requests.first().contains("updates:10.1000/made.up"), qPrintable(server.requests.first()));
+        QVERIFY(!server.requests.first().contains("Made"));
+    }
+
+    void aRetractionIsShownWithItsPublication()
+    {
+        openFakeWindow();
+        const qint64 id = addSessionPublication(QStringLiteral("Made Up Study"), QStringLiteral("10.1000/made.up"));
+        const qint64 other = addSessionPublication(QStringLiteral("Another Made Up Study"), QStringLiteral("10.1000/other"));
+        Notice retraction{QStringLiteral("retraction"), QStringLiteral("Retraction"), QStringLiteral("10.1000/notice"),
+                          QStringLiteral("2022-01-02"), QStringLiteral("publisher")};
+        Notice correction{QStringLiteral("correction"), QStringLiteral("Correction"), QStringLiteral("10.1000/fix"),
+                          QString(), QString()};
+        NoticeRepository(m_session->database()).record({id, other}, {{id, {retraction}}, {other, {correction}}}, 1000);
+
+        m_window->details()->showPublication(id);
+        QVERIFY(m_window->details()->noticeWarning()->isVisibleTo(m_window->details()));
+        QCOMPARE(m_window->details()->noticeWarning()->text(), QStringLiteral("This was retracted in 2022."));
+        QCOMPARE(m_window->details()->noticeWarning()->textFormat(), Qt::PlainText);
+
+        // A correction is listed with the details, but isn't warned about.
+        m_window->details()->showPublication(other);
+        QVERIFY(!m_window->details()->noticeWarning()->isVisibleTo(m_window->details()));
+        bool listed = false;
+        for (const QLabel *label : m_window->details()->findChildren<QLabel *>())
+            listed = listed || label->text().contains(QStringLiteral("10.1000/fix"));
+        QVERIFY(listed);
     }
 
     void goingOfflineDropsWhatsWaiting()

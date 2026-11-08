@@ -34,6 +34,7 @@ struct ExportReport {
     qint64 collections = 0;
     qint64 annotations = 0;
     qint64 summaries = 0;
+    qint64 removed = 0;
     bool cancelled = false;
 };
 
@@ -54,6 +55,7 @@ struct Bundle {
     QJsonArray readingStates;
     QJsonArray provenance;
     QJsonArray summaries;
+    QJsonArray removed; // Files of publications removed by hand, by contents, so they stay out here too.
     QJsonObject settings;
 };
 
@@ -95,6 +97,7 @@ struct ImportReport {
     qint64 annotationsUpdated = 0;
     qint64 summariesAdded = 0;
     qint64 readingPlaces = 0;
+    qint64 removedAdded = 0; // Files to keep out, as they were removed on the other computer.
     core::SettingsImportResult settings;
     QString backupPath;
     bool cancelled = false; // Nothing was changed.

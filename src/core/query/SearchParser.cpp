@@ -23,7 +23,7 @@ bool isFieldName(const QString &name)
         QStringLiteral("journal"), QStringLiteral("conference"), QStringLiteral("publisher"),
         QStringLiteral("institution"), QStringLiteral("tag"), QStringLiteral("doi"),
         QStringLiteral("isbn"), QStringLiteral("issn"), QStringLiteral("arxiv"),
-        QStringLiteral("type"), QStringLiteral("year"),
+        QStringLiteral("type"), QStringLiteral("year"), QStringLiteral("note"),
     };
     return fields.contains(name);
 }
@@ -213,6 +213,11 @@ ParsedSearch parseSearch(const QString &text)
                 addWords(Token{QString(), token.value, token.quoted});
             else
                 result.types << types;
+        } else if (token.field == QStringLiteral("note")) {
+            QStringList terms;
+            addFtsTerms(terms, Token{QString(), token.value, token.quoted});
+            if (!terms.isEmpty())
+                result.notesMatches << terms.join(u' ');
         } else if (token.field == QStringLiteral("year")) {
             if (!parseYear(token.value, result))
                 addWords(Token{QString(), token.value, token.quoted});

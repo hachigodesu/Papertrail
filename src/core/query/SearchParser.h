@@ -29,6 +29,9 @@ struct ParsedSearch {
     QString contentsMatch; // The plain words and phrases.
     QString fieldMatch;    // The rest, which only the metadata can answer.
     QString contentsText;  // What to look for in a reader: a phrase if there is one, or else the longest word.
+    // What note: asks for, matched against highlights, notes on pages and a publication's own notes. Each is an
+    // FTS5 expression, and all of them must match.
+    QStringList notesMatches;
     QStringList tagPrefixes;
     QStringList doiPrefixes;
     QStringList isbns;

@@ -45,6 +45,11 @@ public:
 
     // How many pages are still to be read for titles the contents didn't give.
     int headingsPending() const { return int(m_headingsWanted.size()); }
+    // Whether, with no contents to go on, the articles were found by reading every page.
+    bool foundFromPages() const { return m_fromPages; }
+
+    // The most pages read one by one for a file with no contents.
+    static constexpr int kMostPagesToRead = 2000;
 
 signals:
     // The contents have been read, and the table filled in.
@@ -59,6 +64,7 @@ private:
     void onOutline(const QList<papertrail::ui::ReaderOutlineItem> &items);
     void onHeading(int page, const papertrail::ui::ReaderHeading &heading);
     void requestHeadings();
+    void readEveryPage();
     void showRow(int row);
     void updateMessage();
     void fillTable();
@@ -75,6 +81,7 @@ private:
     struct Heading {
         QString title;
         QString doi;
+        QStringList dois;
     };
     QHash<int, Heading> m_headings;
     QSet<int> m_headingsWanted;
@@ -83,6 +90,8 @@ private:
     int m_named = 0;
     QList<qint64> m_articleIds;
     bool m_numberingRead = false;
+    bool m_fromPages = false;
+    bool m_pagesRead = false;
     bool m_filledNumbering = false;
     QString m_numberingNote;
     QLabel *m_message = nullptr;

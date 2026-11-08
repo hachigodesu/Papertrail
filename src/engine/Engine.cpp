@@ -9,6 +9,11 @@
 
 namespace papertrail::engine {
 
+void Document::saveMarkedCopy(const QString &, const QList<MarkToWrite> &)
+{
+    throw EngineError("only a PDF can have its marks written into a copy");
+}
+
 double RenderedPage::inkFraction() const
 {
     const qsizetype pixels = qsizetype(width) * height;

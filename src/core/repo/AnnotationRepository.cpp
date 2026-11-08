@@ -2,6 +2,7 @@
 
 #include "core/db/Database.h"
 #include "core/model/PublicationFields.h"
+#include "core/query/SearchParser.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -233,6 +234,39 @@ QList<Annotation> AnnotationRepository::forPublication(qint64 publicationId)
     while (select->step())
         annotations << annotationFrom(*select);
     return sorted(annotations);
+}
+
+QList<AnnotationListing> AnnotationRepository::everywhere(const QString &search, int limit, qint64 *total)
+{
+    const QString match = parseSearch(search).contentsMatch;
+    QByteArray where = "WHERE publication_id NOT IN (SELECT publication_id FROM hidden_publication) ";
+    if (!match.isEmpty())
+        where += "AND id IN (SELECT rowid FROM annotation_fts WHERE annotation_fts MATCH ?1) ";
+    if (total) {
+        auto count = m_db.prepare("SELECT count(*) FROM annotation " + where);
+        if (!match.isEmpty())
+            count->bind(1, match);
+        count->step();
+        *total = count->int64At(0);
+    }
+    QList<AnnotationListing> found;
+    if (!search.trimmed().isEmpty() && match.isEmpty())
+        return found; // Nothing searchable in it, such as only punctuation.
+    auto select = m_db.prepare(QByteArray(kColumns) + where + "ORDER BY updated_at DESC, id DESC LIMIT ?2");
+    if (!match.isEmpty())
+        select->bind(1, match);
+    select->bind(2, limit);
+    Statement &title = m_db.cached("SELECT title FROM publication WHERE id = ?");
+    while (select->step()) {
+        AnnotationListing listing;
+        listing.annotation = annotationFrom(*select);
+        title.bind(1, listing.annotation.publicationId);
+        if (title.step())
+            listing.publicationTitle = title.textAt(0);
+        title.reset();
+        found << listing;
+    }
+    return found;
 }
 
 qint64 AnnotationRepository::countFor(qint64 publicationId)

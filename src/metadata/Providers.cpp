@@ -11,6 +11,8 @@
 #include <QUrlQuery>
 #include <QXmlStreamReader>
 
+#include <algorithm>
+
 namespace papertrail::metadata {
 
 using namespace core;
@@ -275,6 +277,75 @@ FoundRecord FoundRecord::fromJson(const QJsonObject &json)
 QUrl crossrefWorkUrl(const ProviderUrls &urls, const QString &doi)
 {
     return QUrl(urls.crossref + QStringLiteral("/works/") + QString::fromLatin1(QUrl::toPercentEncoding(doi)), QUrl::TolerantMode);
+}
+
+QUrl crossrefNoticesUrl(const ProviderUrls &urls, const QStringList &dois)
+{
+    QUrl url(urls.crossref + QStringLiteral("/works"));
+    QStringList filters;
+    for (const QString &doi : dois)
+        filters << QStringLiteral("updates:") + QString::fromLatin1(QUrl::toPercentEncoding(doi.trimmed().toLower(), "/()"));
+    QUrlQuery query;
+    // Repeated, they're each matched: notices about any of these works.
+    query.addQueryItem(QStringLiteral("filter"), filters.join(u','));
+    query.addQueryItem(QStringLiteral("rows"), QStringLiteral("1000"));
+    query.addQueryItem(QStringLiteral("select"), QStringLiteral("DOI,update-to"));
+    url.setQuery(query);
+    return url;
+}
+
+QHash<QString, QList<core::Notice>> parseCrossrefNotices(const QByteArray &body, bool *readable)
+{
+    QHash<QString, QList<core::Notice>> found;
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(body, &error);
+    const QJsonObject message = document.object().value(QStringLiteral("message")).toObject();
+    const bool ok = error.error == QJsonParseError::NoError && message.value(QStringLiteral("items")).isArray();
+    if (readable)
+        *readable = ok;
+    if (!ok)
+        return found;
+    static const QRegularExpression kind(QStringLiteral("^[a-z][a-z_-]{0,40}$"));
+    for (const QJsonValue &itemValue : message.value(QStringLiteral("items")).toArray()) {
+        const QJsonObject item = itemValue.toObject();
+        const QString noticeDoi = normaliseDoi(item.value(QStringLiteral("DOI")).toString());
+        if (noticeDoi.isEmpty())
+            continue;
+        for (const QJsonValue &updateValue : item.value(QStringLiteral("update-to")).toArray()) {
+            const QJsonObject update = updateValue.toObject();
+            const QString target = normaliseDoi(update.value(QStringLiteral("DOI")).toString()).toLower();
+            core::Notice notice;
+            notice.kind = update.value(QStringLiteral("type")).toString().trimmed().toLower().replace(u'-', u'_');
+            if (target.isEmpty() || !kind.match(notice.kind).hasMatch())
+                continue;
+            notice.noticeDoi = noticeDoi;
+            notice.label = update.value(QStringLiteral("label")).toString().simplified().left(80);
+            if (notice.label.isEmpty()) {
+                notice.label = notice.kind;
+                notice.label.replace(u'_', u' ');
+                if (!notice.label.isEmpty())
+                    notice.label[0] = notice.label.at(0).toUpper();
+            }
+            notice.source = update.value(QStringLiteral("source")).toString().simplified().left(40);
+            const QJsonArray parts = update.value(QStringLiteral("updated")).toObject().value(QStringLiteral("date-parts")).toArray().at(0).toArray();
+            QStringList date;
+            for (int i = 0; i < parts.size() && i < 3; ++i) {
+                const int number = parts.at(i).toInt();
+                if (number <= 0)
+                    break;
+                date << (i == 0 ? QString::number(number) : QStringLiteral("%1").arg(number, 2, 10, QLatin1Char('0')));
+            }
+            notice.date = date.join(u'-');
+            // The same notice can be listed twice, from the publisher and from Retraction Watch.
+            QList<core::Notice> &list = found[target];
+            const bool known = std::any_of(list.cbegin(), list.cend(), [&](const core::Notice &other) {
+                return other.noticeDoi == notice.noticeDoi && other.kind == notice.kind;
+            });
+            if (!known)
+                list << notice;
+        }
+    }
+    return found;
 }
 
 QUrl crossrefSearchUrl(const ProviderUrls &urls, const QString &title)

@@ -218,7 +218,41 @@ QByteArray Database::changeStamp()
     version.step();
     const qint64 dataVersion = version.int64At(0);
     version.reset();
-    return QByteArray::number(dataVersion) + '/' + QByteArray::number(sqlite3_total_changes64(m_db));
+    return QByteArray::number(dataVersion) + '/' + QByteArray::number(sqlite3_total_changes64(m_db)) + '/'
+        + QByteArray::number(m_replaced);
+}
+
+void Database::replaceWith(const QString &path)
+{
+    if (inTransaction())
+        throw DbError(SQLITE_MISUSE, "can't replace a database during a transaction");
+    m_cache.clear(); // Nothing of this connection's may be reading while its pages change.
+    sqlite3 *source = nullptr;
+    const QByteArray utf8 = path.toUtf8();
+    int rc = sqlite3_open_v2(utf8.constData(), &source, SQLITE_OPEN_READONLY, nullptr);
+    if (rc != SQLITE_OK) {
+        const std::string message = std::string("cannot open the copy: ") + (source ? sqlite3_errmsg(source) : sqlite3_errstr(rc));
+        sqlite3_close(source);
+        throw DbError(rc, message);
+    }
+    sqlite3_backup *backup = sqlite3_backup_init(m_db, "main", source, "main");
+    if (!backup) {
+        const std::string message = std::string("cannot start copying: ") + sqlite3_errmsg(m_db);
+        sqlite3_close(source);
+        throw DbError(sqlite3_errcode(m_db), message);
+    }
+    // In one step, so other connections never see half of it. They're waited for as any write would.
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        rc = sqlite3_backup_step(backup, -1);
+        if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED)
+            break;
+        sqlite3_sleep(100);
+    }
+    sqlite3_backup_finish(backup);
+    sqlite3_close(source);
+    if (rc != SQLITE_DONE)
+        throw DbError(rc, std::string("cannot copy the database: ") + sqlite3_errstr(rc));
+    ++m_replaced;
 }
 
 bool Database::inTransaction() const

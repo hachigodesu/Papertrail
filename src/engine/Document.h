@@ -60,6 +60,17 @@ struct TextSelection {
     QString text;
 };
 
+// A highlight, underline or note to write into a copy of a document. Rectangles are in points in the page's own
+// space, as a selection gives them.
+struct MarkToWrite {
+    enum class Kind { Highlight, Underline, Note };
+    int page = 0; // Counting from 0.
+    QList<QRectF> rects;
+    Kind kind = Kind::Highlight;
+    QString colour; // As #rrggbb.
+    QString note;
+};
+
 // One open document. Nothing here ever writes to the document's file.
 class Document {
 public:
@@ -109,6 +120,13 @@ public:
     // Raw embedded metadata. Empty if the format or file has none.
     virtual QByteArray xmpPacket() = 0;
     virtual QByteArray epubPackageDocument() = 0;
+
+    // Whether a copy can be written with marks in it, which only a PDF can have.
+    virtual bool canSaveMarkedCopy() { return false; }
+    // Writes a new file at `path`, a copy of this document with these marks added as ordinary PDF annotations,
+    // which any PDF reader shows. The document's own file is never written: a path naming it is refused. Throws
+    // EngineError if it can't.
+    virtual void saveMarkedCopy(const QString &path, const QList<MarkToWrite> &marks);
 };
 
 // Opens documents with the right engine for each format. Use one per thread.

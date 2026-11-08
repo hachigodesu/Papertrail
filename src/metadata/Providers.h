@@ -1,8 +1,10 @@
 #pragma once
 
 #include "core/model/Publication.h"
+#include "core/repo/NoticeRepository.h"
 
 #include <QByteArray>
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QString>
@@ -45,6 +47,13 @@ struct ProviderUrls {
 };
 
 QUrl crossrefWorkUrl(const ProviderUrls &urls, const QString &doi);
+
+// Asks Crossref for the notices, such as retractions, that update any of these works. A DOI with a comma can't be
+// asked about this way, so callers leave those out.
+QUrl crossrefNoticesUrl(const ProviderUrls &urls, const QStringList &dois);
+// The notices in Crossref's answer, by the DOI of the work each is about, in lower case. Anything that isn't one is
+// skipped, and a reply that can't be read gives nothing.
+QHash<QString, QList<core::Notice>> parseCrossrefNotices(const QByteArray &body, bool *readable = nullptr);
 QUrl crossrefSearchUrl(const ProviderUrls &urls, const QString &title);
 QUrl openAlexWorkUrl(const ProviderUrls &urls, const QString &doi);
 QUrl openAlexSearchUrl(const ProviderUrls &urls, const QString &title);

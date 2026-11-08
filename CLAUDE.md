@@ -120,7 +120,7 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 
 ### Worker process
 
-Parsing unknown files will eventually crash a parser, so it happens in a separate process. `WorkerClient` drives `papertrail-worker` with `QProcess`, using line-delimited JSON over stdin and stdout (ops: `hash`, `inspect`), and restarts it after a crash or timeout. A file that keeps failing is listed as unreadable under its file name, so it isn't lost.
+Parsing unknown files will eventually crash a parser, so it happens in a separate process. `WorkerClient` drives `papertrail-worker` with `QProcess`, using line-delimited JSON over stdin and stdout (ops: `hash`, `inspect`, `pagetext`, `cover`, `markedcopy`), and restarts it after a crash or timeout. A file that keeps failing is listed as unreadable under its file name, so it isn't lost.
 
 This is a real risk: Arch's MuPDF hits a double free on `tests/samples/truncated.pdf`, while Ubuntu's and MSYS2's builds don't. Don't assume a clean Windows run means a file is safe.
 
@@ -177,6 +177,8 @@ Lookups are `job` rows of kind `lookup`, which belong to `LookupRepository` and 
 
 Rate limits differ by source and by kind of request, and OpenAlex's anonymous searches run out at about 100 a day. A 429 blocks that source alone, and the queue only waits when no source could answer. A failure of the network or a source puts the job back without counting it as an attempt.
 
+Retractions and other notices come from Crossref (`metadata/NoticeChecker`, `core/repo/NoticeRepository`), which `LookupThread` runs after any lookups, only when lookups are online and `metadata.check_notices` is on. It sends DOIs only, 20 to a request, each publication about once a month. A run never checks one publication twice, so the cut-off for "due" is never later than the run's start.
+
 ### Citations
 
 `citation::citationItems` turns publications into `CitationItem`s, taking what an article or chapter lacks (its journal, book, editors, publisher) from what it's in. `Styles.cpp` holds the four styles, written out by hand rather than through CSL: Harvard (following rules the user chose, which mustn't be named or quoted anywhere), APA 7th, IEEE and Chicago author-date (18th). `formatReferences` sorts, numbers and adds 2020a/2020b letters across a list, so format a list in one call rather than item by item. Each style's output for every kind of publication is fixed in `tests/fixtures/citations/`, written by hand from the rules, and a change to a style should change those by hand too. `test_citations` also runs pdflatex, BibTeX and biber over an export where they're installed (the Ubuntu WSL distro has them). `CitationActions` is the window's side: copying with italics as HTML and plain text, and exporting on its own thread and database connection.
@@ -189,9 +191,15 @@ A `.papertrail` file is a zip (`transfer/Zip`, on zlib) of versioned JSON, one f
 
 `src/summary` builds requests for Claude, reads replies and works out costs (`SummaryRequest`), and drives one summary with `Transport::send` (`SummaryEngine`), carrying on after `pause_turn`. It doesn't use an SDK, since there isn't one for C++. `SummaryDialog` holds the steps. Nothing about a publication goes before the user confirms, and the paper needs a confirmation of its own, so estimates are worked out locally and never by asking Anthropic. The key lives only in `ApiKeyStore` (QtKeychain, built from `cmake/Keychain.cmake`), never in the database or settings, because exports include every setting. `Transport::send` doesn't follow redirects, so a key can't reach another host. Prices are in `knownModels()`: update them and `pricesCheckedOn()` together. Never make a real API call in a test.
 
+Batches at half price (`summary/SummaryBatches`) keep their state in `summary_batch` and `summary_request`, so closing the app loses nothing, and the window checks every few minutes while any wait. Collecting a batch notes every result in one transaction. A result that paused is noted as `to_continue` before it's carried on in a new batch, and one that arrived waits as `arrived` until the user keeps or discards it in `SummariesDialog`. Only keeping it touches `publication_summary`. They only ever send identifying details, never the paper.
+
+`summary_spend` (`summary/SummarySpending`) notes what each reply cost as it comes back, whether instant or batched and whether or not it's kept, keyed so noting it twice changes nothing. It keeps the title, since publications can go. Wherever the window names the Claude Console, `consoleLabel` makes it a link to a fixed Console address. A batch id goes into later addresses, so `parseBatch` only accepts Anthropic's characters, and the results address is built rather than taken from a reply.
+
 ### Highlights and notes
 
 `AnnotationRepository` keeps these by content hash, so they survive a file moving. Fixed pages store a page and rectangles. Reflowable text stores the words, a place and which repeat it was, because rectangles wouldn't survive a layout change: `ReaderTab::locateAnnotations` asks the document's process to find them again (the `anchor` and `locate` ops) each time the layout changes. `PageView` only draws the marks it's given.
+
+`annotation_fts` and `publication_note_fts` let searches find highlights and notes (`note:`, and plain words too); triggers keep them up to date. When some matches come only from these, ranking by relevance is skipped, as for document contents. A marked copy of a PDF (`ui/MarkedCopy`, the worker's `markedcopy` op, `Document::saveMarkedCopy`) is written as a new file from a freshly opened document, and refuses the original's path.
 
 ### Full-text search
 
@@ -201,11 +209,13 @@ Document text is in `fulltext.db`, attached to a connection as `fulltext` by `at
 
 An article is a publication with `parent_id`, `page_start` and `page_end`, and no file of its own: anything reading a file goes through `coalesce(parent_id, id)`, as `kOwnerOfFile` does. Those pages are positions in the file, not printed page numbers, so they don't go in the citation `pages` field. `core/repo/VolumeArticles` works out articles from a table of contents, and `ContentsDialog` reads the contents through a `DocumentClient`, so a bad file can't take the window down. Where the contents only number an entry, the dialog reads that page's largest text and any DOI with the worker's `heading` op, which also finds the issue's printed numbers (`findIssueNumbering`). An article's cover key is its file's hash and first page (`articleCoverKey`), and `CoverCache` shows the file's cover until it's made. The code says "volume" for anything holding articles, but the journal type is `PublicationType::JournalIssue`, shown as "Journal issue" and stored as `journal_volume`, its first name.
 
+Without a table of contents, `ContentsDialog` reads every page's heading (largest text and DOIs) and `import::draftsFromPages` starts an article wherever a page has a new DOI from the issue's main publisher. It needs at least two, since one is most likely a whole paper.
+
 An issue's title from a file is usually its cover's largest text. `import/JournalIssues` (`tidyJournalIssue`) recognises titles that only describe an issue, fills in its numbers and journal, and retitles it from them, never touching fields set by hand. It runs on import, when a library opens, after lookups and after contents are read, so call it from anything new that changes an issue or its articles.
 
 ### Collections
 
-`CollectionRepository` holds named groupings. They're a filter like any other: `PublicationFilter::collectionIds` narrows every query, and `FilterSidebar` lists them with counts from `LibraryQuery::collectionCounts`.
+`CollectionRepository` holds named groupings, which can sit inside one another (`collection_parent`, a table of its own so the migration can run again). They're a filter like any other: `PublicationFilter::collectionIds` narrows every query, including the collections inside those chosen, and `FilterSidebar` lists them as a tree with counts from `LibraryQuery::collectionCounts`. Adding an issue adds its articles, and new articles join their issue's collections.
 
 ### Removed folders
 
@@ -215,10 +225,16 @@ A trigger on `publication_file` brings a hidden publication back whenever it get
 
 Publications imported from another computer that are still waiting for their files (`expected_file`, see below) are hidden the same way, so the same trigger brings them back. `hiddenCount` and `hiddenPublications` mean only those kept for removed folders, and the export includes waiting ones.
 
+### Removed publications and backups
+
+Removing a publication (`core/repo/RemovedContent`) deletes it and remembers its files by contents in `removed_content` (by file id for an unreadable or empty one). `ImportService::createPublication` and fingerprinting both check it, so nothing removed comes back by any route until brought back, which clears the files' hashes so the next scan reads them as new. Exports carry the list by contents.
+
+`core/db/Backups` makes copies with `VACUUM main INTO` in a `backups` folder beside the library: daily on a thread (`DailyBackupThread`), before an upgrade in `LibrarySession` (the library isn't opened if that fails), before Replace, before a restore, and by hand. Restoring uses `Database::replaceWith`, SQLite's backup API on the open connection, which other connections see; `replaceWith` bumps `changeStamp` itself, since it isn't counted as a change.
+
 ### Database and queries
 
 - `Database` wraps the SQLite C API directly rather than using Qt SQL, which keeps control of the FTS5 build. SQLite is pinned in `cmake/SQLite.cmake`. A nested `Transaction` becomes a savepoint.
-- Schema changes are numbered migrations in `src/core/db/Schema.cpp`. Add a new one and leave existing ones unchanged.
+- Schema changes are numbered migrations in `src/core/db/Schema.cpp`. Add a new one and leave existing ones unchanged. Each must be safe to run again (`IF NOT EXISTS`, `INSERT OR IGNORE`), since tests rewind a library's version and migrate it again: so no `ALTER TABLE ... ADD COLUMN`, which can't be.
 - Publications, tags and annotations have permanent UUIDs so re-importing an export can't create duplicates, and publications can exist without a file. The M11 export matches files by content hash, so don't make anything depend on stored paths surviving.
 - `LibraryQuery` turns a `PublicationFilter` into SQL. It materialises search matches once in `temp.search_match`, invalidated by `Database::changeStamp()`, and relies on per-sort indexes using `coalesce(year, ...)`. Measuring search speed needs a new `LibraryQuery` per run, or reused matches flatter the result.
 - All settings go through the registry in `SettingsStore`, so exports include new ones automatically. Machine-specific paths are only suggested on import, never applied.

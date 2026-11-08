@@ -31,6 +31,13 @@ struct FacetValue {
     qint64 count = 0;
 };
 
+struct CollectionCount {
+    QString key;   // The collection's id, for the filter.
+    QString label; // Its name.
+    qint64 count = 0; // Publications in it or any collection inside it, each counted once.
+    std::optional<qint64> parentId;
+};
+
 struct TagCount {
     qint64 tagId = 0;
     QString name;
@@ -45,6 +52,7 @@ struct FlagCounts {
     qint64 noFile = 0;
     qint64 missingOrOffline = 0;
     qint64 unreadable = 0;
+    qint64 retracted = 0;
 };
 
 // Read-only queries behind the library view.
@@ -65,7 +73,7 @@ public:
 
     // Every collection, including any with nothing matching, as its name sorts. Like a facet, this
     // ignores which collections are chosen.
-    QList<FacetValue> collectionCounts(const PublicationFilter &filter);
+    QList<CollectionCount> collectionCounts(const PublicationFilter &filter);
     FlagCounts flagCounts(const PublicationFilter &filter);
     std::optional<std::pair<int, int>> yearRange(const PublicationFilter &filter);
 
@@ -73,6 +81,7 @@ private:
     // The SQL condition for the filter's search text, or empty if it has none.
     QByteArray searchClause(const PublicationFilter &filter);
     void addContentMatches(const QString &contentsMatch, const QString &fieldMatch);
+    void addNoteMatches(const QString &contentsMatch, const QString &fieldMatch);
 
     // Publications from removed folders are never part of the library view.
     bool anyHidden();
@@ -85,6 +94,7 @@ private:
     bool m_searchedContents = false;
     QByteArray m_searchStamp;
     qint64 m_searchCount = 0;
+    bool m_matchesBeyondDetails = false; // Some of the search's matches came only from highlights and notes.
 };
 
 } // namespace papertrail::core

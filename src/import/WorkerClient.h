@@ -2,6 +2,7 @@
 
 #include "import/Extractors.h"
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QProcess>
 #include <QString>
@@ -72,6 +73,13 @@ public:
     };
     // Writes a cover from one page, counting from 0, such as where an article starts.
     Cover pageCover(const QString &path, const QString &convertedPath, int page, const QString &coverPath, int timeoutMs);
+
+    struct MarkedCopy {
+        WorkerFailure failure = WorkerFailure::None;
+        QString error;
+    };
+    // Writes a copy of a PDF at `out` with `marks` added, each {page, kind, colour, note, rects: [[x, y, w, h]]}.
+    MarkedCopy markedCopy(const QString &path, const QString &out, const QJsonArray &marks, int timeoutMs);
 
     // How many times the worker has been started, for tests and reports.
     int startCount() const { return m_startCount; }

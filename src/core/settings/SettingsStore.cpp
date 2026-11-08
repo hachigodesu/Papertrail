@@ -62,6 +62,8 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("summary.effort"), QStringLiteral("high"), K::Value,
          {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("xhigh"), QStringLiteral("max")}},
         {QStringLiteral("library.index_contents"), true, K::Value, {}},
+        {QStringLiteral("library.daily_backups"), true, K::Value, {}},
+        {QStringLiteral("metadata.check_notices"), true, K::Value, {}},
         {QStringLiteral("library.search_contents"), false, K::Value, {}},
         {QStringLiteral("library.view"), QStringLiteral("grid"), K::Value,
          {QStringLiteral("grid"), QStringLiteral("list")}},

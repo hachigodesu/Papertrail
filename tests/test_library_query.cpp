@@ -1,6 +1,7 @@
 #include "core/db/Database.h"
 #include "core/db/Schema.h"
 #include "core/query/LibraryQuery.h"
+#include "core/repo/AnnotationRepository.h"
 #include "core/repo/CollectionRepository.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
@@ -181,14 +182,14 @@ private slots:
         QCOMPARE(m_query->count(filter), qint64(3));
 
         // The sidebar's counts list them all, follow other filters, and ignore which are chosen.
-        const auto countFor = [](const QList<FacetValue> &values, const QString &name) {
-            for (const FacetValue &value : values) {
+        const auto countFor = [](const QList<CollectionCount> &values, const QString &name) {
+            for (const CollectionCount &value : values) {
                 if (value.label == name)
                     return value.count;
             }
             return qint64(-1);
         };
-        QList<FacetValue> counts = m_query->collectionCounts(filter);
+        QList<CollectionCount> counts = m_query->collectionCounts(filter);
         QCOMPARE(counts.size(), 3);
         QCOMPARE(counts.first().label, QStringLiteral("Empty"));
         QCOMPARE(countFor(counts, QStringLiteral("Project")), qint64(2));
@@ -199,6 +200,30 @@ private slots:
         counts = m_query->collectionCounts(beams);
         QCOMPARE(countFor(counts, QStringLiteral("Project")), qint64(1));
         QCOMPARE(countFor(counts, QStringLiteral("Second")), qint64(0));
+
+        // A collection inside another: choosing the outer one shows both, counted once each.
+        collections.move(second, project);
+        QCOMPARE(collections.get(second)->path, QStringLiteral("Project > Second"));
+        collections.add(second, {idOf(QStringLiteral("Beam Fatigue"))}); // Already in Project itself.
+        PublicationFilter outer;
+        outer.collectionIds = {project};
+        QCOMPARE(m_query->count(outer), qint64(3));
+        counts = m_query->collectionCounts({});
+        QCOMPARE(countFor(counts, QStringLiteral("Project")), qint64(3));
+        QCOMPARE(countFor(counts, QStringLiteral("Second")), qint64(2));
+        for (const CollectionCount &value : counts) {
+            if (value.label == QLatin1StringView("Second"))
+                QCOMPARE(value.parentId, std::optional<qint64>(project));
+        }
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, collections.move(project, second));
+        QCOMPARE(collections.all().first().path, QStringLiteral("Empty"));
+        QCOMPARE(collections.all().last().path, QStringLiteral("Project > Second"));
+
+        // Deleting the outer one takes the inner one with it, and nothing else.
+        const qint64 before = m_query->count({});
+        collections.remove(project);
+        QVERIFY(!collections.get(second));
+        QCOMPARE(m_query->count({}), before);
     }
 
     void flagsSelectProblemRecords()
@@ -255,6 +280,55 @@ private slots:
         QCOMPARE(titlesFor(QStringLiteral("isbn:978-0-306-40615-7")), (QSet<QString>{QStringLiteral("The Art of Bridges")}));
     }
 
+    void searchFindsHighlightsAndNotes()
+    {
+        AnnotationRepository annotations(*m_db);
+        Annotation highlight;
+        highlight.publicationId = m_beamFatigue;
+        highlight.contentHash = QStringLiteral("made-up-hash");
+        highlight.colour = QStringLiteral("#ffd54f");
+        highlight.note = QStringLiteral("Check this against the design code");
+        AnnotationPart part;
+        part.text = QStringLiteral("cracks grew along the welds");
+        part.page = 2;
+        part.rects = {QRectF(10, 10, 100, 12)};
+        highlight.parts = {part};
+        const qint64 id = annotations.create(highlight);
+
+        PublicationFilter neural;
+        neural.searchText = QStringLiteral("title:neural");
+        Publication bridges = *m_publications->get(m_query->ids(neural, {}).first());
+        bridges.notes = QStringLiteral("Worth rereading before the lab meeting");
+        m_publications->update(bridges);
+
+        // note: looks only there: in what's highlighted, in notes on pages, and in a publication's own notes.
+        QCOMPARE(titlesFor(QStringLiteral("note:welds")), (QSet<QString>{QStringLiteral("Beam Fatigue")}));
+        QCOMPARE(titlesFor(QStringLiteral("note:design")), (QSet<QString>{QStringLiteral("Beam Fatigue")}));
+        QCOMPARE(titlesFor(QStringLiteral("note:rereading")), (QSet<QString>{QStringLiteral("Neural Bridges")}));
+        QCOMPARE(titlesFor(QStringLiteral("note:\"along the welds\"")), (QSet<QString>{QStringLiteral("Beam Fatigue")}));
+        QCOMPARE(titlesFor(QStringLiteral("note:fatigue")).size(), 0); // In its title, not its notes.
+        QCOMPARE(titlesFor(QStringLiteral("note:welds author:lamport")).size(), 0);
+
+        // Plain words find them too, with or without ranking.
+        QCOMPARE(titlesFor(QStringLiteral("welds")), (QSet<QString>{QStringLiteral("Beam Fatigue")}));
+        PublicationFilter plain;
+        plain.searchText = QStringLiteral("rereading");
+        QCOMPARE(m_query->count(plain), qint64(1));
+        QCOMPARE(m_query->page(plain, {SortField::Relevance, true}, 0, 10).size(), 1);
+        plain.searchText = QStringLiteral("welds title:neural"); // A field still has to agree.
+        QCOMPARE(m_query->count(plain), qint64(0));
+
+        // Changes are followed.
+        annotations.setNote(id, QStringLiteral("Compare with the steel tests"));
+        QCOMPARE(titlesFor(QStringLiteral("note:design")).size(), 0);
+        QCOMPARE(titlesFor(QStringLiteral("note:steel")), (QSet<QString>{QStringLiteral("Beam Fatigue")}));
+        annotations.remove(id);
+        QCOMPARE(titlesFor(QStringLiteral("note:welds")).size(), 0);
+        bridges.notes.clear();
+        m_publications->update(bridges);
+        QCOMPARE(titlesFor(QStringLiteral("note:rereading")).size(), 0);
+    }
+
     void tagPrefixTreatsWildcardsLiterally()
     {
         QCOMPARE(titlesFor(QStringLiteral("tag:%")).size(), 0);
@@ -266,7 +340,7 @@ private slots:
         QTest::addColumn<QString>("text");
         for (const char *text : {"'; DROP TABLE publication; --", "\"", "\"\"\"", "*", "NEAR(", "a OR", "(((", ":",
                                  "title:", "title:\"", "tag:'", "doi:'--", "year:>", "AND", "NOT", "^", "{a}", "a:b:c",
-                                 "\\", "%", "🧪", "tag:\\", "type:'", "isbn:", "arxiv:"}) {
+                                 "\\", "%", "🧪", "tag:\\", "type:'", "isbn:", "arxiv:", "note:", "note:\"", "note:*", "note:NEAR("}) {
             QTest::newRow(text) << QString::fromUtf8(text);
         }
     }

@@ -1,5 +1,6 @@
 #include "ui/OnlineLookupDialog.h"
 
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLabel>
@@ -63,6 +64,13 @@ OnlineLookupDialog::OnlineLookupDialog(const QString &heading, const QString &mo
         column->addLayout(form);
         addText(tr("Crossref and OpenAlex ask for an address to contact if something goes wrong, and may respond faster. "
                    "It's sent with requests to those two only, and only if you enter one."), true);
+
+        column->addSpacing(6);
+        m_notices = new QCheckBox(tr("Check now and then for retractions and concerns raised"), this);
+        m_notices->setChecked(true);
+        column->addWidget(m_notices);
+        addText(tr("Sends the DOIs in your library to Crossref, about once a month each, to find retractions, "
+                   "corrections and expressions of concern published since. Only when lookups are online."), true);
     }
 
     column->addStretch();
@@ -91,6 +99,17 @@ void OnlineLookupDialog::setMode(const QString &mode)
         m_auto->setChecked(true);
     else
         m_offline->setChecked(true);
+}
+
+void OnlineLookupDialog::setCheckNotices(bool check)
+{
+    if (m_notices)
+        m_notices->setChecked(check);
+}
+
+bool OnlineLookupDialog::checkNotices() const
+{
+    return m_notices && m_notices->isChecked();
 }
 
 QString OnlineLookupDialog::email() const

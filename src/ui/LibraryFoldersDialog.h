@@ -5,6 +5,7 @@
 class QLabel;
 class QPushButton;
 class QTableWidget;
+class QTreeWidget;
 
 namespace papertrail::ui {
 
@@ -29,6 +30,7 @@ signals:
     void removeRequested(const QList<qint64> &rootIds);
     void forgetRequested();
     void forgetWaitingRequested();
+    void removedListRequested();
 
 private:
 public:
@@ -53,6 +55,34 @@ private:
     QPushButton *m_forget = nullptr;
     QLabel *m_waitingNote = nullptr;
     QPushButton *m_forgetWaiting = nullptr;
+    QLabel *m_removedNote = nullptr;
+    QPushButton *m_showRemoved = nullptr;
+
+public:
+    QPushButton *showRemovedButton() const { return m_showRemoved; }
+};
+
+// Publications the user removed, kept out of the library, any of which can be brought back.
+class RemovedPublicationsDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    explicit RemovedPublicationsDialog(LibrarySession &session, QWidget *parent = nullptr);
+
+    QTreeWidget *list() const { return m_list; }
+    QPushButton *bringBackButton() const { return m_bringBack; }
+    // How many files will be read again by the next scan.
+    int filesBroughtBack() const { return m_files; }
+
+    void bringBackChosen();
+
+private:
+    void reload();
+
+    LibrarySession &m_session;
+    QTreeWidget *m_list = nullptr;
+    QPushButton *m_bringBack = nullptr;
+    int m_files = 0;
 };
 
 } // namespace papertrail::ui

@@ -4,9 +4,14 @@
 #include "core/repo/PublicationRepository.h"
 #include "import/Extractors.h"
 
+#include "core/model/Identifiers.h"
+
 #include <QDateTime>
 #include <QRegularExpression>
+#include <QHash>
 #include <QSet>
+
+#include <algorithm>
 
 namespace papertrail::import {
 
@@ -46,14 +51,83 @@ bool isDescriptiveIssueTitle(const QString &title, const QString &journal)
         return true;
     if (!journal.trimmed().isEmpty() && text.compare(journal.simplified(), Qt::CaseInsensitive) == 0)
         return true;
-    static const QRegularExpression pages(
-        QStringLiteral("\\b(publication information|information for authors|table of contents|front cover|back cover|"
-                       "cover page|masthead|editorial board|issn)\\b"),
-        QRegularExpression::CaseInsensitiveOption);
-    if (pages.match(text).hasMatch())
+    if (namesAnIssuePage(text))
         return true;
     // Numbers and a date are a cover's, not a title.
     return findIssueNumbering(text).has_value();
+}
+
+bool namesAnIssuePage(const QString &text)
+{
+    static const QRegularExpression pages(
+        QStringLiteral("\\b(publication information|information for authors|instructions for authors|table of contents|"
+                       "front cover|back cover|cover page|masthead|editorial board|issn)\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+    return pages.match(text.simplified()).hasMatch();
+}
+
+QList<core::ArticleDraft> draftsFromPages(QList<PageHeading> pages, int pageCount)
+{
+    std::sort(pages.begin(), pages.end(), [](const PageHeading &a, const PageHeading &b) { return a.page < b.page; });
+    // The publisher's part of a DOI, before its slash, most of the issue's DOIs share.
+    QHash<QString, int> registrants;
+    for (const PageHeading &page : std::as_const(pages)) {
+        for (const QString &doi : page.dois)
+            ++registrants[core::normaliseDoi(doi).section(u'/', 0, 0)];
+    }
+    QString publisher;
+    for (const PageHeading &page : std::as_const(pages)) {
+        for (const QString &doi : page.dois) {
+            const QString registrant = core::normaliseDoi(doi).section(u'/', 0, 0);
+            if (!registrant.isEmpty() && (publisher.isEmpty() || registrants.value(registrant) > registrants.value(publisher)))
+                publisher = registrant;
+        }
+    }
+    QList<core::ArticleDraft> drafts;
+    QString current; // The DOI of the article whose pages these are, in lower case.
+    bool open = false;
+    const auto close = [&](int firstPageNotIn) {
+        if (open)
+            drafts.last().lastPage = qMax(drafts.last().firstPage, firstPageNotIn);
+        open = false;
+    };
+    for (const PageHeading &page : std::as_const(pages)) {
+        if (page.page < 0 || page.page >= pageCount)
+            continue;
+        // The first of its publisher's DOIs that isn't the article's already under way.
+        QString doi;
+        for (const QString &candidate : page.dois) {
+            const QString normal = core::normaliseDoi(candidate).toLower();
+            if (!normal.isEmpty() && normal.section(u'/', 0, 0) == publisher && normal != current) {
+                doi = normal;
+                break;
+            }
+        }
+        // A page that only repeats the article's own DOI, such as in its footer, is still that article's.
+        const bool anyDoi = std::any_of(page.dois.cbegin(), page.dois.cend(),
+                                        [](const QString &candidate) { return !core::normaliseDoi(candidate).isEmpty(); });
+        const QString title = page.title.simplified();
+        if (!doi.isEmpty() && doi != current) {
+            close(page.page);
+            core::ArticleDraft draft;
+            draft.title = title;
+            draft.doi = doi;
+            draft.firstPage = page.page + 1;
+            draft.lastPage = page.page + 1;
+            draft.titleFromPage = true;
+            // Offered, but not chosen, if it looks like one of the issue's own pages.
+            draft.likelyNotAnArticle = title.isEmpty() || namesAnIssuePage(title);
+            drafts << draft;
+            current = doi;
+            open = true;
+        } else if (open && !anyDoi && !title.isEmpty() && namesAnIssuePage(title)) {
+            // The issue's own pages at the end aren't part of its last article.
+            close(page.page);
+            current.clear();
+        }
+    }
+    close(pageCount);
+    return drafts;
 }
 
 QString issueTitle(const Publication &issue)

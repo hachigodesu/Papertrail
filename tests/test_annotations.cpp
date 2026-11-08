@@ -11,6 +11,8 @@
 #include "ui/ImportThread.h"
 #include "ui/LibrarySession.h"
 #include "ui/MainWindow.h"
+#include "ui/MarkedCopy.h"
+#include "ui/NotesDialog.h"
 #include "ui/PageView.h"
 #include "ui/ReaderTab.h"
 
@@ -19,6 +21,7 @@
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QTreeWidget>
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
@@ -298,6 +301,107 @@ private slots:
         QCOMPARE(view->marksOn(0).size(), 1);
         QCOMPARE(view->marksOn(1).size(), 1);
         QVERIFY(view->marksOn(0).first().underline);
+    }
+
+    void everyHighlightIsListedAndOpensAtItsPlace()
+    {
+        const qint64 id = importSample(QStringLiteral("reader_doc.pdf"));
+        ReaderTab *reader = openReader(id);
+        QVERIFY(reader);
+        PageView *view = reader->pageView();
+        const int page = view->pageCount() - 1;
+        QVERIFY(page > 0);
+        view->setSelection(page, {QRectF(10, 10, 100, 12)}, QStringLiteral("a made-up quotation"));
+        QSignalSpy changed(reader, &ReaderTab::annotationsChanged);
+        reader->annotateSelection(AnnotationType::Highlight, QStringLiteral("compare with chapter two"));
+        QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), kLongWaitMs);
+        closeReaders();
+
+        NotesDialog dialog(*m_session);
+        QCOMPARE(dialog.list()->topLevelItemCount(), 1);
+        QTreeWidgetItem *item = dialog.list()->topLevelItem(0);
+        QCOMPARE(item->text(0), QStringLiteral("a made-up quotation"));
+        QCOMPARE(item->text(1), QStringLiteral("compare with chapter two"));
+        QCOMPARE(item->text(3), QString::number(page + 1));
+        QCOMPARE(dialog.countLabel()->text(), QStringLiteral("1 highlight or note"));
+
+        // Searching looks in both the words and the note.
+        dialog.searchBox()->setText(QStringLiteral("chap"));
+        dialog.reload();
+        QCOMPARE(dialog.list()->topLevelItemCount(), 1);
+        dialog.searchBox()->setText(QStringLiteral("nowhere"));
+        dialog.reload();
+        QCOMPARE(dialog.list()->topLevelItemCount(), 0);
+        QCOMPARE(dialog.countLabel()->text(), QStringLiteral("Nothing matches."));
+        dialog.searchBox()->setText(QStringLiteral("quotation"));
+        dialog.reload();
+        QCOMPARE(dialog.list()->topLevelItemCount(), 1);
+
+        // Opening it shows its page in its document.
+        QSignalSpy open(&dialog, &NotesDialog::openRequested);
+        emit dialog.list()->itemActivated(dialog.list()->topLevelItem(0), 0);
+        QCOMPARE(open.size(), 1);
+        QVERIFY(m_window->openAnnotation(open.first().first().toLongLong()));
+        QCOMPARE(m_window->documentTabs()->count(), 2);
+        auto *opened = qobject_cast<ReaderTab *>(m_window->documentTabs()->currentWidget());
+        QVERIFY(opened);
+        QTRY_VERIFY_WITH_TIMEOUT(opened->isReady(), kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(opened->pageView()->currentPage(), page, kLongWaitMs);
+    }
+
+    void aCopyIsSavedWithItsHighlightsAndTheOriginalIsLeftAlone()
+    {
+        const qint64 id = importSample(QStringLiteral("reader_doc.pdf"));
+        ReaderTab *reader = openReader(id);
+        QVERIFY(reader);
+        PageView *view = reader->pageView();
+        view->setSelection(1, {QRectF(72, 100, 200, 14)}, QStringLiteral("a made-up passage"));
+        QSignalSpy changed(reader, &ReaderTab::annotationsChanged);
+        reader->annotateSelection(AnnotationType::Highlight, QStringLiteral("a made-up remark"), QStringLiteral("#81c784"));
+        QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), kLongWaitMs);
+        view->setSelection(2, {QRectF(72, 140, 120, 14)}, QStringLiteral("underlined words"));
+        changed.clear();
+        reader->annotateSelection(AnnotationType::Underline);
+        QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), kLongWaitMs);
+        closeReaders();
+
+        const QString original = QDir(m_docs).filePath(QStringLiteral("reader_doc.pdf"));
+        const QByteArray before = hashOf(original);
+        const std::optional<qint64> fileId = markedPdfFor(*m_session, id);
+        QVERIFY(fileId);
+        int count = 0;
+        const QJsonArray marks = marksForContents(m_session->database(), m_session->files().get(*fileId)->sha256, &count);
+        QCOMPARE(count, 2);
+        QCOMPARE(marks.size(), 2);
+
+        // Somewhere outside the library, as it's offered.
+        const QString out = m_dir->filePath(QStringLiteral("elsewhere/copy with highlights.pdf"));
+        QDir().mkpath(QFileInfo(out).absolutePath());
+        QSignalSpy finished(m_window->markedCopy(), &MarkedCopyActions::finished);
+        QVERIFY(m_window->markedCopy()->save(*fileId, out));
+        QVERIFY(finished.wait(kLongWaitMs));
+        QVERIFY2(finished.first().at(0).toBool(), qPrintable(finished.first().at(1).toString()));
+        QVERIFY(finished.first().at(1).toString().contains(QStringLiteral("2 highlights and notes")));
+
+        QFile copy(out);
+        QVERIFY(copy.open(QIODevice::ReadOnly));
+        const QByteArray written = copy.readAll();
+        QVERIFY(written.startsWith("%PDF"));
+        QVERIFY(written.contains("/Highlight"));
+        QVERIFY(written.contains("/Underline"));
+        QVERIFY(written.contains("made-up remark"));
+        QCOMPARE(hashOf(original), before); // The original is never touched.
+
+        // A copy can't be written over the original, even if asked.
+        finished.clear();
+        QVERIFY(m_window->markedCopy()->save(*fileId, original));
+        QVERIFY(finished.wait(kLongWaitMs));
+        QVERIFY(!finished.first().at(0).toBool());
+        QCOMPARE(hashOf(original), before);
+        // The window says why, which is expected here.
+        QTRY_VERIFY_WITH_TIMEOUT(!m_unexpectedBoxes.isEmpty(), kLongWaitMs);
+        QVERIFY(m_unexpectedBoxes.first().contains(QStringLiteral("can't replace the original")));
+        m_unexpectedBoxes.clear();
     }
 
     void aMarkCanBeFoundUnderTheCursor()

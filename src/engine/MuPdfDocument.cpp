@@ -7,6 +7,8 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
+#include <QFileInfo>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -393,6 +395,90 @@ public:
         for (int i = 0; i < count; ++i)
             rects << rectFrom(quads[i]);
         return rects;
+    }
+
+    bool canSaveMarkedCopy() override
+    {
+        return pdf_specifics(m_ctx, m_doc) != nullptr;
+    }
+
+    void saveMarkedCopy(const QString &path, const QList<MarkToWrite> &marks) override
+    {
+        pdf_document *pdf = pdf_specifics(m_ctx, m_doc);
+        if (!pdf)
+            throw EngineError("only a PDF can have its marks written into a copy");
+        const QFileInfo target(path);
+        const QFileInfo source(QString::fromUtf8(m_path));
+        if (target.absoluteFilePath() == source.absoluteFilePath()
+            || (target.exists() && target.canonicalFilePath() == source.canonicalFilePath())) {
+            throw EngineError("the copy can't replace the original");
+        }
+        const int pages = pageCount();
+        for (const MarkToWrite &mark : marks) {
+            if (mark.page < 0 || mark.page >= pages || mark.rects.isEmpty())
+                continue;
+            // Everything the block needs, made before it.
+            std::vector<fz_quad> quads;
+            for (const QRectF &rect : mark.rects)
+                quads.push_back(fz_quad_from_rect(fz_make_rect(float(rect.left()), float(rect.top()), float(rect.right()), float(rect.bottom()))));
+            // As #rrggbb, or a highlighter's yellow if it can't be read.
+            bool readable = mark.colour.size() == 7 && mark.colour.startsWith(u'#');
+            const uint rgb = readable ? mark.colour.mid(1).toUInt(&readable, 16) : 0;
+            const uint used = readable ? rgb : 0xffd54fu;
+            const float colour[3] = {float((used >> 16) & 0xff) / 255.0f, float((used >> 8) & 0xff) / 255.0f, float(used & 0xff) / 255.0f};
+            const QByteArray note = mark.note.toUtf8();
+            const enum pdf_annot_type type = mark.kind == MarkToWrite::Kind::Underline ? PDF_ANNOT_UNDERLINE
+                : mark.kind == MarkToWrite::Kind::Note                                  ? PDF_ANNOT_TEXT
+                                                                                        : PDF_ANNOT_HIGHLIGHT;
+            const QRectF first = mark.rects.first();
+            const fz_rect icon = fz_make_rect(float(first.left()), float(first.top()), float(first.left() + 20), float(first.top() + 20));
+            const fz_quad *quadData = quads.data();
+            const int quadCount = int(quads.size());
+
+            fz_page *page = nullptr;
+            pdf_annot *annot = nullptr;
+            bool failed = false;
+            fz_var(page);
+            fz_var(annot);
+            fz_try(m_ctx) {
+                page = fz_load_page(m_ctx, m_doc, mark.page);
+                pdf_page *pdfPage = pdf_page_from_fz_page(m_ctx, page);
+                if (!pdfPage)
+                    fz_throw(m_ctx, FZ_ERROR_GENERIC, "not a PDF page");
+                annot = pdf_create_annot(m_ctx, pdfPage, type);
+                if (type == PDF_ANNOT_TEXT) {
+                    pdf_set_annot_rect(m_ctx, annot, icon);
+                } else {
+                    for (int i = 0; i < quadCount; ++i)
+                        pdf_add_annot_quad_point(m_ctx, annot, quadData[i]);
+                }
+                pdf_set_annot_color(m_ctx, annot, 3, colour);
+                if (!note.isEmpty())
+                    pdf_set_annot_contents(m_ctx, annot, note.constData());
+                pdf_update_annot(m_ctx, annot);
+            }
+            fz_always(m_ctx) {
+                pdf_drop_annot(m_ctx, annot);
+                fz_drop_page(m_ctx, page);
+            }
+            fz_catch(m_ctx) {
+                failed = true;
+            }
+            if (failed)
+                throwCaught(QStringLiteral("a mark couldn't be added: %1").arg(QString::fromUtf8(fz_caught_message(m_ctx))));
+        }
+
+        const QByteArray file = path.toUtf8(); // As files are opened, which MuPDF reads as UTF-8 everywhere.
+        pdf_write_options options = pdf_default_write_options;
+        bool failed = false;
+        fz_try(m_ctx) {
+            pdf_save_document(m_ctx, pdf, file.constData(), &options);
+        }
+        fz_catch(m_ctx) {
+            failed = true;
+        }
+        if (failed)
+            throwCaught(QStringLiteral("the copy couldn't be written: %1").arg(QString::fromUtf8(fz_caught_message(m_ctx))));
     }
 
     TextSelection selectText(int page, const QPointF &a, const QPointF &b) override

@@ -2,6 +2,9 @@
 
 #include "ui/LibrarySession.h"
 
+#include "core/repo/RemovedContent.h"
+
+#include <QDateTime>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
@@ -11,6 +14,7 @@
 #include <QLocale>
 #include <QPushButton>
 #include <QTableWidget>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 
 namespace papertrail::ui {
@@ -60,6 +64,16 @@ LibraryFoldersDialog::LibraryFoldersDialog(LibrarySession &session, QWidget *par
     waitingRow->addWidget(m_forgetWaiting);
     layout->addLayout(waitingRow);
     connect(m_forgetWaiting, &QPushButton::clicked, this, &LibraryFoldersDialog::forgetWaitingRequested);
+
+    auto *removedRow = new QHBoxLayout;
+    m_removedNote = new QLabel(this);
+    m_removedNote->setWordWrap(true);
+    m_showRemoved = new QPushButton(tr("Bring back..."), this);
+    m_showRemoved->setToolTip(tr("Lists the publications you removed, so any can be added back."));
+    removedRow->addWidget(m_removedNote, 1);
+    removedRow->addWidget(m_showRemoved);
+    layout->addLayout(removedRow);
+    connect(m_showRemoved, &QPushButton::clicked, this, &LibraryFoldersDialog::removedListRequested);
 
     auto *buttons = new QHBoxLayout;
     auto *add = new QPushButton(tr("Add folder..."), this);
@@ -125,7 +139,80 @@ void LibraryFoldersDialog::reload()
                                .arg(waiting == 1 ? tr("1 publication") : tr("%1 publications").arg(QLocale().toString(waiting))));
     m_waitingNote->setVisible(waiting > 0);
     m_forgetWaiting->setVisible(waiting > 0);
+
+    const qint64 removed = core::RemovedContent(m_session.database()).count();
+    m_removedNote->setText(tr("%1 you removed %2 kept out of the library, even where %3 found again.")
+                               .arg(removed == 1 ? tr("1 file") : tr("%1 files").arg(QLocale().toString(removed)),
+                                    removed == 1 ? tr("is") : tr("are"), removed == 1 ? tr("it's") : tr("they're")));
+    m_removedNote->setVisible(removed > 0);
+    m_showRemoved->setVisible(removed > 0);
     updateButtons();
+}
+
+RemovedPublicationsDialog::RemovedPublicationsDialog(LibrarySession &session, QWidget *parent)
+    : QDialog(parent)
+    , m_session(session)
+{
+    setWindowTitle(tr("Removed publications"));
+    resize(640, 400);
+    auto *layout = new QVBoxLayout(this);
+    auto *about = new QLabel(tr("These were removed from the library, and their files are left out wherever they're found. "
+                                "Bringing one back adds its file again at the next scan, as a new publication."),
+                             this);
+    about->setWordWrap(true);
+    layout->addWidget(about);
+    m_list = new QTreeWidget(this);
+    m_list->setRootIsDecorated(false);
+    m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_list->setHeaderLabels({tr("Title"), tr("File"), tr("Removed")});
+    m_list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_list->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_list->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    layout->addWidget(m_list, 1);
+    auto *buttons = new QHBoxLayout;
+    m_bringBack = new QPushButton(tr("Bring back"), this);
+    connect(m_bringBack, &QPushButton::clicked, this, &RemovedPublicationsDialog::bringBackChosen);
+    connect(m_list, &QTreeWidget::itemSelectionChanged, this,
+            [this] { m_bringBack->setEnabled(!m_list->selectedItems().isEmpty()); });
+    buttons->addWidget(m_bringBack);
+    buttons->addStretch(1);
+    auto *close = new QDialogButtonBox(QDialogButtonBox::Close, this);
+    connect(close, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    buttons->addWidget(close);
+    layout->addLayout(buttons);
+    reload();
+}
+
+void RemovedPublicationsDialog::reload()
+{
+    m_list->clear();
+    const QLocale locale;
+    for (const core::RemovedEntry &entry : core::RemovedContent(m_session.database()).entries()) {
+        // Titles come from documents, so they're shown as plain text, which a tree item always is.
+        auto *item = new QTreeWidgetItem(m_list, {entry.title, entry.fileName,
+                                                  locale.toString(QDateTime::fromMSecsSinceEpoch(entry.removedAt).date(),
+                                                                  QLocale::ShortFormat)});
+        item->setData(0, Qt::UserRole, entry.id);
+        item->setToolTip(0, entry.title);
+    }
+    m_bringBack->setEnabled(false);
+}
+
+void RemovedPublicationsDialog::bringBackChosen()
+{
+    QList<qint64> ids;
+    for (const QTreeWidgetItem *item : m_list->selectedItems())
+        ids << item->data(0, Qt::UserRole).toLongLong();
+    if (ids.isEmpty())
+        return;
+    try {
+        m_files += core::RemovedContent(m_session.database()).bringBack(ids);
+    } catch (const std::exception &) {
+        // Nothing changed; the list shows what's still removed.
+    }
+    reload();
+    if (m_list->topLevelItemCount() == 0)
+        accept();
 }
 
 void LibraryFoldersDialog::setImportRunning(bool running)

@@ -61,6 +61,8 @@ public:
     QLabel *summaryInfo() const { return m_summaryInfo; }
     QPushButton *summarizeButton() const { return m_summarize; }
     QPushButton *deleteSummaryButton() const { return m_deleteSummary; }
+    QLabel *summaryOnItsWayLabel() const { return m_summaryPending; }
+    QPushButton *summariesButton() const { return m_summaries; }
     QWidget *matchesSection() const { return m_matchesSection; }
     QListWidget *matchList() const { return m_matchList; }
     QWidget *articlesSection() const { return m_articlesSection; }
@@ -69,6 +71,7 @@ public:
     QLabel *partOfLabel() const { return m_partOf; }
     QPushButton *showVolumeButton() const { return m_showVolume; }
     QLabel *preprintHint() const { return m_preprintHint; }
+    QLabel *noticeWarning() const { return m_noticeWarning; }
     QWidget *undoRow() const { return m_undoRow; }
     void undoLookup();
     QPlainTextEdit *notesEdit() const { return m_notes; }
@@ -87,6 +90,8 @@ signals:
 
     // The user wants a summary of this publication from Claude.
     void summarizeRequested(qint64 publicationId);
+    // The user wants to see this publication's summary on its way, or review the one that's arrived.
+    void summariesRequested(qint64 publicationId);
     // The Cite button's menu is about to show, for whoever fills it.
     void citeMenuRequested(QMenu *menu, qint64 publicationId);
 
@@ -136,6 +141,8 @@ private:
     QPlainTextEdit *m_summaryView = nullptr;
     QPushButton *m_summarize = nullptr;
     QPushButton *m_deleteSummary = nullptr;
+    QLabel *m_summaryPending = nullptr;
+    QPushButton *m_summaries = nullptr;
     QWidget *m_matchesSection = nullptr;
     QListWidget *m_matchList = nullptr;
     QString m_contentsMatch;
@@ -147,6 +154,7 @@ private:
     QPushButton *m_deleteArticle = nullptr;
     QLabel *m_collections = nullptr;
     QLabel *m_preprintHint = nullptr;
+    QLabel *m_noticeWarning = nullptr;
     QWidget *m_undoRow = nullptr;
     QLabel *m_undoLabel = nullptr;
     QPlainTextEdit *m_notes = nullptr;

@@ -47,6 +47,12 @@ struct Annotation {
     int firstPage() const; // -1 if only a place is known.
 };
 
+// A highlight or note, with what it's in, for listing across the library.
+struct AnnotationListing {
+    Annotation annotation;
+    QString publicationTitle;
+};
+
 class AnnotationRepository {
 public:
     explicit AnnotationRepository(Database &db) : m_db(db) {}
@@ -64,6 +70,11 @@ public:
     // Everything made under this publication, in any format, and from any version of its file.
     QList<Annotation> forPublication(qint64 publicationId);
     qint64 countFor(qint64 publicationId);
+
+    // Every highlight and note in the library, most recently changed first, leaving out those on publications
+    // that are out of sight. With `search`, only those whose words or note have all its words, each as the start of
+    // a word. `total` is set to how many there are in all, of which at most `limit` are returned.
+    QList<AnnotationListing> everywhere(const QString &search, int limit, qint64 *total = nullptr);
 
 private:
     Database &m_db;

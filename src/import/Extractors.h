@@ -60,6 +60,8 @@ bool isValidIsbn(const QString &digits);
 // The DOI of the article starting on this page, if it's printed there. Anything after a list of references
 // is left out, and so is a page with more than one DOI, since there's then no telling which is the article's.
 QString articleDoiOnPage(const QString &pageText);
+// Every DOI on a page in the order they're printed, each once, leaving out any after a list of references.
+QStringList doisOnPage(const QString &pageText);
 
 // A journal issue's numbers as printed on its cover or in a running header, such as
 // "VOL. 7, NO. 11, NOVEMBER 2026" or "NOVEMBER 2026 VOLUME 7 NUMBER 11".

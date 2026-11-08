@@ -29,6 +29,12 @@ struct LibraryPaths {
     // Files changed more recently than this are left for a later scan. See ImportOptions.
     qint64 settleMs = 5000;
 
+    // How long after the window opens the day's backup is made, so it doesn't compete with opening.
+    int dailyBackupDelayMs = 10000;
+
+    // Time between requests checking for retractions. Only tests change this.
+    int noticeCheckIntervalMs = -1;
+
     // Where online sources are, and what reaches them. Only tests change these.
     metadata::ProviderUrls providerUrls;
     std::function<std::unique_ptr<metadata::Transport>()> transportFactory;

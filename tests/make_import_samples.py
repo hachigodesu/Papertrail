@@ -204,6 +204,25 @@ def numbered_issue_pdf(path):
     path.write_bytes(bytes(out))
 
 
+def issue_without_contents_pdf(path):
+    """A journal issue with no table of contents at all. Its articles can only be found from their first pages,
+    each with a large title and its own DOI. A running header repeats the issue's numbers, and an article's DOI is
+    repeated in its footer, as some publishers do."""
+    texts = [
+        [(24, "Journal of Imaginary Findings"), (11, "Volume 3, Issue 4")],
+        [(18, "Publication Information"), (9, "Journal of Imaginary Findings is published by Example Press.")],
+        [(9, "Journal of Imaginary Findings, vol. 3, no. 4"), (18, "A Pretend Survey of Tidal Gardens"),
+         (11, "Cara Example"), (8, "Digital Object Identifier 10.5555/imaginary.2026.0401")],
+        [(9, "Journal of Imaginary Findings, vol. 3, no. 4"), (11, "The pretend survey continues on this page."),
+         (8, "10.5555/imaginary.2026.0401")],
+        [(18, "Invented Notes on Paper Boats"), (8, "doi: 10.5555/imaginary.2026.0402"),
+         (8, "Compare the earlier work at 10.5555/other.0009")],
+        [(11, "More about paper boats, which float.")],
+        [(18, "Information for Authors"), (9, "Send made-up manuscripts to the made-up editor.")],
+    ]
+    path.write_bytes(build_pdf([page_stream(lines) for lines in texts]))
+
+
 def reader_epub(path, navigation):
     """A book long enough to fill several pages. `navigation` is "nav" for EPUB 3's table of contents
     only, or "ncx" for the older kind only."""
@@ -587,6 +606,7 @@ def main():
         reader_djvu(out / "reader_doc.djvu", Path(work))
     reader_pdf(out / "reader_doc.pdf")
     numbered_issue_pdf(out / "numbered_issue.pdf")
+    issue_without_contents_pdf(out / "issue_without_contents.pdf")
     reader_epub(out / "reader_nav.epub", "nav")
     reader_epub(out / "reader_ncx.epub", "ncx")
 

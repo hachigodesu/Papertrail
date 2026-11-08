@@ -1,6 +1,7 @@
 #include "import/ImportService.h"
 
 #include "import/JournalIssues.h"
+#include "core/repo/RemovedContent.h"
 
 #include "core/db/Database.h"
 #include "core/model/Identifiers.h"
@@ -429,6 +430,14 @@ void ImportService::processFingerprint(const Job &job, ImportReport &report)
     Transaction transaction(m_db);
     m_files.setHash(file->id, hash.sha256);
 
+    // Removed by the user: the file stays as it is, out of the library, and isn't read any further.
+    if (RemovedContent(m_db).covers(file->id, hash.sha256, file->size)) {
+        ++report.keptOut;
+        finishJob(job);
+        transaction.commit();
+        return;
+    }
+
     if (!linkToKnownContents(*file, hash.sha256, report)) {
         if (!m_files.publicationsFor(file->id).isEmpty())
             ++report.updated; // Same path, new contents: the publication and its edits are kept.
@@ -727,6 +736,9 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
 {
     // A file that keeps failing can come through here again after a rescan.
     if (!m_files.publicationsFor(file.id).isEmpty())
+        return;
+    // Every way in comes here, so this keeps anything the user removed out, however it was found.
+    if (RemovedContent(m_db).covers(file.id, file.sha256, file.size))
         return;
 
     // With no inspection, the file couldn't be read at all, so it's listed under its file name.

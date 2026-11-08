@@ -1,6 +1,7 @@
 #include "transfer/LibraryTransfer.h"
 
 #include "core/db/Database.h"
+#include "core/repo/CollectionRepository.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationMerge.h"
 #include "core/repo/PublicationRepository.h"
@@ -336,7 +337,9 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
 
     QJsonArray collectionArray;
     {
-        auto select = db.prepare("SELECT id, uuid, name, created_at, updated_at FROM collection ORDER BY id");
+        auto select = db.prepare("SELECT c.id, c.uuid, c.name, c.created_at, c.updated_at, parent.uuid FROM collection c "
+                                 "LEFT JOIN collection_parent cp ON cp.collection_id = c.id "
+                                 "LEFT JOIN collection parent ON parent.id = cp.parent_id ORDER BY c.id");
         auto members = db.prepare(QByteArray("SELECT p.uuid FROM collection_publication c JOIN publication p ON p.id = c.publication_id "
                                              "WHERE c.collection_id = ? AND ")
                                   + kVisible + " ORDER BY c.added_at, p.id");
@@ -346,11 +349,14 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
             while (members->step())
                 uuids.append(members->textAt(0));
             members->reset();
-            collectionArray.append(QJsonObject{{QStringLiteral("uuid"), select->textAt(1)},
-                                               {QStringLiteral("name"), select->textAt(2)},
-                                               {QStringLiteral("createdAt"), double(select->int64At(3))},
-                                               {QStringLiteral("updatedAt"), double(select->int64At(4))},
-                                               {QStringLiteral("publications"), uuids}});
+            QJsonObject entry{{QStringLiteral("uuid"), select->textAt(1)},
+                              {QStringLiteral("name"), select->textAt(2)},
+                              {QStringLiteral("createdAt"), double(select->int64At(3))},
+                              {QStringLiteral("updatedAt"), double(select->int64At(4))},
+                              {QStringLiteral("publications"), uuids}};
+            if (!select->isNull(5))
+                entry.insert(QStringLiteral("parentUuid"), select->textAt(5));
+            collectionArray.append(entry);
         }
     }
     report.collections = collectionArray.size();
@@ -420,6 +426,19 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
         });
     report.summaries = summaryArray.size();
 
+    // Only those known by contents: a file that couldn't be read is only known on this computer.
+    QJsonArray removedArray;
+    {
+        auto select = db.prepare("SELECT sha256, title, file_name, removed_at FROM removed_content WHERE sha256 IS NOT NULL ORDER BY id");
+        while (select->step()) {
+            removedArray.append(QJsonObject{{QStringLiteral("sha256"), select->textAt(0)},
+                                            {QStringLiteral("title"), select->textAt(1)},
+                                            {QStringLiteral("fileName"), select->textAt(2)},
+                                            {QStringLiteral("removedAt"), double(select->int64At(3))}});
+        }
+    }
+    report.removed = removedArray.size();
+
     const QJsonObject settings = core::SettingsStore(db).exportAll();
 
     const QJsonObject manifest{
@@ -446,6 +465,7 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
     zip.add(QStringLiteral("reading.json"), json(readingArray));
     zip.add(QStringLiteral("provenance.json"), json(provenanceArray));
     zip.add(QStringLiteral("summaries.json"), json(summaryArray));
+    zip.add(QStringLiteral("removed.json"), json(removedArray));
     zip.add(QStringLiteral("settings.json"), json(settings));
     return zip.finish();
 }
@@ -508,7 +528,8 @@ std::optional<Bundle> readBundle(const QByteArray &data, QString *error)
         || !array(QStringLiteral("annotations.json"), bundle.annotations)
         || !array(QStringLiteral("reading.json"), bundle.readingStates)
         || !array(QStringLiteral("provenance.json"), bundle.provenance)
-        || !array(QStringLiteral("summaries.json"), bundle.summaries))
+        || !array(QStringLiteral("summaries.json"), bundle.summaries)
+        || !array(QStringLiteral("removed.json"), bundle.removed))
         return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
     if (zip.contains(QStringLiteral("settings.json"))) {
         const std::optional<QByteArray> part = zip.read(QStringLiteral("settings.json"));
@@ -936,6 +957,31 @@ private:
                 member->reset();
             }
         }
+
+        // Then which is inside which, once they all exist. One already placed here stays where it is.
+        core::CollectionRepository collections(m_db);
+        for (const QJsonValue &value : m_bundle.collections) {
+            const QJsonObject collection = value.toObject();
+            const QString parentUuid = collection.value(QStringLiteral("parentUuid")).toString();
+            if (parentUuid.isEmpty())
+                continue;
+            const auto idFor = [&](const QString &uuid) -> std::optional<qint64> {
+                auto select = m_db.prepare("SELECT id FROM collection WHERE uuid = ?");
+                select->bind(1, uuid);
+                return select->step() ? std::optional<qint64>(select->int64At(0)) : std::nullopt;
+            };
+            const std::optional<qint64> child = idFor(collection.value(QStringLiteral("uuid")).toString());
+            const std::optional<qint64> parent = idFor(parentUuid);
+            if (!child || !parent)
+                continue;
+            if (collections.get(*child)->parentId)
+                continue;
+            try {
+                collections.move(*child, *parent);
+            } catch (const std::invalid_argument &) {
+                // It would go inside itself, from how this library has them. It stays at the top.
+            }
+        }
     }
 
     // ---- Highlights and notes
@@ -1143,9 +1189,11 @@ void clearLibrary(Database &db)
 {
     db.exec("DELETE FROM file_proposal");
     db.exec("DELETE FROM expected_file");
+    db.exec("DELETE FROM removed_content");
     db.exec("DELETE FROM lookup_candidate");
     db.exec("DELETE FROM job WHERE kind = 'lookup'");
     db.exec("DELETE FROM collection_publication");
+    db.exec("DELETE FROM collection_parent");
     db.exec("DELETE FROM collection");
     db.exec("DELETE FROM publication_summary");
     db.exec("DELETE FROM annotation");
@@ -1185,6 +1233,27 @@ ImportReport importBundle(Database &db, const Bundle &bundle, const ImportOption
         report = ImportReport{};
         report.cancelled = true;
         return report; // The transaction rolls back.
+    }
+    if (options.parts.details) {
+        // Removed there, so kept out here too, unless it's in this library: merging never takes anything away.
+        auto add = db.prepare(
+            "INSERT INTO removed_content (sha256, title, file_name, removed_at) SELECT ?1, ?2, ?3, ?4 "
+            "WHERE NOT EXISTS (SELECT 1 FROM removed_content WHERE sha256 = ?1) "
+            "AND NOT EXISTS (SELECT 1 FROM file f JOIN publication_file pf ON pf.file_id = f.id WHERE f.sha256 = ?1) "
+            "AND NOT EXISTS (SELECT 1 FROM expected_file WHERE sha256 = ?1)");
+        for (const QJsonValue &value : bundle.removed) {
+            const QJsonObject entry = value.toObject();
+            const QString sha256 = entry.value(QStringLiteral("sha256")).toString().toLower();
+            if (sha256.size() != 64)
+                continue;
+            add->reset();
+            add->bind(1, sha256);
+            add->bind(2, entry.value(QStringLiteral("title")).toString());
+            add->bind(3, entry.value(QStringLiteral("fileName")).toString());
+            add->bind(4, qint64(entry.value(QStringLiteral("removedAt")).toDouble()));
+            add->step();
+            report.removedAdded += db.changes();
+        }
     }
     if (options.mode == ImportMode::Replace) {
         // Files the export doesn't account for are forgotten, so that the next scan finds them as new.

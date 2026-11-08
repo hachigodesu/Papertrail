@@ -108,7 +108,9 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
         c.add(ftsClause);
 
     if (!filter.collectionIds.isEmpty()) {
-        c.addInIds("p.id IN (SELECT publication_id FROM collection_publication WHERE collection_id IN", ")",
+        c.addInIds("p.id IN (SELECT publication_id FROM collection_publication WHERE collection_id IN ("
+                   "WITH RECURSIVE down(id) AS (SELECT id FROM collection WHERE id IN",
+                   " UNION SELECT cp.collection_id FROM collection_parent cp JOIN down ON cp.parent_id = down.id) SELECT id FROM down))",
                    filter.collectionIds);
     }
 
@@ -122,6 +124,12 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
             "WITH RECURSIVE down(id) AS (SELECT id FROM tag WHERE id IN",
             " UNION SELECT t.id FROM tag t JOIN down ON t.parent_id = down.id) SELECT id FROM down))",
             filter.tagIds);
+    }
+    for (const QString &notes : search.notesMatches) {
+        c.add("p.id IN (SELECT publication_id FROM annotation WHERE id IN "
+              "(SELECT rowid FROM annotation_fts WHERE annotation_fts MATCH ?) "
+              "UNION SELECT rowid FROM publication_note_fts WHERE publication_note_fts MATCH ?)");
+        c.bindings << notes << notes;
     }
     for (const QString &prefix : search.tagPrefixes) {
         c.add("p.id IN (SELECT publication_id FROM publication_tag WHERE tag_id IN ("
@@ -203,6 +211,10 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
         c.add(kOwnerOfFile + " IN (SELECT pf.publication_id FROM publication_file pf "
               "JOIN file f ON f.id = pf.file_id WHERE f.status = 'unreadable')");
     }
+    if (filter.retracted) {
+        c.add("p.id IN (SELECT publication_id FROM publication_notice WHERE kind IN "
+              "('retraction', 'partial_retraction', 'withdrawal', 'removal', 'expression_of_concern'))");
+    }
 
     return c;
 }
@@ -233,13 +245,15 @@ struct ListQuery {
     QList<Binding> bindings;
 };
 
-ListQuery buildListQuery(const PublicationFilter &filter, const PublicationSort &sort, const QByteArray &ftsClause, bool anyHidden)
+ListQuery buildListQuery(const PublicationFilter &filter, const PublicationSort &sort, const QByteArray &ftsClause, bool anyHidden,
+                         bool matchedBeyondDetails)
 {
     const QString ftsMatch = parseSearch(filter.searchText).ftsMatch;
     ListQuery query;
     // How well words match inside documents can't be compared with how well they match a title, so a search
     // that includes them falls through to the ordinary order, which treats best match as by title.
-    if (sort.field == SortField::Relevance && !ftsMatch.isEmpty() && !filter.searchContents) {
+    // So do matches found only in highlights and notes.
+    if (sort.field == SortField::Relevance && !ftsMatch.isEmpty() && !filter.searchContents && !matchedBeyondDetails) {
         Conditions c = buildConditions(filter, QByteArray(), anyHidden);
         query.sql = " FROM publication_fts JOIN publication p ON p.id = publication_fts.rowid "
                     "WHERE publication_fts MATCH ?";
@@ -313,6 +327,12 @@ QByteArray LibraryQuery::searchClause(const PublicationFilter &filter)
         fill.bind(1, match);
         fill.step();
         fill.reset();
+        // Whether any were found only by what's in highlights and notes, which can't be ranked with the details.
+        m_matchesBeyondDetails = false;
+        if (!parsed.contentsMatch.isEmpty()) {
+            addNoteMatches(parsed.contentsMatch, parsed.fieldMatch);
+            m_matchesBeyondDetails = m_db.changes() > 0;
+        }
         if (contents)
             addContentMatches(parsed.contentsMatch, parsed.fieldMatch);
 
@@ -343,6 +363,22 @@ bool LibraryQuery::anyHidden()
     const bool any = select.intAt(0) != 0;
     select.reset();
     return any;
+}
+
+void LibraryQuery::addNoteMatches(const QString &contentsMatch, const QString &fieldMatch)
+{
+    // As with documents, a field search can only be answered from the details, so it has to agree too.
+    const QByteArray agreeing = fieldMatch.isEmpty()
+        ? QByteArray()
+        : " AND id IN (SELECT rowid FROM publication_fts WHERE publication_fts MATCH ?2)";
+    auto add = m_db.prepare(
+        "INSERT OR IGNORE INTO temp.search_match SELECT id FROM publication WHERE id IN ("
+        "SELECT publication_id FROM annotation WHERE id IN (SELECT rowid FROM annotation_fts WHERE annotation_fts MATCH ?1) "
+        "UNION SELECT rowid FROM publication_note_fts WHERE publication_note_fts MATCH ?1)" + agreeing);
+    add->bind(1, contentsMatch);
+    if (!fieldMatch.isEmpty())
+        add->bind(2, fieldMatch);
+    add->step();
 }
 
 void LibraryQuery::addContentMatches(const QString &contentsMatch, const QString &fieldMatch)
@@ -405,7 +441,8 @@ qint64 LibraryQuery::count(const PublicationFilter &filter)
 QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, const PublicationSort &sort,
                                              qint64 offset, int limit)
 {
-    const ListQuery query = buildListQuery(filter, sort, searchClause(filter), anyHidden());
+    const QByteArray clause = searchClause(filter);
+    const ListQuery query = buildListQuery(filter, sort, clause, anyHidden(), m_matchesBeyondDetails);
     auto select = m_db.prepare(
         "SELECT p.id, p.type, p.title, p.authors_display, p.year, p.container_title, p.read_status, "
         "p.needs_review, coalesce(p.parent_id, p.id), CASE WHEN p.parent_id IS NULL THEN NULL ELSE p.page_start END, "
@@ -464,7 +501,8 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
 
 QList<qint64> LibraryQuery::ids(const PublicationFilter &filter, const PublicationSort &sort)
 {
-    const ListQuery query = buildListQuery(filter, sort, searchClause(filter), anyHidden());
+    const QByteArray clause = searchClause(filter);
+    const ListQuery query = buildListQuery(filter, sort, clause, anyHidden(), m_matchesBeyondDetails);
     auto select = m_db.prepare("SELECT p.id" + query.sql);
     bindAll(*select, query.bindings);
     QList<qint64> ids;
@@ -570,22 +608,28 @@ QList<TagCount> LibraryQuery::tagCounts(const PublicationFilter &filter)
     return tags;
 }
 
-QList<FacetValue> LibraryQuery::collectionCounts(const PublicationFilter &filter)
+QList<CollectionCount> LibraryQuery::collectionCounts(const PublicationFilter &filter)
 {
     PublicationFilter others = filter;
     others.collectionIds.clear();
     const Conditions c = buildConditions(others, searchClause(others), anyHidden());
     const QByteArray scope = c.clauses.isEmpty()
         ? QByteArray()
-        : " AND m.publication_id IN (SELECT p.id FROM publication p" + c.whereClause() + ")";
-    auto select = m_db.prepare("SELECT c.id, c.name, count(m.publication_id) FROM collection c "
-                               "LEFT JOIN collection_publication m ON m.collection_id = c.id" + scope
-                               + " GROUP BY c.id ORDER BY c.name");
+        : " WHERE m.publication_id IN (SELECT p.id FROM publication p" + c.whereClause() + ")";
+    // Each collection with every one inside it, so a publication in two of them is counted once.
+    auto select = m_db.prepare(
+        "WITH RECURSIVE tree(top, id) AS (SELECT id, id FROM collection "
+        "UNION SELECT tree.top, cp.collection_id FROM collection_parent cp JOIN tree ON cp.parent_id = tree.id), "
+        "counted(top, n) AS (SELECT tree.top, count(DISTINCT m.publication_id) FROM tree "
+        "JOIN collection_publication m ON m.collection_id = tree.id" + scope + " GROUP BY tree.top) "
+        "SELECT c.id, c.name, coalesce(counted.n, 0), cp.parent_id FROM collection c LEFT JOIN counted ON counted.top = c.id "
+        "LEFT JOIN collection_parent cp ON cp.collection_id = c.id "
+        "ORDER BY c.name");
     bindAll(*select, c.bindings);
 
-    QList<FacetValue> values;
+    QList<CollectionCount> values;
     while (select->step())
-        values << FacetValue{select->textAt(0), select->textAt(1), select->int64At(2)};
+        values << CollectionCount{select->textAt(0), select->textAt(1), select->int64At(2), select->optInt64At(3)};
     return values;
 }
 
@@ -613,6 +657,10 @@ FlagCounts LibraryQuery::flagCounts(const PublicationFilter &filter)
     PublicationFilter unreadable = filter;
     unreadable.unreadable = true;
     counts.unreadable = countWith(unreadable);
+
+    PublicationFilter retracted = filter;
+    retracted.retracted = true;
+    counts.retracted = countWith(retracted);
     return counts;
 }
 

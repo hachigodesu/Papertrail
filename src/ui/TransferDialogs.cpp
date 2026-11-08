@@ -1,5 +1,6 @@
 #include "ui/TransferDialogs.h"
 
+#include "core/db/Backups.h"
 #include "core/db/Database.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
@@ -268,6 +269,10 @@ QString describeImport(const ImportReport &report)
                  .arg(report.annotationsUpdated);
     if (report.settings.applied > 0)
         lines << QCoreApplication::translate("LibraryTransfer", "%n setting(s) brought in.", nullptr, report.settings.applied);
+    if (report.removedAdded > 0)
+        lines << QCoreApplication::translate("LibraryTransfer", "%1 removed on the other computer will be left out here too.")
+                     .arg(report.removedAdded == 1 ? QCoreApplication::translate("LibraryTransfer", "1 file")
+                                                   : QCoreApplication::translate("LibraryTransfer", "%1 files").arg(report.removedAdded));
     if (!report.settings.suggestedPaths.isEmpty())
         lines << QCoreApplication::translate("LibraryTransfer", "Folders from the other computer weren't applied, since they're "
                                                                 "unlikely to exist here.");
@@ -293,12 +298,9 @@ LibraryTransferActions::~LibraryTransferActions()
 
 QString LibraryTransferActions::newBackupPath() const
 {
-    const QFileInfo library(m_session.paths().database);
-    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
-    QString path = library.dir().filePath(QStringLiteral("library-before-import-%1.db").arg(stamp));
-    for (int n = 2; QFileInfo::exists(path); ++n)
-        path = library.dir().filePath(QStringLiteral("library-before-import-%1-%2.db").arg(stamp).arg(n));
-    return path;
+    // With the other backups, so it's listed with them and can be restored the same way.
+    QDir().mkpath(core::backupFolder(m_session.paths().database));
+    return core::newBackupPath(m_session.paths().database, core::BackupKind::BeforeImport);
 }
 
 void LibraryTransferActions::start(const QString &label,

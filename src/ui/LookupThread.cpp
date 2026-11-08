@@ -2,6 +2,7 @@
 
 #include "core/db/Database.h"
 #include "core/settings/SettingsStore.h"
+#include "metadata/NoticeChecker.h"
 #include "metadata/Transport.h"
 
 #include <exception>
@@ -29,6 +30,13 @@ void LookupThread::kick()
         emit kickRequested();
 }
 
+void LookupThread::checkNotices()
+{
+    m_noticesWaiting = true;
+    if (m_ready)
+        emit noticesRequested();
+}
+
 void LookupThread::stopLookups()
 {
     m_kickWaiting = false;
@@ -54,10 +62,42 @@ void LookupThread::run()
     connect(&engine, &LookupEngine::publicationChanged, this, &LookupThread::publicationChanged);
     connect(&engine, &LookupEngine::reviewChanged, this, &LookupThread::reviewChanged);
     connect(&engine, &LookupEngine::problem, this, &LookupThread::problem);
-    connect(&engine, &LookupEngine::finished, this, [this](const LookupSummary &summary) {
+    NoticeChecker notices(*db, *transport);
+    notices.setProviderUrls(m_paths.providerUrls);
+    if (m_paths.noticeCheckIntervalMs >= 0)
+        notices.setIntervalMs(m_paths.noticeCheckIntervalMs);
+    connect(&notices, &NoticeChecker::noticesChanged, this, &LookupThread::noticesChanged);
+    connect(&notices, &NoticeChecker::problem, this, &LookupThread::problem);
+    connect(&notices, &NoticeChecker::finished, this, [this](int checked, int newWarnings) {
+        m_checkingNotices = false;
+        emit noticesChecked(checked, newWarnings);
+    });
+    // Only with online lookups on, and checking too, and after any lookups, which matter more.
+    const auto checkNotices = [this, &engine, &notices, &db] {
+        if (engine.isRunning() || notices.isRunning() || !m_noticesWaiting)
+            return;
+        m_noticesWaiting = false;
+        try {
+            core::SettingsStore settings(*db);
+            if (!settings.value(QStringLiteral("metadata.mode_chosen")).toBool()
+                || settings.value(QStringLiteral("metadata.mode")).toString() == QLatin1StringView("offline")
+                || !settings.value(QStringLiteral("metadata.check_notices")).toBool()) {
+                return;
+            }
+            notices.setContactEmail(settings.value(QStringLiteral("metadata.crossref_email")).toString());
+        } catch (const std::exception &) {
+            return;
+        }
+        m_checkingNotices = true;
+        notices.start();
+    };
+    connect(this, &LookupThread::noticesRequested, &notices, checkNotices, Qt::QueuedConnection);
+
+    connect(&engine, &LookupEngine::finished, this, [this, checkNotices](const LookupSummary &summary) {
         m_busy = false;
         emit busyChanged(false);
         emit lookupsFinished(summary);
+        checkNotices();
     });
 
     // A plain function run in this thread, because these signals are sent from the window's.
@@ -75,15 +115,21 @@ void LookupThread::run()
         engine.start();
     };
     connect(this, &LookupThread::kickRequested, &engine, start, Qt::QueuedConnection);
-    connect(this, &LookupThread::stopRequested, &engine, [&engine] { engine.stop(); }, Qt::QueuedConnection);
+    connect(this, &LookupThread::stopRequested, &engine, [&engine, &notices] {
+        engine.stop();
+        notices.stop();
+    }, Qt::QueuedConnection);
 
     m_ready = true;
     if (m_kickWaiting)
         start();
+    else
+        checkNotices();
     exec();
     m_ready = false;
     if (engine.isRunning())
         engine.stop();
+    notices.stop();
 }
 
 } // namespace papertrail::ui

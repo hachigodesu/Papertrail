@@ -51,7 +51,8 @@ public:
     bool onlyCollectionsChosen() const;
 
     // These ask what they need to, then say that collections have changed.
-    void newCollection();
+    void newCollection(std::optional<qint64> parent = std::nullopt);
+    void moveCollection(qint64 id);
     void renameCollection(qint64 id);
     void deleteCollection(qint64 id);
 
@@ -70,12 +71,26 @@ signals:
     void filterChanged();
     void tagsChanged();
     void collectionsChanged();
+    // The publications chosen in the library were dragged onto a collection or tag.
+    void publicationsDropped(Section section, qint64 id);
 
 private:
     void buildSections();
     void updateFacet(Section section, const QList<core::FacetValue> &values);
+    struct TreeValue {
+        qint64 id = 0;
+        QString name;
+        std::optional<qint64> parentId;
+        std::optional<QString> colour; // For a tag, whose swatch is shown.
+        qint64 count = 0;
+    };
+    // Tags and collections, each inside the one it belongs to.
+    void updateTree(Section section, const QList<TreeValue> &values, QString &signature, const QString &hint);
     void updateTags(const QList<core::TagCount> &tags);
-    void updateCollections(const QList<core::FacetValue> &collections);
+    void updateCollections(const QList<core::CollectionCount> &collections);
+    bool eventFilter(QObject *watched, QEvent *event) override;
+    // The collection or tag a drop at this place in the tree's viewport would land on.
+    QTreeWidgetItem *dropTarget(const QPoint &position) const;
     void updateFlag(const QString &key, const QString &label, qint64 count);
     void setCount(QTreeWidgetItem *item, qint64 count);
     void onItemChanged(QTreeWidgetItem *item);
@@ -97,6 +112,7 @@ private:
     QSet<QString> m_chosen[SectionCount];
     QHash<QString, QString> m_chosenLabels[SectionCount]; // Chosen values may drop out of the results.
     QString m_tagSignature;
+    QString m_collectionSignature;
 };
 
 } // namespace papertrail::ui

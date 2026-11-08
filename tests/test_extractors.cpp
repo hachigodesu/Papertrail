@@ -55,6 +55,17 @@ private slots:
         QCOMPARE(articleDoiOnPage(text), expected);
     }
 
+    void everyDoiOnAPageIsListedInOrder()
+    {
+        // An article's first page that also cites another work, with its own references after.
+        const QString page = QStringLiteral("A Made-Up Article\nDigital Object Identifier 10.5555/made.1\n"
+                                            "As shown by 10.5555/earlier.2, and again 10.5555/made.1.\n"
+                                            "References\n[1] doi:10.5555/cited.3");
+        QCOMPARE(doisOnPage(page), (QStringList{QStringLiteral("10.5555/made.1"), QStringLiteral("10.5555/earlier.2")}));
+        QCOMPARE(articleDoiOnPage(page), QString()); // Two, so neither is certainly the article's.
+        QVERIFY(doisOnPage(QStringLiteral("No identifiers here.")).isEmpty());
+    }
+
     void anIssuesNumbersAreFound_data()
     {
         QTest::addColumn<QString>("text");

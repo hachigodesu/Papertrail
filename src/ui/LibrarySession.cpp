@@ -3,6 +3,7 @@
 #include "import/JournalIssues.h"
 #include "core/repo/FullTextIndex.h"
 
+#include "core/db/Backups.h"
 #include "core/db/Schema.h"
 
 #include <QCoreApplication>
@@ -41,6 +42,12 @@ LibrarySession::LibrarySession(const LibraryPaths &paths)
         throw LibraryInUse("this library is already open in another copy of Papertrail");
 
     m_db = std::make_unique<core::Database>(paths.database);
+    // A copy of the library as it was, before a newer version changes its layout. Without one, it isn't changed.
+    try {
+        core::backUpBeforeUpgrade(*m_db, paths.database);
+    } catch (const core::DbError &error) {
+        throw core::DbError(error.code(), std::string("it couldn't be backed up before being upgraded: ") + error.what());
+    }
     core::migrateLibrary(*m_db);
     core::attachFullText(*m_db, core::fullTextPathFor(paths.database));
     // Issues titled from their covers before this was done get their proper titles.

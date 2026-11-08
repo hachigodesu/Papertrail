@@ -3,6 +3,7 @@
 #include "core/db/Database.h"
 #include "core/repo/PublicationRepository.h"
 
+#include <QDateTime>
 #include <QHash>
 #include <QRegularExpression>
 #include <QSet>
@@ -262,7 +263,14 @@ QList<qint64> createArticles(Database &db, qint64 volumeId, const QList<ArticleD
         article.eissn = volume->eissn;
         article.conferenceName = volume->conferenceName;
         article.conferenceLocation = volume->conferenceLocation;
-        ids << publications.create(article);
+        const qint64 id = publications.create(article);
+        auto join = db.prepare("INSERT OR IGNORE INTO collection_publication (collection_id, publication_id, added_at) "
+                               "SELECT collection_id, ?, ? FROM collection_publication WHERE publication_id = ?");
+        join->bind(1, id);
+        join->bind(2, QDateTime::currentMSecsSinceEpoch());
+        join->bind(3, volumeId);
+        join->step();
+        ids << id;
     }
     transaction.commit();
     return ids;

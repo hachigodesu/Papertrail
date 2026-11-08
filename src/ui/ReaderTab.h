@@ -89,6 +89,8 @@ public:
     // Goes to where a search across the library found something, and looks for it here too. For a file
     // whose pages move with its layout, the page can't be relied on, so it goes to the first match instead.
     void showMatch(int page, const QString &text);
+    // Goes to a highlight or note, once the document is ready if it isn't yet.
+    void showAnnotation(qint64 id);
 
     // Highlights and notes. These are kept in the library's database, and never in the file.
     void annotateSelection(core::AnnotationType type, const QString &note = QString(), const QString &colour = QString());
@@ -154,6 +156,7 @@ private:
     void askToExportAnnotations();
 
     std::optional<std::pair<int, QString>> m_pendingMatch;
+    std::optional<qint64> m_pendingAnnotation;
 
     // What's on this file's contents, and what's on other copies or formats of this publication.
     QString m_contentHash;

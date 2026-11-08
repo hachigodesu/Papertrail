@@ -1,7 +1,9 @@
 #include "ui/MainWindow.h"
 
 #include "import/JournalIssues.h"
+#include "core/db/Backups.h"
 #include "core/repo/FileRepository.h"
+#include "core/repo/RemovedContent.h"
 #include "core/repo/LookupRepository.h"
 #include "core/repo/PublicationMerge.h"
 #include "metadata/Matching.h"
@@ -9,6 +11,7 @@
 #include "ui/CoverCache.h"
 #include "ui/Delegates.h"
 #include "ui/DetailsPanel.h"
+#include "ui/SummariesDialog.h"
 #include "ui/FilterSidebar.h"
 #include "ui/FolderWatcher.h"
 #include "ui/ImportThread.h"
@@ -23,6 +26,11 @@
 #include "ui/ApiKeyStore.h"
 #include "ui/IndexThread.h"
 #include "ui/ArticleCoverThread.h"
+#include "ui/BackupsDialog.h"
+#include "ui/BatchSummaryDialog.h"
+#include "summary/SummaryBatches.h"
+#include "ui/MarkedCopy.h"
+#include "ui/NotesDialog.h"
 #include "ui/CitationActions.h"
 #include "ui/TransferDialogs.h"
 #include "ui/GridView.h"
@@ -173,8 +181,20 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_index = new IndexThread(session.paths(), this);
     m_articleCovers = new ArticleCoverThread(session.paths(), this);
     m_citations = new CitationActions(session, this);
+    m_markedCopy = new MarkedCopyActions(session, this);
+    connect(m_markedCopy, &MarkedCopyActions::finished, this, [this](bool ok, const QString &message) {
+        if (ok) {
+            statusBar()->showMessage(message, 15000);
+            return;
+        }
+        QMessageBox box(QMessageBox::Warning, tr("Save a copy with highlights"), message, QMessageBox::Ok, this);
+        box.setTextFormat(Qt::PlainText);
+        box.exec();
+    });
     connect(m_citations, &CitationActions::message, this, [this](const QString &text) { statusBar()->showMessage(text, 8000); });
     m_transfer = new LibraryTransferActions(session, this);
+    if (session.paths().dailyBackupDelayMs >= 0)
+        QTimer::singleShot(session.paths().dailyBackupDelayMs, this, &MainWindow::startDailyBackup);
     connect(m_transfer, &LibraryTransferActions::message, this, [this](const QString &text) { statusBar()->showMessage(text, 8000); });
     connect(m_transfer, &LibraryTransferActions::foldersRequested, this, &MainWindow::showFoldersDialog);
     connect(m_transfer, &LibraryTransferActions::importFinished, this,
@@ -200,6 +220,52 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
             });
     m_keys = session.paths().keyStoreFactory ? session.paths().keyStoreFactory() : createSystemKeyStore();
     m_summaryTransport = session.paths().transportFactory ? session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
+    m_batches = new summary::SummaryBatches(session.database(), *m_summaryTransport, session.paths().providerUrls.anthropic, this);
+    connect(m_batches, &summary::SummaryBatches::submitted, this, [this](int count) {
+        statusBar()->showMessage(count == 1 ? tr("Sent 1 publication to be summarized at half price. Its summary waits for you to "
+                                                 "review when it arrives, usually within the hour.")
+                                            : tr("Sent %1 publications to be summarized at half price. Each summary waits for you to "
+                                                 "review when it arrives, usually within the hour.")
+                                                  .arg(count),
+                                 15000);
+        m_batchTimer->start();
+    });
+    connect(m_batches, &summary::SummaryBatches::submitFailed, this, [this](summary::SummaryFailure, const QString &message) {
+        QMessageBox box(QMessageBox::Warning, tr("Summarize later at half price"), tr("Nothing was sent. %1").arg(message), QMessageBox::Ok,
+                        this);
+        box.setTextFormat(Qt::PlainText);
+        box.exec();
+    });
+    connect(m_batches, &summary::SummaryBatches::summariesArrived, this, [this](const QList<qint64> &ids) {
+        statusBar()->showMessage(ids.size() == 1 ? tr("A summary from Claude has arrived. Review it in View > Summaries from Claude.")
+                                                 : tr("%1 summaries from Claude have arrived. Review them in View > Summaries from Claude.")
+                                                       .arg(ids.size()),
+                                 20000);
+    });
+    // Whatever's on its way or waiting to be reviewed is shown on its publication and in the status bar.
+    m_summaryStatus = new QPushButton(this);
+    m_summaryStatus->setFlat(true);
+    m_summaryStatus->setToolTip(tr("Summaries from Claude, on their way or waiting for you to review them."));
+    connect(m_summaryStatus, &QPushButton::clicked, this, [this] { showSummariesDialog(); });
+    statusBar()->addPermanentWidget(m_summaryStatus);
+    connect(m_batches, &summary::SummaryBatches::changed, this, [this] {
+        refreshSummaryStatus();
+        if (m_details->currentId())
+            m_details->reload();
+    });
+    refreshSummaryStatus();
+    connect(m_batches, &summary::SummaryBatches::summariesFailed, this, [this](int count, const QString &problem) {
+        statusBar()->showMessage(count == 1 ? tr("A summary couldn't be made: %1").arg(problem)
+                                            : tr("%1 summaries couldn't be made. The first: %2").arg(count).arg(problem),
+                                 20000);
+    });
+    connect(m_batches, &summary::SummaryBatches::checkProblem, this,
+            [this](const QString &message) { statusBar()->showMessage(tr("Summaries on their way couldn't be checked: %1").arg(message), 15000); });
+    // While any are on their way, now and then, as Anthropic suggests asking.
+    m_batchTimer = new QTimer(this);
+    m_batchTimer->setInterval(3 * 60000);
+    connect(m_batchTimer, &QTimer::timeout, this, &MainWindow::checkSummaryBatches);
+    QTimer::singleShot(15000, this, &MainWindow::checkSummaryBatches);
 
     const QString sortSetting = session.settings().value(QStringLiteral("library.sort_field")).toString();
     m_sortField = sortFieldFromSetting(sortSetting);
@@ -301,6 +367,8 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
 MainWindow::~MainWindow()
 {
     m_details->saveNotes();
+    if (m_dailyBackup)
+        m_dailyBackup->wait();
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -384,6 +452,7 @@ void MainWindow::buildToolbar()
     example(QStringLiteral("publisher:wiley"), tr("From a publisher"));
     example(QStringLiteral("institution:leeds"), tr("From a university or other institution"));
     example(QStringLiteral("tag:maths"), tr("With a tag, or one inside it"));
+    example(QStringLiteral("note:welds"), tr("In your highlights and notes"));
     heading(tr("Kind and date"));
     example(QStringLiteral("type:thesis"), tr("Of a type: thesis, issue, book, standard..."));
     example(QStringLiteral("year:2020"), tr("From a year"));
@@ -489,6 +558,18 @@ void MainWindow::buildCentre()
         refreshNow();
         m_details->reload();
     });
+    connect(m_sidebar, &FilterSidebar::publicationsDropped, this, [this](FilterSidebar::Section section, qint64 id) {
+        if (selectedCount() == 0)
+            return;
+        if (section == FilterSidebar::Collections) {
+            addSelectedToCollection(id);
+        } else if (section == FilterSidebar::Tags) {
+            QString path;
+            guarded(tr("Reading the tags"), [&] { path = m_session.tags().path(id); });
+            if (!path.isEmpty())
+                tagSelected(path);
+        }
+    });
     m_splitter->addWidget(m_sidebar);
 
     m_stack = new QStackedWidget(m_splitter);
@@ -516,7 +597,7 @@ void MainWindow::buildCentre()
     m_grid->setAccessibleName(tr("Publications"));
     m_stack->addWidget(m_grid);
 
-    m_list = new QTableView(m_stack);
+    m_list = new PublicationTableView(m_stack);
     m_list->setModel(m_model);
     m_list->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -530,6 +611,14 @@ void MainWindow::buildCentre()
     m_list->setItemDelegateForColumn(PublicationListModel::TitleColumn, new ListTitleDelegate(*m_covers, m_list));
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
     m_list->setAccessibleName(tr("Publications"));
+    // Delete removes what's chosen, after asking, in either view.
+    for (QAbstractItemView *view : {static_cast<QAbstractItemView *>(m_grid), static_cast<QAbstractItemView *>(m_list)}) {
+        auto *remove = new QAction(tr("Remove from library..."), view);
+        remove->setShortcut(QKeySequence::Delete);
+        remove->setShortcutContext(Qt::WidgetShortcut);
+        connect(remove, &QAction::triggered, this, &MainWindow::askToRemoveSelected);
+        view->addAction(remove);
+    }
     QHeaderView *header = m_list->horizontalHeader();
     header->setSectionsClickable(true);
     header->setSortIndicatorShown(true);
@@ -593,6 +682,7 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
     connect(m_details, &DetailsPanel::openMatchRequested, this, &MainWindow::openAtMatch);
     connect(m_details, &DetailsPanel::summarizeRequested, this, &MainWindow::showSummaryDialog);
+    connect(m_details, &DetailsPanel::summariesRequested, this, [this](qint64 id) { showSummariesDialog(id); });
     connect(m_details, &DetailsPanel::findFileRequested, this, [this](qint64 id) {
         QString start;
         const QList<LibraryRoot> roots = m_session.files().roots();
@@ -746,6 +836,7 @@ void MainWindow::buildMenus()
     m_checkSuggestedFiles = file->addAction(tr("Check suggested files..."), this, &MainWindow::showSuggestedFiles);
     updateSuggestedFilesAction();
     file->addSeparator();
+    file->addAction(tr("&Backups..."), this, &MainWindow::showBackupsDialog);
     file->addAction(tr("&Online lookups..."), this, &MainWindow::showLookupSettings);
     file->addAction(tr("Look up details for the whole library..."), this, &MainWindow::askAndLookUpLibrary);
     file->addSeparator();
@@ -771,6 +862,9 @@ void MainWindow::buildMenus()
         const int count = m_documentTabs->count();
         m_documentTabs->setCurrentIndex((m_documentTabs->currentIndex() + count - 1) % count);
     });
+    view->addSeparator();
+    view->addAction(tr("&Highlights and notes..."), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this, &MainWindow::showNotesDialog);
+    view->addAction(tr("Summaries from &Claude..."), this, [this] { showSummariesDialog(); });
     view->addSeparator();
     view->addAction(tr("&Grid"), QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] { setViewMode(ViewMode::Grid); });
     view->addAction(tr("&List"), QKeySequence(Qt::CTRL | Qt::Key_2), this, [this] { setViewMode(ViewMode::List); });
@@ -840,6 +934,31 @@ void MainWindow::connectImport()
     });
     connect(m_lookup, &LookupThread::reviewChanged, this, &MainWindow::updateReviewButton);
     connect(m_lookup, &LookupThread::lookupsFinished, this, &MainWindow::onLookupsFinished);
+    connect(m_lookup, &LookupThread::noticesChanged, this, [this](const QList<qint64> &ids) {
+        refreshNow(); // The sidebar's count of retractions.
+        if (const std::optional<qint64> shown = m_details->currentId(); shown && ids.contains(*shown))
+            m_details->reload();
+    });
+    connect(m_lookup, &LookupThread::noticesChecked, this, [this](int, int newWarnings) {
+        if (newWarnings > 0) {
+            statusBar()->showMessage(newWarnings == 1
+                                         ? tr("1 publication in the library has been retracted or had concerns raised. See Retracted or "
+                                              "of concern in the filters.")
+                                         : tr("%1 publications in the library have been retracted or had concerns raised. See Retracted "
+                                              "or of concern in the filters.")
+                                               .arg(newWarnings),
+                                     30000);
+        }
+    });
+    // Notices come out long after a paper does, so the library's checked now and then: a little after opening,
+    // then every few hours, each publication at most once a month.
+    if (m_session.paths().noticeCheckIntervalMs < 0) {
+        QTimer::singleShot(60000, this, [this] { m_lookup->checkNotices(); });
+        auto *noticeTimer = new QTimer(this);
+        noticeTimer->setInterval(6 * 3600 * 1000);
+        connect(noticeTimer, &QTimer::timeout, this, [this] { m_lookup->checkNotices(); });
+        noticeTimer->start();
+    }
     connect(m_lookup, &LookupThread::problem, this,
             [this](const QString &message) { statusBar()->showMessage(tr("%1 Trying again shortly.").arg(message), 15000); });
     connect(m_import, &ImportThread::failed, this, [this](const QString &message) {
@@ -1394,6 +1513,100 @@ void MainWindow::prepareForImport()
         closeDocumentTab(m_documentTabs->count() - 1);
 }
 
+void MainWindow::startDailyBackup()
+{
+    if (m_dailyBackup && m_dailyBackup->isRunning())
+        return;
+    if (!m_session.settings().value(QStringLiteral("library.daily_backups")).toBool())
+        return;
+    if (!m_dailyBackup) {
+        m_dailyBackup = new DailyBackupThread(m_session.paths().database, this);
+        connect(m_dailyBackup, &DailyBackupThread::failed, this, [this](const QString &error) {
+            statusBar()->showMessage(tr("Today's backup couldn't be made: %1").arg(error), 15000);
+        });
+        connect(m_dailyBackup, &DailyBackupThread::made, this, [this] {
+            if (m_backupsDialog)
+                m_backupsDialog->reload();
+        });
+    }
+    m_dailyBackup->start(QThread::LowPriority);
+}
+
+void MainWindow::showNotesDialog()
+{
+    NotesDialog dialog(m_session, this);
+    connect(&dialog, &NotesDialog::openRequested, this, [this, &dialog](qint64 id) {
+        if (openAnnotation(id))
+            dialog.accept();
+    });
+    dialog.exec();
+}
+
+bool MainWindow::openAnnotation(qint64 annotationId)
+{
+    std::optional<Annotation> annotation;
+    std::optional<qint64> fileId;
+    guarded(tr("Reading the highlight"), [&] {
+        annotation = AnnotationRepository(m_session.database()).get(annotationId);
+        if (!annotation)
+            return;
+        // The file with the contents it was made on, wherever that is now.
+        for (const FileRecord &file : m_session.files().withHash(annotation->contentHash)) {
+            if (file.status == FileStatus::Ok && QFileInfo::exists(m_session.files().absolutePath(file.id))) {
+                fileId = file.id;
+                break;
+            }
+        }
+    });
+    if (!annotation)
+        return false;
+    if (!fileId) {
+        statusBar()->showMessage(tr("The file this was made on can't be found right now."), 8000);
+        return false;
+    }
+    ReaderTab *reader = openPublicationFile(annotation->publicationId, *fileId);
+    if (!reader)
+        return false;
+    reader->showAnnotation(annotationId);
+    return true;
+}
+
+void MainWindow::showBackupsDialog()
+{
+    BackupsDialog dialog(m_session, this);
+    m_backupsDialog = &dialog;
+    connect(&dialog, &BackupsDialog::restoreRequested, this, [this](const QString &path) {
+        if (restoreBackup(path))
+            m_backupsDialog->accept();
+    });
+    dialog.exec();
+    m_backupsDialog = nullptr;
+}
+
+bool MainWindow::restoreBackup(const QString &backupPath)
+{
+    prepareForImport(); // Nothing else writes while the library's replaced.
+    if (m_dailyBackup)
+        m_dailyBackup->wait();
+    m_details->saveNotes();
+    const QString made = QFileInfo(backupPath).fileName();
+    const bool done = guarded(tr("Restoring the backup"), [&] {
+        core::restoreBackup(m_session.database(), m_session.paths().database, backupPath);
+    });
+    // Whatever happened, the library is looked at afresh.
+    m_covers->forgetMissing();
+    afterFoldersChanged();
+    m_details->reload();
+    updateSuggestedFilesAction();
+    refreshSummaryStatus();
+    rescanAll(); // Files the backup didn't know about are found again.
+    if (m_session.settings().value(QStringLiteral("library.index_contents")).toBool())
+        m_index->kick();
+    if (done)
+        statusBar()->showMessage(tr("The library was restored from %1. Its previous state was backed up first.").arg(made), 15000);
+    return done;
+}
+
 void MainWindow::updateSuggestedFilesAction()
 {
     if (!m_checkSuggestedFiles)
@@ -1552,6 +1765,13 @@ void MainWindow::showContextMenu(const QPoint &position)
             menu.addAction(tr("Show in folder"), this, [this, publication] { showPublicationInFolder(publication); });
             menu.addAction(tr("Edit..."), this, [this, publication] { editPublication(publication); });
             menu.addAction(tr("Summarize with Claude..."), this, [this, publication] { showSummaryDialog(publication); });
+            menu.addAction(tr("Summarize later at half price..."), this, &MainWindow::showBatchSummaryDialog);
+            bool marked = false;
+            guarded(tr("Reading the highlights"), [&] { marked = markedPdfFor(m_session, publication).has_value(); });
+            if (marked) {
+                menu.addAction(tr("Save a copy with highlights..."), this,
+                               [this, publication] { m_markedCopy->askAndSave(publication); });
+            }
             guarded(tr("Reading the publication"), [&] {
                 const std::optional<Publication> details = m_session.publications().get(publication);
                 if (details && !details->parentId && canHoldArticles(details->type)) {
@@ -1571,6 +1791,8 @@ void MainWindow::showContextMenu(const QPoint &position)
     menu.addAction(tr("Mark as checked"), this, &MainWindow::markSelectedChecked);
     menu.addAction(tr("Look up details online"), this, &MainWindow::askAndLookUpSelected);
     m_citations->addCiteMenu(&menu, count, [this] { return selectedIds(); });
+    if (count > 1)
+        menu.addAction(tr("Summarize %1 later at half price...").arg(count), this, &MainWindow::showBatchSummaryDialog);
     menu.addSeparator();
     addCollectionActions(&menu);
     if (count >= 2 && count <= kMaxToCombine) {
@@ -1586,7 +1808,86 @@ void MainWindow::showContextMenu(const QPoint &position)
                 combineSelected();
         });
     }
+    menu.addSeparator();
+    menu.addAction(count == 1 ? tr("Remove from library...") : tr("Remove %1 from library...").arg(count), this,
+                   &MainWindow::askToRemoveSelected);
     menu.exec(view->viewport()->mapToGlobal(position));
+}
+
+void MainWindow::showBatchSummaryDialog()
+{
+    QList<qint64> ids;
+    guarded(tr("Reading the library"), [&] { ids = selectedIds(); });
+    if (ids.isEmpty())
+        return;
+    // The key is read first, since without one nothing can be sent.
+    m_keys->read([this, ids](const QString &key) {
+        if (key.isEmpty()) {
+            QMessageBox box(QMessageBox::Information, tr("Summarize later at half price"),
+                            tr("This needs your Claude API key. Add it with Summarize with Claude on any publication, then try again."),
+                            QMessageBox::Ok, this);
+            box.setTextFormat(Qt::PlainText);
+            box.exec();
+            return;
+        }
+        BatchSummaryDialog dialog(m_session, ids, this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        const QList<Publication> chosen = dialog.included();
+        if (chosen.isEmpty())
+            return;
+        m_batches->setApiKey(key);
+        m_batches->submit(dialog.model(), dialog.effort(), chosen);
+    });
+}
+
+void MainWindow::refreshSummaryStatus()
+{
+    qint64 waiting = 0;
+    qint64 arrived = 0;
+    try {
+        waiting = summary::SummaryBatches::waitingCount(m_session.database());
+        arrived = summary::SummaryBatches::arrivedCount(m_session.database());
+    } catch (const std::exception &) {
+        // Only the reminder is missing. The list says what's wrong.
+    }
+    QStringList parts;
+    if (arrived > 0)
+        parts << (arrived == 1 ? tr("1 summary to review") : tr("%1 summaries to review").arg(arrived));
+    if (waiting > 0)
+        parts << (waiting == 1 ? tr("1 summary on its way") : tr("%1 summaries on their way").arg(waiting));
+    m_summaryStatus->setText(parts.join(QStringLiteral(", ")));
+    m_summaryStatus->setVisible(!parts.isEmpty());
+}
+
+void MainWindow::showSummariesDialog(std::optional<qint64> publicationId)
+{
+    SummariesDialog dialog(m_session, *m_batches, this);
+    connect(&dialog, &SummariesDialog::checkRequested, this, &MainWindow::checkSummaryBatches);
+    if (publicationId)
+        dialog.showPublication(*publicationId);
+    dialog.exec();
+    refreshSummaryStatus();
+    if (m_details->currentId())
+        m_details->reload();
+}
+
+void MainWindow::checkSummaryBatches()
+{
+    qint64 waiting = 0;
+    guarded(tr("Reading the summaries on their way"), [&] { waiting = summary::SummaryBatches::waitingCount(m_session.database()); });
+    if (waiting == 0) {
+        m_batchTimer->stop();
+        return;
+    }
+    if (!m_batchTimer->isActive())
+        m_batchTimer->start();
+    m_keys->read([this](const QString &key) {
+        if (key.isEmpty())
+            return; // Kept until there's a key to ask with.
+        m_batches->setApiKey(key);
+        m_batches->check();
+    });
 }
 
 void MainWindow::showSummaryDialog(qint64 publicationId)
@@ -1636,6 +1937,77 @@ void MainWindow::showAddArticleDialog(qint64 volumeId)
         m_details->reload();
         refreshNow();
     });
+}
+
+void MainWindow::askToRemoveSelected()
+{
+    const qint64 count = selectedCount();
+    if (count == 0)
+        return;
+    QList<qint64> ids;
+    guarded(tr("Reading the library"), [&] { ids = selectedIds(); });
+    if (ids.isEmpty())
+        return;
+    QString what = count == 1 ? tr("this publication") : tr("these %1 publications").arg(QLocale().toString(count));
+    if (count == 1) {
+        if (const std::optional<Publication> one = m_session.publications().get(ids.first()))
+            what = QStringLiteral("\"%1\"").arg(one->title);
+    }
+    QMessageBox box(QMessageBox::Question, count == 1 ? tr("Remove publication") : tr("Remove publications"),
+                    tr("Remove %1 from the library?\n\nTheir details, tags, notes and highlights are deleted, with any articles "
+                       "inside them. Your files aren't touched, and won't be added again when found. They can be brought "
+                       "back from Library folders.")
+                        .arg(what),
+                    QMessageBox::NoButton, this);
+    box.setTextFormat(Qt::PlainText);
+    QPushButton *remove = box.addButton(tr("Remove"), QMessageBox::DestructiveRole);
+    remove->setObjectName(QStringLiteral("removePublications"));
+    QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(cancel);
+    box.exec();
+    if (box.clickedButton() == remove)
+        removePublications(ids);
+}
+
+void MainWindow::removePublications(const QList<qint64> &ids)
+{
+    if (ids.isEmpty())
+        return;
+    // Open documents and the details panel let go first, since they save as they close.
+    QSet<qint64> gone(ids.cbegin(), ids.cend());
+    guarded(tr("Reading the library"), [&] {
+        for (const qint64 id : ids) {
+            for (const qint64 child : m_session.publications().childIds(id))
+                gone.insert(child);
+        }
+    });
+    for (int i = m_documentTabs->count() - 1; i > 0; --i) {
+        const auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
+        if (reader && gone.contains(reader->publicationId()))
+            closeDocumentTab(i);
+    }
+    if (const std::optional<qint64> shown = m_details->currentId(); shown && gone.contains(*shown)) {
+        m_selectedId.reset();
+        m_details->showNothing();
+    }
+    const qint64 when = QDateTime::currentMSecsSinceEpoch();
+    m_bulk->enqueue(tr("Removing"), ids, [when](Database &db, const QList<qint64> &batch) {
+        RemovedContent(db).remove(batch, when);
+    });
+}
+
+void MainWindow::showRemovedPublications()
+{
+    RemovedPublicationsDialog dialog(m_session, m_foldersDialog ? static_cast<QWidget *>(m_foldersDialog) : this);
+    m_removedDialog = &dialog;
+    dialog.exec();
+    m_removedDialog = nullptr;
+    if (m_foldersDialog)
+        m_foldersDialog->reload();
+    if (dialog.filesBroughtBack() > 0) {
+        m_importStoppedByHand = false;
+        rescanAll(); // Reads them again, as new files.
+    }
 }
 
 void MainWindow::askToDeleteArticle(qint64 articleId)
@@ -1694,7 +2066,7 @@ void MainWindow::addCollectionActions(QMenu *menu)
 
         for (const Collection &collection : m_session.collections().all()) {
             const qint64 id = collection.id;
-            const QString name = escapedForMenu(collection.name);
+            const QString name = escapedForMenu(collection.path);
             const qint64 inIt = holding.value(id);
             const bool partly = known && inIt > 0 && inIt < selected;
             QAction *add = addTo->addAction(partly ? tr("%1 (%2 of %3 already in it)").arg(name).arg(inIt).arg(selected) : name, this,
@@ -1835,9 +2207,17 @@ void MainWindow::showLookupSettings()
 {
     QString email;
     guarded(tr("Reading settings"), [&] { email = m_session.settings().value(QStringLiteral("metadata.crossref_email")).toString(); });
+    bool notices = true;
+    guarded(tr("Reading settings"), [&] { notices = m_session.settings().value(QStringLiteral("metadata.check_notices")).toBool(); });
     OnlineLookupDialog dialog(QString(), lookupMode(), email, true, this);
-    if (dialog.exec() == QDialog::Accepted)
+    dialog.setCheckNotices(notices);
+    if (dialog.exec() == QDialog::Accepted) {
+        guarded(tr("Saving settings"),
+                [&] { m_session.settings().setValue(QStringLiteral("metadata.check_notices"), dialog.checkNotices()); });
         setLookupMode(dialog.mode(), dialog.email().isNull() ? QStringLiteral("") : dialog.email());
+        if (dialog.checkNotices())
+            m_lookup->checkNotices();
+    }
 }
 
 bool MainWindow::makeSureLookupModeIsChosen()
@@ -2055,6 +2435,7 @@ void MainWindow::showFoldersDialog()
     connect(&dialog, &LibraryFoldersDialog::removeRequested, this, &MainWindow::removeRoots);
     connect(&dialog, &LibraryFoldersDialog::forgetRequested, this, &MainWindow::confirmForgetHidden);
     connect(&dialog, &LibraryFoldersDialog::forgetWaitingRequested, this, &MainWindow::confirmForgetWaiting);
+    connect(&dialog, &LibraryFoldersDialog::removedListRequested, this, &MainWindow::showRemovedPublications);
     dialog.exec();
     m_foldersDialog = nullptr;
     offerReviewIfDue();
@@ -2324,7 +2705,7 @@ void MainWindow::onImportFinished(const import::ImportReport &report)
         return;
     }
     if (report.publicationsCreated == 0 && report.duplicates == 0 && report.moved == 0 && report.updated == 0
-        && report.unreadable == 0 && report.reclassified == 0 && report.formatsJoined == 0) {
+        && report.unreadable == 0 && report.reclassified == 0 && report.formatsJoined == 0 && report.keptOut == 0) {
         return;
     }
     QStringList parts;
@@ -2343,6 +2724,8 @@ void MainWindow::onImportFinished(const import::ImportReport &report)
         parts << tr("%1 can't be read").arg(report.unreadable);
     if (report.needsReview > 0)
         parts << tr("%1 to check").arg(report.needsReview);
+    if (report.keptOut > 0)
+        parts << tr("%1 left out, as you removed them earlier").arg(report.keptOut);
     statusBar()->showMessage(tr("Import finished: %1.").arg(parts.join(QStringLiteral(", "))), 15000);
 }
 

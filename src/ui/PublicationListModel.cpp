@@ -148,6 +148,14 @@ int PublicationListModel::columnCount(const QModelIndex &parent) const
     return parent.isValid() ? 0 : ColumnCount;
 }
 
+Qt::ItemFlags PublicationListModel::flags(const QModelIndex &index) const
+{
+    Qt::ItemFlags flags = QAbstractTableModel::flags(index);
+    if (index.isValid())
+        flags |= Qt::ItemIsDragEnabled;
+    return flags;
+}
+
 QVariant PublicationListModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid())

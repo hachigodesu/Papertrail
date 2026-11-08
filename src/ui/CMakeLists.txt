@@ -26,7 +26,13 @@ add_library(papertrail_ui STATIC
     MainWindow.cpp
     MainWindow.h
     MetadataEditor.cpp
+    MarkedCopy.cpp
+    MarkedCopy.h
     MetadataEditor.h
+    NotesDialog.cpp
+    NotesDialog.h
+    SummariesDialog.cpp
+    SummariesDialog.h
     OnlineLookupDialog.cpp
     OnlineLookupDialog.h
     PageView.cpp
@@ -41,6 +47,10 @@ add_library(papertrail_ui STATIC
     IndexThread.h
     ArticleCoverThread.cpp
     ArticleCoverThread.h
+    BackupsDialog.cpp
+    BackupsDialog.h
+    BatchSummaryDialog.cpp
+    BatchSummaryDialog.h
     CitationActions.cpp
     GridView.cpp
     GridView.h

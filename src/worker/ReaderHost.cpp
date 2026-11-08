@@ -303,6 +303,8 @@ private:
         reply.insert(QStringLiteral("title"), m_document->largestTextOnPage(number).left(500));
         const QString text = m_document->pageText(number);
         reply.insert(QStringLiteral("doi"), import::articleDoiOnPage(text));
+        // All of them too, for telling where articles start in a file with no contents. A few are enough.
+        reply.insert(QStringLiteral("dois"), QJsonArray::fromStringList(import::doisOnPage(text).mid(0, 8)));
         if (const std::optional<import::IssueNumbering> numbering = import::findIssueNumbering(text.left(4000))) {
             reply.insert(QStringLiteral("volume"), numbering->volume);
             reply.insert(QStringLiteral("issue"), numbering->issue);

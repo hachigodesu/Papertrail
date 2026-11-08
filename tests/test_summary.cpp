@@ -2,22 +2,28 @@
 // API's format, and the one real network path talks to a server inside the test.
 
 #include "core/db/Database.h"
+#include "core/db/Schema.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/SummaryRepository.h"
 #include "core/repo/VolumeArticles.h"
 #include "core/settings/SettingsStore.h"
 #include "metadata/Transport.h"
+#include "summary/SummaryBatches.h"
 #include "summary/SummaryEngine.h"
 #include "summary/SummaryRequest.h"
+#include "summary/SummarySpending.h"
 #include "ui/ApiKeyStore.h"
+#include "ui/BatchSummaryDialog.h"
 #include "ui/DetailsPanel.h"
 #include "ui/ImportThread.h"
 #include "ui/LibrarySession.h"
 #include "ui/MainWindow.h"
+#include "ui/SummariesDialog.h"
 #include "ui/SummaryDialog.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDirIterator>
@@ -31,6 +37,8 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTabWidget>
+#include <QTreeWidget>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -435,6 +443,405 @@ private slots:
         QVERIFY(!outcome.cutOff);
     }
 
+    // ---- Batches ----
+
+    void aBatchIsSentCollectedAndCarriedOn()
+    {
+        Publication first = examplePublication();
+        first.id = m_session->publications().create(first);
+        Publication second = examplePublication();
+        second.title = QStringLiteral("Corrosion of Made-Up Bridges");
+        second.doi = QStringLiteral("10.1000/second");
+        second.id = m_session->publications().create(second);
+
+        QJsonArray paused;
+        paused.append(QJsonObject{{QStringLiteral("type"), QStringLiteral("server_tool_use")}, {QStringLiteral("id"), QStringLiteral("a")},
+                                  {QStringLiteral("name"), QStringLiteral("web_search")}});
+        const auto line = [](const QString &customId, const QByteArray &message) {
+            return QJsonDocument(QJsonObject{{QStringLiteral("custom_id"), customId},
+                                             {QStringLiteral("result"), QJsonObject{{QStringLiteral("type"), QStringLiteral("succeeded")},
+                                                                                    {QStringLiteral("message"), QJsonDocument::fromJson(message).object()}}}})
+                .toJson(QJsonDocument::Compact);
+        };
+        const QByteArray batchOne = R"({"id":"msgbatch_01","type":"message_batch","processing_status":"in_progress"})";
+        m_fake->reply(batchOne);
+        m_fake->reply(batchOne); // Not finished yet when first asked.
+        m_fake->reply(R"({"id":"msgbatch_01","type":"message_batch","processing_status":"ended"})");
+        m_fake->reply(line(QStringLiteral("p%1").arg(first.id), replyWith(kGoodText, QStringLiteral("end_turn"), 1000, 500, 1)) + '\n'
+                      + line(QStringLiteral("p%1").arg(second.id), replyWith(QString(), QStringLiteral("pause_turn"), 100, 10, 1, paused)) + '\n');
+        m_fake->reply(R"({"id":"msgbatch_02","type":"message_batch","processing_status":"in_progress"})"); // What paused, sent on.
+        m_fake->reply(R"({"id":"msgbatch_02","type":"message_batch","processing_status":"ended"})");
+        m_fake->reply(R"({"custom_id":"p)" + QByteArray::number(second.id)
+                      + R"(-c1","result":{"type":"errored","error":{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}}})");
+
+        SummaryBatches batches(m_session->database(), *m_transport, QStringLiteral("https://api.example"));
+        batches.setApiKey(kKey);
+        QSignalSpy submitted(&batches, &SummaryBatches::submitted);
+        QSignalSpy saved(&batches, &SummaryBatches::summariesArrived);
+        QSignalSpy failed(&batches, &SummaryBatches::summariesFailed);
+        QSignalSpy checked(&batches, &SummaryBatches::checked);
+        batches.submit(defaultModel(), defaultEffort(), {first, second});
+        QVERIFY(submitted.wait(kWaitMs));
+        QCOMPARE(submitted.first().first().toInt(), 2);
+        QCOMPARE(batches.waitingCount(), qint64(2));
+        QCOMPARE(SummaryBatches::entries(m_session->database()).size(), 2);
+        QCOMPARE(SummaryBatches::entryFor(m_session->database(), first.id)->state, BatchEntry::State::Waiting);
+
+        // What was sent: each publication's identifying details under its own id, the key only in a header.
+        const HttpRequest sent = m_fake->requests.first();
+        QCOMPARE(sent.url, QUrl(QStringLiteral("https://api.example/v1/messages/batches")));
+        QCOMPARE(sent.method, QByteArray("POST"));
+        const QJsonArray requests = QJsonDocument::fromJson(sent.body).object().value(QStringLiteral("requests")).toArray();
+        QCOMPARE(requests.size(), 2);
+        QCOMPARE(requests.at(0).toObject().value(QStringLiteral("custom_id")).toString(), QStringLiteral("p%1").arg(first.id));
+        QCOMPARE(requests.at(0).toObject().value(QStringLiteral("params")).toObject().value(QStringLiteral("model")).toString(), defaultModel());
+        QVERIFY(sent.body.contains("Fatigue of Steel Beams"));
+        QVERIFY(!sent.body.contains("My private note"));
+        QVERIFY(!sent.body.contains(kKey.toUtf8()));
+
+        // Not finished: nothing changes.
+        batches.check();
+        QVERIFY(checked.wait(kWaitMs));
+        QVERIFY(saved.isEmpty());
+        QCOMPARE(batches.waitingCount(), qint64(2));
+
+        // Finished: one arrives to be reviewed, at half the price, and the one that paused goes on in another batch.
+        checked.clear();
+        batches.check();
+        QVERIFY(checked.wait(kWaitMs));
+        QCOMPARE(saved.size(), 1);
+        QCOMPARE(saved.first().first().value<QList<qint64>>(), QList<qint64>{first.id});
+        QVERIFY(!SummaryRepository(m_session->database()).forPublication(first.id)); // Not until it's kept.
+        const BatchEntry arrived = *SummaryBatches::entryFor(m_session->database(), first.id);
+        QCOMPARE(arrived.state, BatchEntry::State::Arrived);
+        QVERIFY(arrived.arrivedAt > 0);
+        QVERIFY(arrived.text.contains(QStringLiteral("The beams broke.")));
+        QCOMPARE(SummaryBatches::arrivedCount(m_session->database()), qint64(1));
+        Usage usage;
+        usage.inputTokens = 1000;
+        usage.outputTokens = 500;
+        usage.webSearches = 1;
+        QVERIFY(arrived.cost.has_value());
+        QVERIFY(qAbs(*arrived.cost - *costOf(defaultModel(), usage) * kBatchPriceFactor) < 1e-9);
+        batches.keep(arrived.batchId, arrived.customId);
+        const std::optional<StoredSummary> stored = SummaryRepository(m_session->database()).forPublication(first.id);
+        QVERIFY(stored);
+        QVERIFY(stored->text.contains(QStringLiteral("The beams broke.")));
+        QVERIFY(qAbs(stored->costDollars.value_or(0) - *arrived.cost) < 1e-9);
+        QCOMPARE(SummaryBatches::arrivedCount(m_session->database()), qint64(0));
+        QVERIFY(!SummaryBatches::entryFor(m_session->database(), first.id));
+        QVERIFY(m_fake->requests.at(3).url.path().endsWith(QLatin1StringView("/v1/messages/batches/msgbatch_01/results")));
+        QTRY_COMPARE_WITH_TIMEOUT(m_fake->requests.size(), 5, kWaitMs);
+        const QJsonArray carried = QJsonDocument::fromJson(m_fake->requests.at(4).body).object().value(QStringLiteral("requests")).toArray();
+        QCOMPARE(carried.size(), 1);
+        QCOMPARE(carried.at(0).toObject().value(QStringLiteral("custom_id")).toString(), QStringLiteral("p%1-c1").arg(second.id));
+        const QJsonArray messages = carried.at(0).toObject().value(QStringLiteral("params")).toObject().value(QStringLiteral("messages")).toArray();
+        QCOMPARE(messages.at(1).toObject().value(QStringLiteral("content")).toArray(), paused);
+        QTRY_COMPARE_WITH_TIMEOUT(batches.waitingCount(), qint64(1), kWaitMs);
+        QCOMPARE(submitted.size(), 1); // Carrying on isn't announced as something new.
+
+        // The carried-on one fails, and says why.
+        checked.clear();
+        batches.check();
+        QVERIFY(checked.wait(kWaitMs));
+        QCOMPARE(failed.size(), 1);
+        QCOMPARE(failed.first().at(0).toInt(), 1);
+        QCOMPARE(failed.first().at(1).toString(), QStringLiteral("Overloaded"));
+        QCOMPARE(batches.waitingCount(), qint64(0));
+        QVERIFY(!SummaryRepository(m_session->database()).forPublication(second.id));
+
+        // The failure stays listed, saying why, until it's taken off the list.
+        const BatchEntry failure = *SummaryBatches::entryFor(m_session->database(), second.id);
+        QCOMPARE(failure.state, BatchEntry::State::Failed);
+        QCOMPARE(failure.problem, QStringLiteral("Overloaded"));
+        batches.dismiss(failure.batchId, failure.customId);
+        QVERIFY(SummaryBatches::entries(m_session->database()).isEmpty());
+
+        // Each reply that came back is counted at half price, whether or not its summary was kept.
+        const QList<SpendEntry> spent = spendEntries(m_session->database());
+        QCOMPARE(spent.size(), 2);
+        double total = 0;
+        for (const SpendEntry &entry : spent) {
+            QCOMPARE(entry.kind, SpendKind::Batch);
+            total += entry.cost.value_or(0);
+        }
+        Usage paused2;
+        paused2.inputTokens = 100;
+        paused2.outputTokens = 10;
+        paused2.webSearches = 1;
+        const double expected = (*costOf(defaultModel(), usage) + *costOf(defaultModel(), paused2)) * kBatchPriceFactor;
+        QVERIFY(qAbs(total - expected) < 1e-9);
+        QVERIFY(qAbs(spendTotals(m_session->database(), QDateTime::currentMSecsSinceEpoch()).batch - expected) < 1e-9);
+    }
+
+    void nothingIsLostWhenPapertrailClosesPartway()
+    {
+        Publication one = examplePublication();
+        one.id = m_session->publications().create(one);
+        Publication two = examplePublication();
+        two.title = QStringLiteral("Corrosion of Made-Up Bridges");
+        two.id = m_session->publications().create(two);
+        QJsonArray paused;
+        paused.append(QJsonObject{{QStringLiteral("type"), QStringLiteral("server_tool_use")}, {QStringLiteral("id"), QStringLiteral("a")},
+                                  {QStringLiteral("name"), QStringLiteral("web_search")}});
+        const auto line = [](const QString &customId, const QByteArray &message) {
+            return QJsonDocument(QJsonObject{{QStringLiteral("custom_id"), customId},
+                                             {QStringLiteral("result"), QJsonObject{{QStringLiteral("type"), QStringLiteral("succeeded")},
+                                                                                    {QStringLiteral("message"), QJsonDocument::fromJson(message).object()}}}})
+                .toJson(QJsonDocument::Compact);
+        };
+
+        {
+            SummaryBatches batches(m_session->database(), *m_transport, QStringLiteral("https://api.example"));
+            batches.setApiKey(kKey);
+            QSignalSpy submitted(&batches, &SummaryBatches::submitted);
+            m_fake->reply(R"({"id":"msgbatch_01","type":"message_batch","processing_status":"in_progress"})");
+            batches.submit(defaultModel(), defaultEffort(), {one, two});
+            QVERIFY(submitted.wait(kWaitMs));
+        }
+        // Papertrail closed with the batch on its way. Next time, it has finished: one arrives, and the other paused, but
+        // Anthropic can't be reached to send it on.
+        {
+            SummaryBatches batches(m_session->database(), *m_transport, QStringLiteral("https://api.example"));
+            batches.setApiKey(kKey);
+            QCOMPARE(batches.waitingCount(), qint64(2));
+            m_fake->replies.clear();
+            m_fake->reply(R"({"id":"msgbatch_01","type":"message_batch","processing_status":"ended"})");
+            m_fake->reply(line(QStringLiteral("p%1").arg(one.id), replyWith(kGoodText)) + '\n'
+                          + line(QStringLiteral("p%1").arg(two.id), replyWith(QString(), QStringLiteral("pause_turn"), 100, 10, 1, paused)) + '\n');
+            m_fake->reply(QByteArray(), 503);
+            QSignalSpy checked(&batches, &SummaryBatches::checked);
+            QSignalSpy problems(&batches, &SummaryBatches::checkProblem);
+            batches.check();
+            QVERIFY(checked.wait(kWaitMs));
+            QCOMPARE(problems.size(), 1);
+            QCOMPARE(SummaryBatches::entryFor(m_session->database(), one.id)->state, BatchEntry::State::Arrived);
+            QCOMPARE(SummaryBatches::entryFor(m_session->database(), two.id)->state, BatchEntry::State::Paused);
+        }
+        // And closed again. What arrived still waits to be reviewed, and what paused is sent on from where it was.
+        SummaryBatches batches(m_session->database(), *m_transport, QStringLiteral("https://api.example"));
+        batches.setApiKey(kKey);
+        QCOMPARE(SummaryBatches::arrivedCount(m_session->database()), qint64(1));
+        QCOMPARE(batches.waitingCount(), qint64(1));
+        m_fake->replies.clear();
+        m_fake->reply(R"({"id":"msgbatch_02","type":"message_batch","processing_status":"in_progress"})");
+        const qsizetype before = m_fake->requests.size();
+        QSignalSpy checked(&batches, &SummaryBatches::checked);
+        batches.check();
+        QVERIFY(checked.wait(kWaitMs));
+        QCOMPARE(m_fake->requests.size(), before + 1);
+        const QJsonArray carried = QJsonDocument::fromJson(m_fake->requests.last().body).object().value(QStringLiteral("requests")).toArray();
+        QCOMPARE(carried.size(), 1);
+        QCOMPARE(carried.at(0).toObject().value(QStringLiteral("custom_id")).toString(), QStringLiteral("p%1-c1").arg(two.id));
+        const BatchEntry onItsWay = *SummaryBatches::entryFor(m_session->database(), two.id);
+        QCOMPARE(onItsWay.state, BatchEntry::State::Waiting);
+        QCOMPARE(onItsWay.batchId, QStringLiteral("msgbatch_02"));
+        QCOMPARE(onItsWay.continuations, 1);
+        QCOMPARE(SummaryBatches::entryFor(m_session->database(), one.id)->state, BatchEntry::State::Arrived);
+
+        // Discarding one that arrived keeps nothing, but what it cost is still counted.
+        const BatchEntry arrived = *SummaryBatches::entryFor(m_session->database(), one.id);
+        batches.discard(arrived.batchId, arrived.customId);
+        QVERIFY(!SummaryBatches::entryFor(m_session->database(), one.id));
+        QVERIFY(!SummaryRepository(m_session->database()).forPublication(one.id));
+        QCOMPARE(spendEntries(m_session->database()).size(), 2);
+    }
+
+    void aRefusedContinuationFailsRatherThanRepeating()
+    {
+        Publication one = examplePublication();
+        one.id = m_session->publications().create(one);
+        m_fake->reply(R"({"id":"msgbatch_01","type":"message_batch","processing_status":"ended"})");
+        SummaryBatches batches(m_session->database(), *m_transport, QStringLiteral("https://api.example"));
+        batches.setApiKey(kKey);
+        QSignalSpy submitted(&batches, &SummaryBatches::submitted);
+        batches.submit(defaultModel(), defaultEffort(), {one});
+        QVERIFY(submitted.wait(kWaitMs));
+        m_fake->replies.clear();
+        m_fake->reply(R"({"id":"msgbatch_01","type":"message_batch","processing_status":"ended"})");
+        m_fake->reply(QJsonDocument(QJsonObject{{QStringLiteral("custom_id"), QStringLiteral("p%1").arg(one.id)},
+                                                {QStringLiteral("result"), QJsonObject{{QStringLiteral("type"), QStringLiteral("succeeded")},
+                                                                                       {QStringLiteral("message"), QJsonDocument::fromJson(replyWith(QString(), QStringLiteral("pause_turn"))).object()}}}})
+                          .toJson(QJsonDocument::Compact));
+        m_fake->reply(errorReply(QStringLiteral("invalid_request_error"), QStringLiteral("Too long")), 400);
+        QSignalSpy checked(&batches, &SummaryBatches::checked);
+        QSignalSpy failed(&batches, &SummaryBatches::summariesFailed);
+        batches.check();
+        QVERIFY(checked.wait(kWaitMs));
+        QCOMPARE(failed.size(), 1);
+        const BatchEntry entry = *SummaryBatches::entryFor(m_session->database(), one.id);
+        QCOMPARE(entry.state, BatchEntry::State::Failed);
+        QVERIFY(entry.problem.contains(QStringLiteral("Too long")));
+        QCOMPARE(batches.waitingCount(), qint64(0));
+    }
+
+    void keepAllKeepsEveryOneAndSeveralFailuresGoAtOnce()
+    {
+        QList<Publication> sent;
+        for (const QString &title : {QStringLiteral("Fatigue of Steel Beams"), QStringLiteral("Corrosion of Made-Up Bridges"),
+                                     QStringLiteral("Creep in Imaginary Columns"), QStringLiteral("Wear of Pretend Bearings"),
+                                     QStringLiteral("Cracks in Invented Welds")}) {
+            Publication p = examplePublication();
+            p.title = title;
+            p.id = m_session->publications().create(p);
+            sent << p;
+        }
+        SummaryBatches batches(m_session->database(), *m_transport, QStringLiteral("https://api.example"));
+        batches.setApiKey(kKey);
+        QSignalSpy submitted(&batches, &SummaryBatches::submitted);
+        m_fake->reply(R"({"id":"msgbatch_01","type":"message_batch","processing_status":"in_progress"})");
+        batches.submit(defaultModel(), defaultEffort(), sent);
+        QVERIFY(submitted.wait(kWaitMs));
+
+        // Three arrive, and two fail.
+        QByteArray results;
+        for (int i = 0; i < sent.size(); ++i) {
+            const QJsonObject outcome = i < 3
+                ? QJsonObject{{QStringLiteral("type"), QStringLiteral("succeeded")},
+                              {QStringLiteral("message"), QJsonDocument::fromJson(replyWith(kGoodText)).object()}}
+                : QJsonObject{{QStringLiteral("type"), QStringLiteral("expired")}};
+            results += QJsonDocument(QJsonObject{{QStringLiteral("custom_id"), QStringLiteral("p%1").arg(sent.at(i).id)},
+                                                 {QStringLiteral("result"), outcome}})
+                           .toJson(QJsonDocument::Compact)
+                + '\n';
+        }
+        m_fake->replies.clear();
+        m_fake->reply(R"({"id":"msgbatch_01","type":"message_batch","processing_status":"ended"})");
+        m_fake->reply(results);
+        QSignalSpy checked(&batches, &SummaryBatches::checked);
+        batches.check();
+        QVERIFY(checked.wait(kWaitMs));
+        QCOMPARE(SummaryBatches::arrivedCount(m_session->database()), qint64(3));
+
+        SummariesDialog list(*m_session, batches);
+        QCOMPARE(list.reviewList()->count(), 3);
+        QCOMPARE(list.waitingList()->topLevelItemCount(), 2);
+        list.reviewList()->setCurrentRow(1); // Whichever is chosen, all are kept.
+        QVERIFY(list.keepAllButton()->isEnabled());
+        list.keepAllButton()->click();
+        QCOMPARE(list.reviewList()->count(), 0);
+        QCOMPARE(SummaryBatches::arrivedCount(m_session->database()), qint64(0));
+        for (int i = 0; i < 3; ++i)
+            QVERIFY(SummaryRepository(m_session->database()).forPublication(sent.at(i).id).has_value());
+
+        list.waitingList()->selectAll();
+        QPushButton *remove = nullptr;
+        for (QPushButton *button : list.findChildren<QPushButton *>()) {
+            if (button->text() == QStringLiteral("Remove from list"))
+                remove = button;
+        }
+        QVERIFY(remove);
+        QVERIFY(remove->isEnabled());
+        remove->click();
+        QCOMPARE(list.waitingList()->topLevelItemCount(), 0);
+        QVERIFY(SummaryBatches::entries(m_session->database()).isEmpty());
+    }
+
+    void spendingIsAddedUpByWhenAndHow()
+    {
+        const qint64 id = addExample();
+        const QDateTime now = QDateTime::currentDateTime();
+        Usage usage;
+        usage.inputTokens = 1000000; // A million in.
+        const double dollars = *costOf(defaultModel(), usage);
+        core::Database &db = m_session->database();
+        recordSpend(db, QStringLiteral("instant:a"), id, defaultModel(), SpendKind::Instant, usage, 1.0, now.toMSecsSinceEpoch());
+        recordSpend(db, QStringLiteral("instant:a"), id, defaultModel(), SpendKind::Instant, usage, 1.0, now.toMSecsSinceEpoch()); // Again: once.
+        recordSpend(db, QStringLiteral("batch:b:p1"), id, defaultModel(), SpendKind::Batch, usage, kBatchPriceFactor, now.toMSecsSinceEpoch());
+        recordSpend(db, QStringLiteral("instant:old"), id, defaultModel(), SpendKind::Instant, usage, 1.0, now.addDays(-90).toMSecsSinceEpoch());
+        recordSpend(db, QStringLiteral("instant:unknown"), id, QStringLiteral("claude-made-up"), SpendKind::Instant, usage, 1.0,
+                    now.toMSecsSinceEpoch());
+        recordSpend(db, QStringLiteral("instant:nothing"), id, defaultModel(), SpendKind::Instant, Usage{}, 1.0, now.toMSecsSinceEpoch());
+
+        const SpendTotals totals = spendTotals(db, now.toMSecsSinceEpoch());
+        QCOMPARE(totals.requests, 4);
+        QCOMPARE(totals.unpriced, 1);
+        QVERIFY(qAbs(totals.allTime - dollars * 2.5) < 1e-9);
+        QVERIFY(qAbs(totals.last30Days - dollars * 1.5) < 1e-9);
+        QVERIFY(qAbs(totals.thisMonth - dollars * 1.5) < 1e-9);
+        QVERIFY(qAbs(totals.instant - dollars * 2) < 1e-9);
+        QVERIFY(qAbs(totals.batch - dollars * 0.5) < 1e-9);
+
+        // What it was for is still said once the publication has gone.
+        m_session->publications().remove(id);
+        const QList<SpendEntry> entries = spendEntries(db);
+        QCOMPARE(entries.size(), 4);
+        QCOMPARE(entries.first().title, QStringLiteral("Fatigue of Steel Beams"));
+        QVERIFY(!entries.first().publicationId.has_value());
+    }
+
+    void batchesFromBeforeAreKeptAndSpendingStartsFromWhatWasKept()
+    {
+        // A library from before summaries waited to be reviewed, with one batch on its way and one summary kept.
+        const qint64 waiting = addExample();
+        Publication other = examplePublication();
+        other.title = QStringLiteral("Corrosion of Made-Up Bridges");
+        const qint64 kept = m_session->publications().create(other);
+        StoredSummary summary;
+        summary.publicationId = kept;
+        summary.model = defaultModel();
+        summary.effort = defaultEffort();
+        summary.basis = QStringLiteral("full text");
+        summary.text = QStringLiteral("Kept already");
+        summary.costDollars = 0.25;
+        SummaryRepository(m_session->database()).save(summary);
+        core::Database &db = m_session->database();
+        db.exec("DELETE FROM summary_spend");
+        db.exec("CREATE TABLE summary_batch_item (batch_id TEXT NOT NULL REFERENCES summary_batch(id) ON DELETE CASCADE, "
+                "custom_id TEXT NOT NULL, publication_id INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE, "
+                "request TEXT NOT NULL, content_so_far TEXT NOT NULL, text_so_far TEXT NOT NULL, sources TEXT NOT NULL, "
+                "usage TEXT NOT NULL, continuations INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL CHECK (state IN ('waiting', "
+                "'saved', 'failed', 'continued')), problem TEXT, PRIMARY KEY (batch_id, custom_id)) STRICT, WITHOUT ROWID");
+        db.exec("INSERT INTO summary_batch (id, model, effort, created_at, status) VALUES ('msgbatch_old', 'claude-sonnet-5-5', 'high', 1000, 'waiting')");
+        auto insert = db.prepare("INSERT INTO summary_batch_item (batch_id, custom_id, publication_id, request, content_so_far, text_so_far, "
+                                 "sources, usage, state) VALUES ('msgbatch_old', ?, ?, '{}', '[]', '', '[]', '{}', ?)");
+        insert->bind(1, QStringLiteral("p%1").arg(waiting));
+        insert->bind(2, waiting);
+        insert->bind(3, QStringLiteral("waiting"));
+        insert->step();
+        insert->reset();
+        insert->bind(1, QStringLiteral("p%1").arg(kept));
+        insert->bind(2, kept);
+        insert->bind(3, QStringLiteral("saved"));
+        insert->step();
+        db.setUserVersion(17);
+        core::migrateLibrary(db);
+
+        const BatchEntry entry = *SummaryBatches::entryFor(db, waiting);
+        QCOMPARE(entry.state, BatchEntry::State::Waiting);
+        QCOMPARE(entry.sentAt, qint64(1000));
+        QVERIFY(!SummaryBatches::entryFor(db, kept)); // Kept already, so nothing to do.
+        const QList<SpendEntry> spent = spendEntries(db);
+        QCOMPARE(spent.size(), 1);
+        QCOMPARE(spent.first().kind, SpendKind::Batch);
+        QCOMPARE(spent.first().cost.value_or(0), 0.25);
+
+        // Running it again changes nothing. From before the old table was made, as other tests rewind.
+        db.setUserVersion(16);
+        core::migrateLibrary(db);
+        QCOMPARE(SummaryBatches::entries(db).size(), 1);
+        QCOMPARE(spendEntries(db).size(), 1);
+    }
+
+    void aBatchThatCantBeSentLeavesNothingWaiting()
+    {
+        Publication one = examplePublication();
+        one.id = m_session->publications().create(one);
+        m_fake->reply(errorReply(QStringLiteral("authentication_error"), QStringLiteral("invalid x-api-key")), 401);
+        SummaryBatches batches(m_session->database(), *m_transport, QStringLiteral("https://api.example"));
+        batches.setApiKey(kKey);
+        QSignalSpy failed(&batches, &SummaryBatches::submitFailed);
+        batches.submit(defaultModel(), defaultEffort(), {one});
+        QVERIFY(failed.wait(kWaitMs));
+        QCOMPARE(failed.first().first().value<SummaryFailure>(), SummaryFailure::BadKey);
+        QCOMPARE(batches.waitingCount(), qint64(0));
+
+        // An id that isn't one of Anthropic's is never put in an address.
+        QVERIFY(!parseBatch(R"({"id":"../other","type":"message_batch","processing_status":"ended"})").valid);
+        QVERIFY(parseBatch(R"({"id":"msgbatch_01AbC","type":"message_batch","processing_status":"ended"})").valid);
+        QVERIFY(parseBatchResults("not json\n\n").isEmpty());
+    }
+
     void aPausedTurnIsCarriedOnAndAddedUp()
     {
         QJsonArray first;
@@ -755,9 +1162,14 @@ private slots:
         QVERIFY(dialog.costLabel()->text().contains(QStringLiteral("$")));
         QVERIFY(dialog.costLabel()->text().contains(QStringLiteral("1000")));
 
-        // Nothing's stored until it's accepted.
+        // Nothing's stored until it's accepted, but what it cost is counted straight away.
         SummaryRepository summaries(m_session->database());
         QVERIFY(!summaries.forPublication(id).has_value());
+        const QList<SpendEntry> spent = spendEntries(m_session->database());
+        QCOMPARE(spent.size(), 1);
+        QCOMPARE(spent.first().kind, SpendKind::Instant);
+        QCOMPARE(spent.first().publicationId.value_or(0), id);
+        QVERIFY(spent.first().cost.value_or(0) > 0);
         dialog.accept();
         QVERIFY(dialog.kept());
 
@@ -1055,6 +1467,116 @@ private slots:
 
         m_session->publications().remove(id);
         QVERIFY(!summaries.forPublication(id).has_value());
+    }
+
+    void theWindowConfirmsABatchAndCollectsIt()
+    {
+        // The window's own transport and key store, which the other tests here don't need.
+        LibraryPaths paths = m_session->paths();
+        m_session.reset();
+        auto fake = m_fake;
+        paths.transportFactory = [fake] { return std::make_unique<FakeTransport>(fake); };
+        paths.keyStoreFactory = [] {
+            auto keys = std::make_unique<MemoryKeyStore>();
+            keys->write(kKey, [](bool) {});
+            return std::unique_ptr<ApiKeyStore>(std::move(keys));
+        };
+        m_session = std::make_unique<LibrarySession>(paths);
+        const qint64 fresh = addExample();
+        Publication other = examplePublication();
+        other.title = QStringLiteral("Corrosion of Made-Up Bridges");
+        const qint64 summarised = m_session->publications().create(other);
+        StoredSummary kept;
+        kept.publicationId = summarised;
+        kept.model = defaultModel();
+        kept.effort = defaultEffort();
+        kept.basis = QStringLiteral("abstract only");
+        kept.text = QStringLiteral("Kept already");
+        SummaryRepository(m_session->database()).save(kept);
+
+        // What's sent is confirmed first: one with a summary is left out unless it's to be replaced.
+        BatchSummaryDialog dialog(*m_session, {fresh, summarised});
+        QCOMPARE(dialog.included().size(), 1);
+        QCOMPARE(dialog.included().first().id, fresh);
+        QVERIFY(dialog.replaceBox()->isVisibleTo(&dialog));
+        QVERIFY(dialog.estimateLabel()->text().contains(QStringLiteral("1 publication will be sent")));
+        QVERIFY(dialog.estimateLabel()->text().contains(QStringLiteral("1 is left out")));
+        QVERIFY(dialog.estimateLabel()->text().contains(QStringLiteral("half price")));
+        dialog.replaceBox()->setChecked(true);
+        QCOMPARE(dialog.included().size(), 2);
+        QCOMPARE(dialog.sendButton()->text(), QStringLiteral("Send 2"));
+        QVERIFY(m_fake->requests.isEmpty()); // Estimating asks nothing.
+
+        // One on its way, as if sent earlier, is collected when the window checks.
+        m_window = std::make_unique<MainWindow>(*m_session);
+        m_fake->reply(R"({"id":"msgbatch_09","type":"message_batch","processing_status":"in_progress"})");
+        QSignalSpy submitted(m_window->summaryBatches(), &SummaryBatches::submitted);
+        m_window->summaryBatches()->setApiKey(kKey);
+        Publication sent = *m_session->publications().get(fresh);
+        m_window->summaryBatches()->submit(defaultModel(), defaultEffort(), {sent});
+        QVERIFY(submitted.wait(kWaitMs));
+        m_window->summaryBatches()->setApiKey(QString()); // The window reads its own from the key store.
+
+        // It's said on the publication, and in the status bar.
+        m_window->details()->showPublication(fresh);
+        QVERIFY(m_window->details()->summaryOnItsWayLabel()->isVisibleTo(m_window->details()));
+        QVERIFY(m_window->details()->summaryOnItsWayLabel()->text().contains(QStringLiteral("on its way")));
+        QCOMPARE(m_window->summaryStatusButton()->text(), QStringLiteral("1 summary on its way"));
+        {
+            SummariesDialog list(*m_session, *m_window->summaryBatches());
+            QCOMPARE(list.waitingList()->topLevelItemCount(), 1);
+            QCOMPARE(list.waitingList()->topLevelItem(0)->text(0), QStringLiteral("Fatigue of Steel Beams"));
+            QCOMPARE(list.waitingList()->topLevelItem(0)->text(3), QStringLiteral("On its way"));
+            QCOMPARE(list.reviewList()->count(), 0);
+        }
+
+        m_fake->replies.clear();
+        m_fake->reply(R"({"id":"msgbatch_09","type":"message_batch","processing_status":"ended"})");
+        m_fake->reply(QJsonDocument(QJsonObject{{QStringLiteral("custom_id"), QStringLiteral("p%1").arg(fresh)},
+                                                {QStringLiteral("result"), QJsonObject{{QStringLiteral("type"), QStringLiteral("succeeded")},
+                                                                                       {QStringLiteral("message"), QJsonDocument::fromJson(replyWith(kGoodText)).object()}}}})
+                          .toJson(QJsonDocument::Compact));
+        QSignalSpy saved(m_window->summaryBatches(), &SummaryBatches::summariesArrived);
+        m_window->checkSummaryBatches();
+        QVERIFY(saved.wait(kWaitMs));
+        QCOMPARE(SummaryBatches::waitingCount(m_session->database()), qint64(0));
+
+        // It waits to be reviewed, which the publication and the status bar say.
+        QVERIFY(!SummaryRepository(m_session->database()).forPublication(fresh));
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->details()->summaryOnItsWayLabel()->text().contains(QStringLiteral("has arrived")), kWaitMs);
+        QCOMPARE(m_window->details()->summariesButton()->text(), QStringLiteral("Review summary..."));
+        QCOMPARE(m_window->summaryStatusButton()->text(), QStringLiteral("1 summary to review"));
+        {
+            SummariesDialog list(*m_session, *m_window->summaryBatches());
+            QCOMPARE(list.tabs()->currentIndex(), int(SummariesDialog::Page::ToReview));
+            QCOMPARE(list.reviewList()->count(), 1);
+            QVERIFY(list.reviewText()->toPlainText().contains(QStringLiteral("The beams broke.")));
+            QVERIFY(list.reviewInfo()->text().contains(QStringLiteral("half price")));
+            QVERIFY(list.keepButton()->isEnabled());
+            QVERIFY(list.totalsLabel()->text().contains(QStringLiteral("$")));
+            QCOMPARE(list.spendingList()->topLevelItemCount(), 1);
+            QCOMPARE(list.spendingList()->topLevelItem(0)->text(3), QStringLiteral("At half price"));
+            // The Console is a link wherever it's named.
+            QVERIFY(list.spendingNote()->text().contains(QStringLiteral("<a href=\"https://platform.claude.com/settings/billing\">Claude Console</a>")));
+            QVERIFY(list.spendingNote()->openExternalLinks());
+            const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES");
+            if (!pictures.isEmpty()) {
+                list.resize(820, 600);
+                list.grab().save(QDir(pictures).filePath(QStringLiteral("summaries-review.png")));
+                list.showPage(SummariesDialog::Page::Spending);
+                list.grab().save(QDir(pictures).filePath(QStringLiteral("summaries-spending.png")));
+            }
+            list.keepButton()->click();
+            QCOMPARE(list.reviewList()->count(), 0);
+        }
+        QVERIFY(SummaryRepository(m_session->database()).forPublication(fresh));
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->summaryStatusButton()->isVisibleTo(m_window.get()), kWaitMs);
+        QVERIFY(!m_window->details()->summaryOnItsWayLabel()->isVisibleTo(m_window->details()));
+        bool keyed = false;
+        for (const auto &header : m_fake->requests.last().headers)
+            keyed = keyed || (header.first == "x-api-key" && header.second == kKey.toUtf8());
+        QVERIFY(keyed);
+        QCOMPARE(SummaryRepository(m_session->database()).forPublication(summarised)->text, QStringLiteral("Kept already"));
     }
 
     void theWindowOffersItAndAskingNeverSendsByItself()

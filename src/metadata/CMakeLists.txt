@@ -3,6 +3,8 @@ add_library(papertrail_metadata STATIC
     LookupEngine.h
     Matching.cpp
     Matching.h
+    NoticeChecker.cpp
+    NoticeChecker.h
     Providers.cpp
     Providers.h
     Transport.cpp

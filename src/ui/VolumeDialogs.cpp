@@ -150,7 +150,7 @@ void ContentsDialog::onOutline(const QList<ReaderOutlineItem> &items)
             depths.insert(item.depth);
     }
     if (depths.isEmpty()) {
-        cantOffer(tr("This file has no table of contents to work from. You can still add articles by hand."));
+        readEveryPage();
         return;
     }
 
@@ -177,6 +177,28 @@ void ContentsDialog::onOutline(const QList<ReaderOutlineItem> &items)
     emit contentsReady();
 }
 
+// With no contents, an article's first page is told by its DOI, so every page is read for its largest text and
+// any DOI, in the background.
+void ContentsDialog::readEveryPage()
+{
+    if (m_pageCount <= 0 || m_pageCount > kMostPagesToRead) {
+        cantOffer(tr("This file has no table of contents to work from. You can still add articles by hand."));
+        return;
+    }
+    m_fromPages = true;
+    m_level->setVisible(false);
+    if (auto *row = qobject_cast<QHBoxLayout *>(m_level->parentWidget()->layout()->itemAt(1)->layout())) {
+        if (QWidget *levelLabel = row->itemAt(0)->widget())
+            levelLabel->setVisible(false);
+    }
+    m_create->setEnabled(false);
+    for (int page = 0; page < m_pageCount; ++page) {
+        m_headingsWanted.insert(page);
+        m_client->requestHeading(page);
+    }
+    updateMessage();
+}
+
 void ContentsDialog::requestHeadings()
 {
     // Only for what the contents didn't name, which saves reading every article's first page, and the first
@@ -198,7 +220,7 @@ void ContentsDialog::onHeading(int page, const ReaderHeading &heading)
         return;
     const QString &title = heading.title;
     const QString &doi = heading.doi;
-    m_headings.insert(page, Heading{title, doi});
+    m_headings.insert(page, Heading{title, doi, heading.dois});
 
     // The numbers fill gaps in the volume's details, and its articles', changing nothing already there.
     if (!m_numberingRead && !heading.volume.isEmpty()) {
@@ -226,6 +248,21 @@ void ContentsDialog::onHeading(int page, const ReaderHeading &heading)
         if (adoptPageHeading(draft, title, doi))
             showRow(row);
     }
+    if (m_fromPages && !m_pagesRead && m_headingsWanted.isEmpty()) {
+        // Every page has been read, so the articles can be worked out.
+        m_pagesRead = true;
+        fillTable();
+        // One alone is most likely the whole file, such as a single paper, rather than an issue's article.
+        if (m_drafts.size() < 2) {
+            m_drafts.clear();
+            m_table->setRowCount(0);
+            cantOffer(tr("This file has no table of contents, and its pages don't show where separate articles start, so "
+                         "they couldn't be found. You can still add them by hand."));
+            emit headingsRead();
+            return;
+        }
+        emit contentsReady();
+    }
     updateCreateButton();
     updateMessage();
     if (m_headingsWanted.isEmpty())
@@ -236,7 +273,16 @@ void ContentsDialog::updateMessage()
 {
     QString text = tr("Tick the entries that are articles, and correct anything that's wrong. "
                       "Nothing is created until you choose Create articles.");
-    if (!m_headingsWanted.isEmpty()) {
+    if (m_fromPages && !m_pagesRead) {
+        text = tr("This file has no table of contents, so its pages are being read for where each article starts "
+                  "(%1 of %2 left).")
+                   .arg(m_headingsWanted.size())
+                   .arg(m_pageCount);
+    } else if (m_fromPages) {
+        text = tr("This file has no table of contents, so these were found from pages that start with a DOI of their own, "
+                  "each titled from its largest text. Check them carefully. ")
+            + text;
+    } else if (!m_headingsWanted.isEmpty()) {
         text += u' ' + tr("Reading titles and numbers from the articles' first pages (%n left).", nullptr,
                           int(m_headingsWanted.size()));
     }
@@ -247,7 +293,14 @@ void ContentsDialog::updateMessage()
 
 void ContentsDialog::fillTable()
 {
-    m_drafts = draftsFromContents(m_entries, m_level->currentData().toInt(), m_pageCount);
+    if (m_fromPages) {
+        QList<import::PageHeading> pages;
+        for (auto it = m_headings.cbegin(); it != m_headings.cend(); ++it)
+            pages << import::PageHeading{it.key(), it->title, it->dois};
+        m_drafts = import::draftsFromPages(pages, m_pageCount);
+    } else {
+        m_drafts = draftsFromContents(m_entries, m_level->currentData().toInt(), m_pageCount);
+    }
     try {
         markExistingArticles(m_session.database(), m_volumeId, m_drafts);
     } catch (const std::exception &) {

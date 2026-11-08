@@ -309,6 +309,48 @@ QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
     return reply;
 }
 
+// Writes a copy of a PDF with highlights and notes added, for reading elsewhere. The document is opened afresh,
+// so nothing cached is changed, and the original file is never written.
+QJsonObject markedCopy(engine::Engine &engine, const QJsonObject &request)
+{
+    const QString path = request.value(QStringLiteral("path")).toString();
+    const QString out = request.value(QStringLiteral("out")).toString();
+    if (out.isEmpty())
+        return failure(QStringLiteral("there's nowhere to write the copy"));
+    QList<engine::MarkToWrite> marks;
+    for (const QJsonValue &value : request.value(QStringLiteral("marks")).toArray()) {
+        const QJsonObject object = value.toObject();
+        engine::MarkToWrite mark;
+        mark.page = object.value(QStringLiteral("page")).toInt(-1);
+        const QString kind = object.value(QStringLiteral("kind")).toString();
+        mark.kind = kind == QLatin1StringView("underline") ? engine::MarkToWrite::Kind::Underline
+            : kind == QLatin1StringView("note")            ? engine::MarkToWrite::Kind::Note
+                                                           : engine::MarkToWrite::Kind::Highlight;
+        mark.colour = object.value(QStringLiteral("colour")).toString();
+        mark.note = object.value(QStringLiteral("note")).toString().left(100000);
+        for (const QJsonValue &rect : object.value(QStringLiteral("rects")).toArray()) {
+            const QJsonArray numbers = rect.toArray();
+            if (numbers.size() == 4)
+                mark.rects << QRectF(numbers.at(0).toDouble(), numbers.at(1).toDouble(), numbers.at(2).toDouble(), numbers.at(3).toDouble());
+        }
+        marks << mark;
+    }
+    try {
+        const std::unique_ptr<engine::Document> fresh = engine.open(path);
+        if (fresh->needsPassword())
+            return failure(QStringLiteral("the file needs a password"));
+        if (!fresh->canSaveMarkedCopy())
+            return failure(QStringLiteral("only a PDF can have its highlights written into a copy"));
+        fresh->saveMarkedCopy(out, marks);
+    } catch (const engine::EngineError &error) {
+        return failure(QString::fromUtf8(error.what()));
+    }
+    QJsonObject reply;
+    reply.insert(QStringLiteral("ok"), true);
+    reply.insert(QStringLiteral("marks"), int(marks.size()));
+    return reply;
+}
+
 // Fault injection for testing how the app copes with a worker that dies or hangs. It only ever
 // happens with this environment variable set, which the app itself never does.
 void applyTestFaults(const QString &path)
@@ -360,6 +402,8 @@ int main(int argc, char *argv[])
             reply = pageTexts(engine, object);
         } else if (op == QStringLiteral("cover")) {
             reply = pageCover(engine, object);
+        } else if (op == QStringLiteral("markedcopy")) {
+            reply = markedCopy(engine, object);
         } else if (op == QStringLiteral("inspect")) {
             reply = inspectFile(engine, path, object.value(QStringLiteral("coverPath")).toString(),
                                 object.value(QStringLiteral("convertedPath")).toString());
