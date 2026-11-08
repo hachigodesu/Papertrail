@@ -104,6 +104,7 @@ private:
     core::TagRepository &m_tags;
     core::CollectionRepository &m_collections;
     QTreeWidget *m_tree = nullptr;
+    QObject *m_treeViewport = nullptr; // What the event filter watches, kept so it never has to ask the tree.
     QLineEdit *m_yearFrom = nullptr;
     QLineEdit *m_yearTo = nullptr;
     QPushButton *m_clear = nullptr;

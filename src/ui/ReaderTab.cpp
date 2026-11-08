@@ -145,7 +145,7 @@ private:
 // Lays the contents out again when the panel's width changes, since that changes how titles wrap.
 class RelayoutOnResize : public QObject {
 public:
-    explicit RelayoutOnResize(QTreeView *view) : QObject(view), m_view(view)
+    explicit RelayoutOnResize(QTreeView *view) : QObject(view), m_viewport(view->viewport())
     {
         m_timer.setSingleShot(true);
         m_timer.setInterval(30);
@@ -156,13 +156,14 @@ public:
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override
     {
-        if (watched == m_view->viewport() && event->type() == QEvent::Resize)
+        // Compared, not asked for: this sees the viewport's events while the view is being destroyed.
+        if (watched == m_viewport && event->type() == QEvent::Resize)
             m_timer.start();
         return QObject::eventFilter(watched, event);
     }
 
 private:
-    QTreeView *m_view;
+    QObject *m_viewport;
     QTimer m_timer;
 };
 

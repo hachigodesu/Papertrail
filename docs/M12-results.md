@@ -29,7 +29,7 @@ M12 turns Papertrail into something to install: a Windows installer and portable
 | Windows installer (`Papertrail-1.0.0-setup.exe`, 54 MB) | `packaging/windows/build-package.sh`, NSIS | The self-test with only Windows' folders on PATH. CI also installs it silently, self-tests the installed copy and uninstalls it, checking nothing is left |
 | Portable zip (`Papertrail-1.0.0-portable.zip`, 75 MB) | The same script | The same files and self-test |
 | AppImage | `packaging/linux/build-appimage.sh` on Ubuntu 22.04 | Its self-test and start-up on Ubuntu 22.04 and 24.04, Debian 12, Fedora, openSUSE and Arch |
-| Flatpak | `packaging/flatpak/io.github.hachigodesu.Papertrail.yml`, KDE runtime 6.12 | AppStream and desktop file validation, then installed and self-tested in its sandbox, in CI |
+| Flatpak | `packaging/flatpak/io.github.hachigodesu.Papertrail.yml`, KDE runtime 6.11 | AppStream and desktop file validation, then installed and self-tested in its sandbox, in CI |
 | AUR | `packaging/arch/PKGBUILD`, with Arch's own MuPDF and DjVuLibre | `makepkg` runs the self-test in `check()`. `test-pkgbuild.sh` builds it from the checkout |
 
 - **The installer** offers just this user (into `%LOCALAPPDATA%\Programs\Papertrail`) or everyone (into Program Files), a desktop shortcut if wanted, and **Open Papertrail** at the end. It's listed in **Settings > Apps** with its version and icon. **Uninstalling deletes only the files it installed, by name,** so an install folder chosen by mistake, such as `C:\`, loses nothing else. It keeps the library, notes, highlights and backups, and says so.
@@ -66,6 +66,11 @@ Pushing a tag such as `v1.0.0` runs `.github/workflows/release.yml`. It checks t
 
 ## Problems found
 
+- **The AppImage couldn't find its worker,** so it couldn't import or show any document. It starts the program from the image's root while the worker is in `usr/bin`, and the old smoke test only checked the window stayed open. The new self-test caught it in CI. The worker is now also looked for where an AppImage keeps it, using the `APPDIR` its runtime sets.
+- **The installer ignored a folder given with `/D`** when installing just for the user, since choosing the mode set its default folder. It now keeps one that's given, which CI's silent install needs.
+- **The sanitizers found two places where Papertrail used a widget while it was being destroyed,** both when closing a window: the reader's contents list asked its view for its viewport from an event filter, and the review tab's closing reached into the main window after it had gone. Event filters now compare against what they saved, and the review tab is held by a `QPointer`. The sidebar's and tab bar's event filters had the same pattern and were changed too.
+- **A test expected exactly one failed import** with a missing worker, but on Linux the folder watcher can scan again and fail again. It now expects at least one.
+- **Flathub has no KDE 6.12 runtime yet,** only KDE's source for one, so the Flatpak's first CI build failed. It now uses the 6.11 runtime, with Qt 6.11.3. Papertrail only asked for 6.12 by choice, to match Windows, so a setting lets the Flatpak build with 6.11. All the tests pass with Qt 6.11.3 on Ubuntu once one test used a drag event in a way 6.11 also has. It should move to 6.12 once Flathub publishes it.
 - **WSL couldn't start its VM** for a while, saying Windows had too few resources, though 6 GB was free. It recovered by itself. If it happens again, closing other programs or limiting WSL's memory in `.wslconfig` would help.
 - **MSYS2 has no licence text** for DjVuLibre, and keeps ICU's and OpenJPEG's under other names, so the script now finds licence files from each package's own file list.
 

@@ -311,6 +311,28 @@ private slots:
         QCOMPARE(LibraryPaths::forThisCopy().database, LibraryPaths::standard().database);
     }
 
+    void anAppImagesWorkerIsFoundInItsOwnFolders()
+    {
+        // As an AppImage runs: the program from the image's root, its worker in usr/bin, and APPDIR saying where.
+        const QString root = m_dir->filePath(QStringLiteral("appimage"));
+        QVERIFY(QDir().mkpath(root + QStringLiteral("/usr/bin")));
+        const QString worker = QFileInfo(LibraryPaths::standard().workerPath).fileName();
+        QFile file(root + QStringLiteral("/usr/bin/") + worker);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.close();
+        const QByteArray before = qgetenv("APPDIR");
+        qputenv("APPDIR", root.toLocal8Bit());
+        const QString found = LibraryPaths::standard().workerPath;
+        if (before.isEmpty())
+            qunsetenv("APPDIR");
+        else
+            qputenv("APPDIR", before);
+        // The tests' own worker is beside them, so that's still preferred. Without one there, the AppImage's is found.
+        const QString beside = QDir(QCoreApplication::applicationDirPath()).filePath(worker);
+        QCOMPARE(QDir::cleanPath(found),
+                 QDir::cleanPath(QFileInfo::exists(beside) ? beside : root + QStringLiteral("/usr/bin/") + worker));
+    }
+
     // ---- Selection and changes ----
 
     void selectingShowsDetails()
@@ -887,7 +909,8 @@ private slots:
         openWindow();
         QSignalSpy failed(m_window->importThread(), &ImportThread::failed);
         m_window->addFolder(folder);
-        QTRY_COMPARE_WITH_TIMEOUT(failed.size(), 1, kLongWaitMs);
+        // At least once: on Linux, the folder watcher may scan again as the copied file settles, and fail again.
+        QTRY_VERIFY_WITH_TIMEOUT(failed.size() >= 1, kLongWaitMs);
         QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
         QCOMPARE(m_session->query().flagCounts({}).unreadable, 0);
         QCOMPARE(m_session->query().count({}), 0);
@@ -1848,9 +1871,15 @@ private slots:
         const auto dropOn = [&](QTreeWidgetItem *item, const QMimeData &data) {
             sidebar->tree()->scrollToItem(item);
             const QPoint at = sidebar->tree()->visualItemRect(item).center();
-            QDragEnterEvent enter(QPointF(at), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+            // Qt 6.12 takes a QPointF here, and 6.11, which the Flatpak builds with, only a QPoint.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+            const QPointF dragAt(at);
+#else
+            const QPoint dragAt(at);
+#endif
+            QDragEnterEvent enter(dragAt, Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
             QApplication::sendEvent(viewport, &enter);
-            QDragMoveEvent move(QPointF(at), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+            QDragMoveEvent move(dragAt, Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
             QApplication::sendEvent(viewport, &move);
             QDropEvent drop(QPointF(at), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
             QApplication::sendEvent(viewport, &drop);

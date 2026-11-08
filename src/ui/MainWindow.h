@@ -87,7 +87,7 @@ public:
     void lookUp(const QList<qint64> &ids);
 
     void showReviewTab();
-    ReviewTab *reviewTab() const { return m_reviewTab; }
+    ReviewTab *reviewTab() const;
     LookupThread *lookupThread() const { return m_lookup; }
     IndexThread *indexThread() const { return m_index; }
     QCheckBox *searchInsideBox() const { return m_searchInside; }
@@ -333,7 +333,7 @@ private:
     QLabel *m_indexLabel = nullptr;
     QPushButton *m_indexStop = nullptr;
     LookupThread *m_lookup = nullptr;
-    ReviewTab *m_reviewTab = nullptr;
+    QPointer<ReviewTab> m_reviewTab; // Cleared when its tab is closed, even while the window itself is closing.
     QPointer<QMessageBox> m_reviewOffer;
     qint64 m_reviewCountSeen = 0; // Offers are only for what's been added since the last one.
     QPushButton *m_reviewButton = nullptr;
@@ -348,6 +348,7 @@ private:
     quint64 m_sidebarGeneration = 0;
 
     QTabWidget *m_documentTabs = nullptr;
+    QObject *m_documentTabBar = nullptr; // What the event filter watches, kept so it never has to ask the tabs.
     QLineEdit *m_search = nullptr;
     QTabBar *m_tabs = nullptr;
     QComboBox *m_sortBox = nullptr;

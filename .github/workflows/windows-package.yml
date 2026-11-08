@@ -40,7 +40,7 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem dist/Papertrail-*-setup.exe | Select-Object -First 1
-          $dir = Join-Path $env:RUNNER_TEMP 'Papertrail installed'
+          $dir = Join-Path $env:RUNNER_TEMP 'PapertrailInstalled'
           Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/S', '/CurrentUser', "/D=$dir"
           if (-not (Test-Path "$dir/papertrail.exe")) { throw 'The installer put nothing in place' }
           $env:PATH = 'C:\Windows\System32;C:\Windows'

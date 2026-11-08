@@ -8,7 +8,9 @@
 # and hashes as the other builds use.
 id: io.github.hachigodesu.Papertrail
 runtime: org.kde.Platform
-runtime-version: '6.12'
+# Flathub's newest KDE runtime, which has Qt 6.11. Move to 6.12, and drop PAPERTRAIL_QT_MINIMUM below, once
+# Flathub publishes it: https://dl.flathub.org/repo/refs/heads/runtime/org.kde.Platform/x86_64/6.12 then exists.
+runtime-version: '6.11'
 sdk: org.kde.Sdk
 command: papertrail
 finish-args:
@@ -64,6 +66,7 @@ modules:
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DBUILD_TESTING=OFF
+      - -DPAPERTRAIL_QT_MINIMUM=6.11
       # The libraries CMake would otherwise download, from the sources below.
       - -DFETCHCONTENT_FULLY_DISCONNECTED=ON
       - -DFETCHCONTENT_SOURCE_DIR_SQLITE=/run/build/papertrail/deps/sqlite

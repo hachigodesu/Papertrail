@@ -11,7 +11,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(GNUInstallDirs)
 
-find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets Network Test)
+# Qt 6.12 everywhere, except where a package's platform doesn't have it yet: the Flatpak builds on Flathub's newest KDE
+# runtime, which can lag a version behind. Nothing here needs 6.12 itself.
+set(PAPERTRAIL_QT_MINIMUM 6.12 CACHE STRING "The oldest Qt to build with")
+find_package(Qt6 ${PAPERTRAIL_QT_MINIMUM} REQUIRED COMPONENTS Core Gui Widgets Network Test)
 
 # Qt 6.12 is the last release that supports Windows 10, so Windows builds must
 # stay on it. Linux builds may use newer versions (Arch moves ahead of 6.12).

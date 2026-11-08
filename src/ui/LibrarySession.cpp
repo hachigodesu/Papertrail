@@ -22,7 +22,18 @@ QString installedWorker()
 #else
     const QString workerName = QStringLiteral("papertrail-worker");
 #endif
-    return QDir(QCoreApplication::applicationDirPath()).filePath(workerName);
+    // Beside the program, as every package but the AppImage has it. An AppImage starts the program from its own
+    // root, with the worker in usr/bin, and its runtime says where that root is in APPDIR.
+    const QDir program(QCoreApplication::applicationDirPath());
+    QStringList candidates{program.filePath(workerName)};
+    if (const QString appDir = qEnvironmentVariable("APPDIR"); !appDir.isEmpty())
+        candidates << QDir(appDir).filePath(QStringLiteral("usr/bin/") + workerName);
+    candidates << program.filePath(QStringLiteral("usr/bin/") + workerName);
+    for (const QString &candidate : std::as_const(candidates)) {
+        if (QFileInfo(candidate).isFile())
+            return candidate;
+    }
+    return candidates.first();
 }
 
 } // namespace

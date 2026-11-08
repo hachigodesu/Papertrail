@@ -67,7 +67,12 @@ Function .onInit
         MessageBox MB_ICONSTOP "${APPNAME} needs 64-bit Windows 10 or newer."
         Abort
     ${EndIf}
+    ; A folder given with /D, as silent installs do, is kept: choosing the mode would replace it with its default.
+    StrCpy $0 $INSTDIR
     !insertmacro MULTIUSER_INIT
+    ${If} $0 != ""
+        StrCpy $INSTDIR $0
+    ${EndIf}
     ${If} $MultiUser.InstallMode == "AllUsers"
         SetRegView 64
     ${EndIf}

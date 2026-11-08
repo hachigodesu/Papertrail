@@ -193,7 +193,8 @@ FilterSidebar::FilterSidebar(TagRepository &tags, CollectionRepository &collecti
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     // Publications dragged from the library can be dropped on a collection or tag.
     m_tree->viewport()->setAcceptDrops(true);
-    m_tree->viewport()->installEventFilter(this);
+    m_treeViewport = m_tree->viewport();
+    m_treeViewport->installEventFilter(this);
     m_tree->setAccessibleName(tr("Filters"));
     auto *checks = new VisibleChecksStyle;
     checks->setParent(m_tree);
@@ -576,7 +577,8 @@ QTreeWidgetItem *FilterSidebar::dropTarget(const QPoint &position) const
 
 bool FilterSidebar::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched != m_tree->viewport())
+    // Compared, not asked for: this sees the viewport's events while the tree is being destroyed.
+    if (watched != m_treeViewport)
         return QWidget::eventFilter(watched, event);
     switch (event->type()) {
     case QEvent::DragEnter:

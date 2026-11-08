@@ -745,7 +745,8 @@ void MainWindow::buildCentre()
             keepLibraryFirst();
         });
     });
-    m_documentTabs->tabBar()->installEventFilter(this);
+    m_documentTabBar = m_documentTabs->tabBar();
+    m_documentTabBar->installEventFilter(this);
     m_documentTabs->addTab(central, tr("Library"));
     for (const QTabBar::ButtonPosition side : {QTabBar::LeftSide, QTabBar::RightSide}) {
         if (QWidget *close = m_documentTabs->tabBar()->tabButton(0, side)) {
@@ -1522,7 +1523,8 @@ void MainWindow::keepLibraryFirst()
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    if (m_documentTabs && watched == m_documentTabs->tabBar() && event->type() == QEvent::MouseButtonRelease)
+    // Compared, not asked for: this sees the tab bar's events while the window is being destroyed.
+    if (watched == m_documentTabBar && event->type() == QEvent::MouseButtonRelease)
         QTimer::singleShot(0, this, &MainWindow::keepLibraryFirst);
     return QMainWindow::eventFilter(watched, event);
 }
@@ -2295,6 +2297,11 @@ void MainWindow::askAndLookUpSelected()
         lookUp(selectedIds());
 }
 
+ReviewTab *MainWindow::reviewTab() const
+{
+    return m_reviewTab;
+}
+
 void MainWindow::showReviewTab()
 {
     if (!m_reviewTab) {
@@ -2305,7 +2312,6 @@ void MainWindow::showReviewTab()
             scheduleRefresh();
         });
         connect(m_reviewTab, &ReviewTab::openRequested, this, [this](qint64 id) { openOrChooseFormat(id); });
-        connect(m_reviewTab, &QObject::destroyed, this, [this] { m_reviewTab = nullptr; });
         m_documentTabs->addTab(m_reviewTab, tr("To review"));
     } else {
         m_reviewTab->reload();
