@@ -78,4 +78,9 @@ QString nameSortKey(const QString &name)
     return foldForSort(name);
 }
 
+QString foldedText(const QString &text)
+{
+    return foldForSort(text);
+}
+
 } // namespace papertrail::core

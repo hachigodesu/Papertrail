@@ -52,9 +52,11 @@ add_library(papertrail_ui STATIC
     BatchSummaryDialog.cpp
     BatchSummaryDialog.h
     CitationActions.cpp
+    CitationActions.h
+    ContentsPopup.cpp
+    ContentsPopup.h
     GridView.cpp
     GridView.h
-    CitationActions.h
     TransferDialogs.cpp
     TransferDialogs.h
     ApiKeyStore.cpp

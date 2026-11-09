@@ -2,6 +2,7 @@
 
 #include "core/repo/ReadingStateRepository.h"
 #include "core/repo/VolumeArticles.h"
+#include "ui/ContentsPopup.h"
 #include "ui/Delegates.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
@@ -942,6 +943,52 @@ void ReaderTab::focusSearch()
 {
     m_search->setFocus();
     m_search->selectAll();
+}
+
+void ReaderTab::showContentsPopup()
+{
+    if (!m_ready || m_contentsPopup)
+        return;
+    // The entries the side panel shows, which leaves out those outside an article shown on its own.
+    QList<OutlineEntry> entries;
+    int current = -1;
+    const int first = m_view->firstShownPage();
+    const int page = m_view->currentPage();
+    for (QTreeWidgetItemIterator it(m_contents); *it; ++it) {
+        QTreeWidgetItem *item = *it;
+        bool hidden = item->isHidden();
+        QStringList parents;
+        for (QTreeWidgetItem *parent = item->parent(); parent; parent = parent->parent()) {
+            hidden = hidden || parent->isHidden();
+            parents.prepend(parent->text(0));
+        }
+        if (hidden)
+            continue;
+        OutlineEntry entry;
+        entry.title = item->text(0);
+        entry.parents = parents.join(QStringLiteral(" › "));
+        entry.depth = int(parents.size());
+        entry.page = item->data(0, kPageRole).toInt();
+        entry.y = item->data(0, kPointRole).toDouble();
+        if (entry.page >= 0) {
+            entry.pageLabel = QString::number(entry.page - first + 1);
+            if (entry.page <= page)
+                current = int(entries.size());
+        }
+        entries << entry;
+    }
+    const int shown = m_view->pageCount() > 0 ? m_view->lastShownPage() - first + 1 : 0;
+    m_contentsPopup = new ContentsPopup(entries, current, shown, this);
+    connect(m_contentsPopup, &ContentsPopup::entryChosen, this, [this](int to, double y) {
+        ensurePageShown(to);
+        m_view->goToPoint(to, y);
+        m_view->setFocus();
+    });
+    connect(m_contentsPopup, &ContentsPopup::pageChosen, this, [this](int number) {
+        m_view->goToPoint(m_view->firstShownPage() + number - 1, 0);
+        m_view->setFocus();
+    });
+    m_contentsPopup->popUpOver(m_stack);
 }
 
 QList<int> ReaderTab::markedPages() const

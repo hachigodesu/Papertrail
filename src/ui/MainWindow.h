@@ -206,6 +206,9 @@ public:
     // Summaries on their way, to review, and what they've cost, opened at one publication's if it's given.
     void showSummariesDialog(std::optional<qint64> publicationId = std::nullopt);
     QPushButton *summaryStatusButton() const { return m_summaryStatus; }
+    // The document being read, if a document is what's showing.
+    ReaderTab *activeReader() const;
+    QAction *goToAction() const { return m_goTo; }
     // What an empty library says, for tests.
     QPushButton *welcomeImportButton() const { return m_welcomeImport; }
     QLabel *welcomePlaceLabel() const { return m_welcomePlace; }
@@ -337,6 +340,7 @@ private:
     summary::SummaryBatches *m_batches = nullptr;
     QTimer *m_batchTimer = nullptr;
     QPushButton *m_summaryStatus = nullptr;
+    QAction *m_goTo = nullptr;
     void refreshSummaryStatus();
     BackupsDialog *m_backupsDialog = nullptr;
     RemovedPublicationsDialog *m_removedDialog = nullptr;

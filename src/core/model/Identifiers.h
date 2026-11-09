@@ -18,4 +18,7 @@ QString titleSortKey(const QString &title);
 // As above, but keeps leading words, because a family name can start with "A" or "The".
 QString nameSortKey(const QString &name);
 
+// Text for matching what someone types: case-folded, without accents, and with its spaces tidied.
+QString foldedText(const QString &text);
+
 } // namespace papertrail::core

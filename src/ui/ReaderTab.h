@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/repo/AnnotationRepository.h"
+#include "ui/ContentsPopup.h"
 #include "ui/DocumentClient.h"
 #include "ui/PageView.h"
 
@@ -9,6 +10,7 @@
 #include <QHash>
 #include <QList>
 #include <QPair>
+#include <QPointer>
 #include <QWidget>
 
 #include <optional>
@@ -52,6 +54,10 @@ public:
 
     // Puts the cursor in this document's search box.
     void focusSearch();
+
+    // The contents over the page, searched as you type, for going to an entry or a page number.
+    void showContentsPopup();
+    ContentsPopup *contentsPopup() const { return m_contentsPopup; }
 
     // For an article in a volume's file: whether only its own pages are shown, or the whole file. Anything
     // else always shows the whole file. Opened from the library, an article shows only its own pages.
@@ -225,6 +231,7 @@ private:
     QSplitter *m_splitter = nullptr;
     QTabWidget *m_side = nullptr;
     QTreeWidget *m_contents = nullptr;
+    QPointer<ContentsPopup> m_contentsPopup;
     QListView *m_thumbnails = nullptr;
     ThumbnailModel *m_thumbnailModel = nullptr;
     QToolButton *m_sideToggle = nullptr;

@@ -1024,6 +1024,73 @@ private slots:
         QCOMPARE(reader->pageView()->topPage(), 0);
     }
 
+    void contentsAreFoundByTypingWithCtrlG()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reader_doc.pdf"));
+        QTRY_COMPARE_WITH_TIMEOUT(reader->contents()->topLevelItemCount(), 2, kWaitMs);
+        QAction *goTo = m_window->goToAction();
+        QCOMPARE(goTo->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_G));
+
+        // It opens on everything, starting where the reader is.
+        goTo->trigger();
+        ContentsPopup *popup = reader->contentsPopup();
+        QVERIFY(popup != nullptr);
+        QTRY_VERIFY_WITH_TIMEOUT(popup->isVisible(), kWaitMs);
+        QCOMPARE(popup->list()->topLevelItemCount(), 3);
+        QCOMPARE(popup->list()->currentItem()->text(0), QStringLiteral("Chapter One"));
+        QCOMPARE(popup->list()->topLevelItem(1)->text(0).trimmed(), QStringLiteral("A Section"));
+        QCOMPARE(popup->list()->topLevelItem(2)->text(1), QStringLiteral("4"));
+
+        // Typing narrows it down, and Enter goes there, which Back comes back from.
+        QTest::keyClicks(popup->searchBox(), QStringLiteral("two"));
+        QCOMPARE(popup->list()->topLevelItemCount(), 1);
+        QCOMPARE(popup->list()->currentItem()->text(0), QStringLiteral("Chapter Two"));
+        QTest::keyClick(popup->searchBox(), Qt::Key_Return);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->contentsPopup() == nullptr, kWaitMs);
+        QCOMPARE(reader->pageView()->topPage(), 3);
+        reader->pageView()->goBack();
+        QCOMPARE(reader->pageView()->topPage(), 0);
+
+        // Words from what an entry is inside find it too, shown with them.
+        goTo->trigger();
+        popup = reader->contentsPopup();
+        QTest::keyClicks(popup->searchBox(), QStringLiteral("section one"));
+        QCOMPARE(popup->list()->topLevelItemCount(), 1);
+        QCOMPARE(popup->list()->currentItem()->text(0), QStringLiteral("Chapter One › A Section"));
+
+        // A page number goes to that page.
+        popup->searchBox()->clear();
+        QTest::keyClicks(popup->searchBox(), QStringLiteral("5"));
+        QCOMPARE(popup->list()->currentItem()->text(0), QStringLiteral("Go to page 5"));
+        QTest::keyClick(popup->searchBox(), Qt::Key_Return);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->contentsPopup() == nullptr, kWaitMs);
+        QCOMPARE(reader->pageView()->topPage(), 4);
+
+        // Escape leaves the page as it was.
+        goTo->trigger();
+        popup = reader->contentsPopup();
+        QTest::keyClicks(popup->searchBox(), QStringLiteral("one"));
+        QTest::keyClick(popup->searchBox(), Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->contentsPopup() == nullptr, kWaitMs);
+        QCOMPARE(reader->pageView()->topPage(), 4);
+    }
+
+    void contentsMatchIgnoringCaseAccentsAndOrder()
+    {
+        const QList<OutlineEntry> entries = {
+            {QStringLiteral("Résumé of Results"), QString(), 0, 0, 0, QStringLiteral("1")},
+            {QStringLiteral("Methods"), QString(), 0, 2, 0, QStringLiteral("3")},
+            {QStringLiteral("Sampling"), QStringLiteral("Methods"), 1, 3, 0, QStringLiteral("4")},
+            {QStringLiteral("Results by method"), QString(), 0, 5, 0, QStringLiteral("6")},
+        };
+        QCOMPARE(contentsMatches(QStringLiteral("RESUME"), entries), QList<int>{0});
+        QCOMPARE(contentsMatches(QStringLiteral("results résumé"), entries), QList<int>{0});
+        // Those with every word in their own title come first.
+        QCOMPARE(contentsMatches(QStringLiteral("method"), entries), (QList<int>{1, 3, 2}));
+        QCOMPARE(contentsMatches(QStringLiteral("methods sampling"), entries), QList<int>{2});
+        QCOMPARE(contentsMatches(QStringLiteral("nothing"), entries), QList<int>{});
+    }
+
     void thumbnailsLoadAsTheyreSeen()
     {
         ReaderTab *reader = openSample(QStringLiteral("reader_doc.pdf"));

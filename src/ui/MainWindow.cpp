@@ -911,13 +911,18 @@ void MainWindow::buildMenus()
 
     QMenu *view = menuBar()->addMenu(tr("&View"));
     view->addAction(tr("&Search"), QKeySequence::Find, this, [this] {
-        if (auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->currentWidget())) {
+        if (ReaderTab *reader = activeReader()) {
             reader->focusSearch();
         } else {
             m_search->setFocus();
             m_search->selectAll();
         }
     });
+    m_goTo = view->addAction(tr("&Go to..."), QKeySequence(Qt::CTRL | Qt::Key_G), this, [this] {
+        if (ReaderTab *reader = activeReader())
+            reader->showContentsPopup();
+    });
+    m_goTo->setToolTip(tr("Search the open document's contents, or go to a page"));
     view->addAction(tr("Close &tab"), QKeySequence(Qt::CTRL | Qt::Key_W), this, [this] {
         if (m_documentTabs->currentIndex() > 0)
             closeDocumentTab(m_documentTabs->currentIndex());
@@ -2554,6 +2559,11 @@ void MainWindow::askAndLookUpSelected()
 ReviewTab *MainWindow::reviewTab() const
 {
     return m_reviewTab;
+}
+
+ReaderTab *MainWindow::activeReader() const
+{
+    return qobject_cast<ReaderTab *>(m_documentTabs->currentWidget());
 }
 
 void MainWindow::showReviewTab()
