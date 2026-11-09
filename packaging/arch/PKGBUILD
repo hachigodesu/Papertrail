@@ -6,7 +6,7 @@
 # For a new release, set pkgver, push its tag, then run `updpkgsums`. To try the current checkout, see test-pkgbuild.sh.
 
 pkgname=papertrail
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc="Library manager and reader for academic publications: papers, textbooks, theses and standards"
 arch=('x86_64')
