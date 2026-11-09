@@ -40,6 +40,7 @@
 #include "ui/VolumeDialogs.h"
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
+#include "ui/ReaderPair.h"
 #include "ui/ReaderTab.h"
 #include "core/repo/SavedSearchRepository.h"
 #include "ui/SettingsDialog.h"
@@ -393,7 +394,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     m_details->saveNotes();
     for (int i = 1; i < m_documentTabs->count(); ++i) {
-        if (auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i)))
+        for (ReaderTab *reader : readersIn(m_documentTabs->widget(i)))
             reader->saveState();
     }
     saveWindowState();
@@ -808,6 +809,18 @@ void MainWindow::buildCentre()
     connect(m_documentTabs, &QTabWidget::currentChanged, this, [this](int index) {
         if (index == 0 && m_lookup)
             offerWhatsDue();
+        if (index > 0 && !readersIn(m_documentTabs->widget(index)).isEmpty())
+            m_lastDocument = m_documentTabs->widget(index);
+    });
+    QTabBar *tabBar = m_documentTabs->tabBar();
+    tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(tabBar, &QWidget::customContextMenuRequested, this, [this, tabBar](const QPoint &position) {
+        const int index = tabBar->tabAt(position);
+        if (index <= 0)
+            return;
+        std::unique_ptr<QMenu> menu(documentTabMenu(index));
+        if (menu && !menu->isEmpty())
+            menu->exec(tabBar->mapToGlobal(position));
     });
     setCentralWidget(m_documentTabs);
     syncSortControls();
@@ -1729,15 +1742,27 @@ ReaderTab *MainWindow::openPublication(qint64 id, bool articleOnly)
 ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId, bool articleOnly)
 {
     for (int i = 1; i < m_documentTabs->count(); ++i) {
-        auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
-        if (reader && reader->publicationId() == id && reader->fileId() == fileId) {
-            if (reader->isArticle())
-                reader->setArticleOnly(articleOnly);
-            m_documentTabs->setCurrentIndex(i);
-            return reader;
+        for (ReaderTab *reader : readersIn(m_documentTabs->widget(i))) {
+            if (reader->publicationId() == id && reader->fileId() == fileId) {
+                if (reader->isArticle())
+                    reader->setArticleOnly(articleOnly);
+                m_documentTabs->setCurrentIndex(i);
+                if (auto *pair = qobject_cast<ReaderPair *>(m_documentTabs->widget(i)))
+                    pair->setActive(reader);
+                return reader;
+            }
         }
     }
+    ReaderTab *reader = createReader(id, fileId, articleOnly);
+    if (reader) {
+        insertReaderTab(reader, m_documentTabs->count());
+        m_documentTabs->setCurrentWidget(reader);
+    }
+    return reader;
+}
 
+ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
+{
     ReaderTab *reader = nullptr;
     guarded(tr("Opening the file"), [&] {
         const std::optional<FileRecord> file = m_session.files().get(fileId);
@@ -1756,6 +1781,7 @@ ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId, bool articl
                 [](const QString &file) { QDesktopServices::openUrl(QUrl::fromLocalFile(file)); });
         connect(reader, &ReaderTab::statusMessage, this,
                 [this](const QString &message) { statusBar()->showMessage(message, 8000); });
+        connect(reader, &ReaderTab::closeSideRequested, this, [this, reader] { closeSide(reader); });
 
         // In a tab bar, & marks a shortcut key, and a long title would crowd out the other tabs.
         QString title = publication->title;
@@ -1763,11 +1789,179 @@ ReaderTab *MainWindow::openPublicationFile(qint64 id, qint64 fileId, bool articl
         QString shortTitle = QFontMetrics(font()).elidedText(title, Qt::ElideRight, 220);
         if (formatChoices(id).size() > 1)
             shortTitle += QStringLiteral(" (%1)").arg(file->format.toUpper());
-        const int index = m_documentTabs->addTab(reader, shortTitle);
-        m_documentTabs->setTabToolTip(index, publication->title);
-        m_documentTabs->setCurrentIndex(index);
+        reader->setTitles(shortTitle, publication->title);
     });
     return reader;
+}
+
+void MainWindow::insertReaderTab(ReaderTab *reader, int index)
+{
+    const int at = m_documentTabs->insertTab(qMax(1, index), reader, reader->shortTitle());
+    m_documentTabs->setTabToolTip(at, reader->fullTitle());
+}
+
+int MainWindow::insertPair(ReaderTab *left, ReaderTab *right, int index)
+{
+    auto *pair = new ReaderPair(left, right, m_documentTabs);
+    const int at = m_documentTabs->insertTab(qMax(1, index), pair, QString());
+    updatePairTitle(pair);
+    m_documentTabs->setCurrentIndex(at);
+    return at;
+}
+
+void MainWindow::updatePairTitle(ReaderPair *pair)
+{
+    const int index = m_documentTabs->indexOf(pair);
+    if (index < 0 || !pair->left() || !pair->right())
+        return;
+    const QFontMetrics metrics(font());
+    m_documentTabs->setTabText(index, metrics.elidedText(pair->left()->shortTitle(), Qt::ElideRight, 140) + QStringLiteral(" | ")
+                                          + metrics.elidedText(pair->right()->shortTitle(), Qt::ElideRight, 140));
+    m_documentTabs->setTabToolTip(index, pair->left()->fullTitle() + u'\n' + pair->right()->fullTitle());
+}
+
+QList<ReaderTab *> MainWindow::readersIn(QWidget *tab) const
+{
+    if (auto *reader = qobject_cast<ReaderTab *>(tab))
+        return {reader};
+    if (auto *pair = qobject_cast<ReaderPair *>(tab))
+        return pair->readers();
+    return {};
+}
+
+ReaderTab *MainWindow::openBeside(qint64 id, qint64 fileId)
+{
+    QWidget *beside = m_lastDocument;
+    const int index = beside ? m_documentTabs->indexOf(beside) : -1;
+    if (index <= 0)
+        return openPublicationFile(id, fileId);
+    ReaderTab *reader = createReader(id, fileId, true);
+    if (!reader)
+        return nullptr;
+    if (auto *pair = qobject_cast<ReaderPair *>(beside)) {
+        // In place of the side not being read.
+        ReaderTab *old = pair->replace(pair->otherThan(pair->activeReader()), reader);
+        delete old;
+        updatePairTitle(pair);
+        m_documentTabs->setCurrentIndex(index);
+    } else {
+        auto *single = qobject_cast<ReaderTab *>(beside);
+        m_documentTabs->removeTab(index);
+        insertPair(single, reader, index);
+    }
+    reader->setFocus();
+    return reader;
+}
+
+void MainWindow::showBeside(int tabIndex, int otherTabIndex)
+{
+    auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(tabIndex));
+    auto *other = qobject_cast<ReaderTab *>(m_documentTabs->widget(otherTabIndex));
+    if (!reader || !other || reader == other)
+        return;
+    const int at = qMin(tabIndex, otherTabIndex);
+    m_documentTabs->removeTab(qMax(tabIndex, otherTabIndex));
+    m_documentTabs->removeTab(at);
+    insertPair(reader, other, at);
+}
+
+void MainWindow::showAgainBeside(int tabIndex)
+{
+    auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(tabIndex));
+    if (!reader)
+        return;
+    reader->saveState(); // So the second side opens where this one is.
+    ReaderTab *again = createReader(reader->publicationId(), reader->fileId(), reader->isArticleOnly());
+    if (!again)
+        return;
+    m_documentTabs->removeTab(tabIndex);
+    insertPair(reader, again, tabIndex);
+}
+
+void MainWindow::separate(int tabIndex)
+{
+    auto *pair = qobject_cast<ReaderPair *>(m_documentTabs->widget(tabIndex));
+    if (!pair)
+        return;
+    ReaderTab *left = pair->take(pair->left());
+    ReaderTab *right = pair->take(pair->right());
+    m_documentTabs->removeTab(tabIndex);
+    pair->deleteLater();
+    int at = tabIndex;
+    for (ReaderTab *reader : {left, right}) {
+        if (reader)
+            insertReaderTab(reader, at++);
+    }
+    m_documentTabs->setCurrentIndex(tabIndex);
+}
+
+void MainWindow::closeSide(ReaderTab *reader)
+{
+    for (int i = 1; i < m_documentTabs->count(); ++i) {
+        auto *pair = qobject_cast<ReaderPair *>(m_documentTabs->widget(i));
+        if (!pair || !pair->readers().contains(reader))
+            continue;
+        const bool wasCurrent = m_documentTabs->currentIndex() == i;
+        ReaderTab *other = pair->take(pair->otherThan(reader));
+        pair->take(reader);
+        m_documentTabs->removeTab(i);
+        pair->deleteLater();
+        if (other)
+            insertReaderTab(other, i);
+        if (wasCurrent || other)
+            m_documentTabs->setCurrentIndex(other ? i : qMax(0, i - 1));
+        // Not straight away, since this can come from its own button. It keeps its place as it goes, so it stays the
+        // window's meanwhile, to go before the library does if the window closes first.
+        reader->hide();
+        reader->setParent(this);
+        reader->deleteLater();
+        return;
+    }
+}
+
+QMenu *MainWindow::documentTabMenu(int tabIndex)
+{
+    QWidget *tab = m_documentTabs->widget(tabIndex);
+    auto *menu = new QMenu; // The caller owns it.
+    if (qobject_cast<ReaderPair *>(tab)) {
+        menu->addAction(tr("Separate"), this, [this, tab] { separate(m_documentTabs->indexOf(tab)); })
+            ->setObjectName(QStringLiteral("separate"));
+    } else if (auto *reader = qobject_cast<ReaderTab *>(tab)) {
+        QMenu *beside = menu->addMenu(tr("Show beside"));
+        beside->setObjectName(QStringLiteral("showBeside"));
+        for (int i = 1; i < m_documentTabs->count(); ++i) {
+            auto *other = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
+            if (!other || other == reader)
+                continue;
+            // Tab text marks a shortcut with &, which a menu would too.
+            beside->addAction(m_documentTabs->tabText(i), this, [this, reader, other] {
+                showBeside(m_documentTabs->indexOf(reader), m_documentTabs->indexOf(other));
+            });
+        }
+        if (!beside->isEmpty())
+            beside->addSeparator();
+        beside->addAction(tr("This document again"), this, [this, reader] { showAgainBeside(m_documentTabs->indexOf(reader)); })
+            ->setObjectName(QStringLiteral("again"));
+    }
+    return menu;
+}
+
+void MainWindow::closeReadersOf(const QSet<qint64> &publicationIds)
+{
+    for (int i = m_documentTabs->count() - 1; i > 0; --i) {
+        const QList<ReaderTab *> readers = readersIn(m_documentTabs->widget(i));
+        QList<ReaderTab *> closing;
+        for (ReaderTab *reader : readers) {
+            if (publicationIds.contains(reader->publicationId()))
+                closing << reader;
+        }
+        if (closing.isEmpty())
+            continue;
+        if (closing.size() == readers.size())
+            closeDocumentTab(i);
+        else
+            closeSide(closing.first());
+    }
 }
 
 void MainWindow::keepLibraryFirst()
@@ -2044,6 +2238,17 @@ void MainWindow::showContextMenu(const QPoint &position)
             } else {
                 menu.addAction(tr("Open"), this, [this, publication] { openPublication(publication); });
             }
+            if (const QList<ReaderTab *> last = readersIn(m_lastDocument); !last.isEmpty() && !choices.isEmpty()) {
+                // Beside the document last read, or in a tab with two, in place of the side not being read.
+                auto *pair = qobject_cast<ReaderPair *>(m_lastDocument.data());
+                const ReaderTab *kept = pair ? pair->activeReader() : last.first();
+                QString title = QFontMetrics(font()).elidedText(kept->fullTitle(), Qt::ElideRight, 260);
+                title.replace(u'&', QStringLiteral("&&"));
+                const qint64 fileId = choices.first().id;
+                menu.addAction(tr("Open beside \u201C%1\u201D").arg(title), this,
+                               [this, publication, fileId] { openBeside(publication, fileId); })
+                    ->setObjectName(QStringLiteral("openBeside"));
+            }
             menu.addAction(tr("Open in another app"), this, [this, publication] { openPublicationElsewhere(publication); });
             menu.addAction(tr("Show in folder"), this, [this, publication] { showPublicationInFolder(publication); });
             menu.addAction(tr("Edit..."), this, [this, publication] { editPublication(publication); });
@@ -2266,11 +2471,7 @@ void MainWindow::removePublications(const QList<qint64> &ids)
                 gone.insert(child);
         }
     });
-    for (int i = m_documentTabs->count() - 1; i > 0; --i) {
-        const auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
-        if (reader && gone.contains(reader->publicationId()))
-            closeDocumentTab(i);
-    }
+    closeReadersOf(gone);
     if (const std::optional<qint64> shown = m_details->currentId(); shown && gone.contains(*shown)) {
         m_selectedId.reset();
         m_details->showNothing();
@@ -2311,11 +2512,7 @@ void MainWindow::askToDeleteArticle(qint64 articleId)
             return;
 
         // These save as they go, so they come first.
-        for (int i = m_documentTabs->count() - 1; i > 0; --i) {
-            const auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
-            if (reader && reader->publicationId() == articleId)
-                closeDocumentTab(i);
-        }
+        closeReadersOf({articleId});
         if (m_details->currentId() == articleId) {
             m_selectedId.reset();
             m_details->showNothing();
@@ -2563,6 +2760,8 @@ ReviewTab *MainWindow::reviewTab() const
 
 ReaderTab *MainWindow::activeReader() const
 {
+    if (auto *pair = qobject_cast<ReaderPair *>(m_documentTabs->currentWidget()))
+        return pair->activeReader();
     return qobject_cast<ReaderTab *>(m_documentTabs->currentWidget());
 }
 
@@ -3027,11 +3226,7 @@ void MainWindow::letGoOfHidden()
 {
     const QList<qint64> hidden = m_session.files().hiddenPublications();
     const QSet<qint64> ids(hidden.cbegin(), hidden.cend());
-    for (int i = m_documentTabs->count() - 1; i > 0; --i) {
-        const auto *reader = qobject_cast<ReaderTab *>(m_documentTabs->widget(i));
-        if (reader && ids.contains(reader->publicationId()))
-            closeDocumentTab(i);
-    }
+    closeReadersOf(ids);
     if (const std::optional<qint64> shown = m_details->currentId(); shown && ids.contains(*shown)) {
         m_selectedId.reset();
         m_details->showNothing();

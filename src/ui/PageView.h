@@ -58,6 +58,9 @@ public:
     void setImageAreas(int page, const QList<QRectF> &areas);
     QList<QRectF> imageAreasOn(int page) const { return m_imageAreas.value(page); }
 
+    // How much memory rendered pages may take, in bytes. Less when two documents share a tab.
+    void setImageBudget(qint64 bytes);
+
     void setLayoutMode(LayoutMode mode);
     LayoutMode layoutMode() const { return m_layoutMode; }
 
@@ -234,6 +237,7 @@ private:
     QSet<int> m_failedPages;
     quint64 m_useClock = 0;
     qint64 m_imageBytes = 0;
+    qint64 m_imageBudget = 0;
 
     QHash<int, QList<ReaderLink>> m_links;
     QSet<int> m_linksAsked;

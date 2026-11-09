@@ -51,6 +51,20 @@ public:
     qint64 publicationId() const { return m_publicationId; }
     qint64 fileId() const { return m_fileId; }
 
+    // How its tab names it, short and in full.
+    void setTitles(const QString &shortTitle, const QString &fullTitle);
+    QString shortTitle() const { return m_shortTitle; }
+    QString fullTitle() const { return m_fullTitle; }
+
+    // Beside another document in one tab: it offers to close just this side. See ReaderPair.
+    void setInPair(bool inPair);
+    bool isInPair() const { return m_inPair; }
+    QToolButton *closeSideButton() const { return m_closeSide; }
+    // Whether it keeps its place for next time, which only one of two sides showing the same document does.
+    void setSavesPlace(bool saves) { m_savesPlace = saves; }
+    bool savesPlace() const { return m_savesPlace; }
+    void setImageBudget(qint64 bytes);
+
     // Remembers the place in the document for next time.
     void saveState();
 
@@ -142,6 +156,9 @@ signals:
     // A highlight or note has been added, changed or removed.
     void annotationsChanged();
 
+    // Close this side of two documents side by side.
+    void closeSideRequested();
+
 private:
     struct Hit {
         int page = 0;
@@ -222,6 +239,12 @@ private:
 
     qint64 m_publicationId;
     qint64 m_fileId;
+    QString m_shortTitle;
+    QString m_fullTitle;
+    bool m_inPair = false;
+    bool m_savesPlace = true;
+    QToolButton *m_closeSide = nullptr;
+    QAction *m_closeSideAction = nullptr;
 
     // An article's first and last pages in its volume's file, counting from 0.
     std::optional<std::pair<int, int>> m_articlePages;

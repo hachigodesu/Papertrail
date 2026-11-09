@@ -40,6 +40,7 @@ const QColor kCurrentHitColour(255, 120, 0, 150);
 PageView::PageView(QWidget *parent)
     : QAbstractScrollArea(parent)
 {
+    m_imageBudget = kMaxImageBytes;
     setFocusPolicy(Qt::StrongFocus);
     setFrameShape(QFrame::NoFrame);
     viewport()->setMouseTracking(true);
@@ -526,7 +527,7 @@ void PageView::setPageImage(int page, double scale, const QImage &image)
 
 void PageView::trimCache()
 {
-    if (m_imageBytes <= kMaxImageBytes)
+    if (m_imageBytes <= m_imageBudget)
         return;
     // Not whatever's on show, however little room there is.
     const QRectF visible(contentX(), contentY(), viewport()->width(), viewport()->height());
@@ -534,7 +535,7 @@ void PageView::trimCache()
     std::sort(pages.begin(), pages.end(),
               [this](int a, int b) { return m_images.value(a).lastUsed < m_images.value(b).lastUsed; });
     for (const int page : pages) {
-        if (m_imageBytes <= kMaxImageBytes)
+        if (m_imageBytes <= m_imageBudget)
             break;
         if (m_pageRects.value(page).intersects(visible))
             continue;
@@ -890,6 +891,12 @@ void PageView::drawPage(QPainter &painter, int page, const QRectF &target)
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(area);
     }
+}
+
+void PageView::setImageBudget(qint64 bytes)
+{
+    m_imageBudget = qMax<qint64>(bytes, 32 * 1024 * 1024);
+    trimCache();
 }
 
 void PageView::startArea()

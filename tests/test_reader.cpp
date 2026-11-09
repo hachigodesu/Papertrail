@@ -11,6 +11,7 @@
 #include "ui/MainWindow.h"
 #include "ui/PageView.h"
 #include "ui/PublicationListModel.h"
+#include "ui/ReaderPair.h"
 #include "ui/ReaderTab.h"
 #include "ui/Theme.h"
 
@@ -22,6 +23,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
@@ -30,6 +32,7 @@
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QtTest>
 
@@ -1424,6 +1427,117 @@ private slots:
         ReaderTab *reader = waitForReader(id);
         QVERIFY(reader->pageView()->pageCount() > pagesAtFirst);
         QTRY_VERIFY_WITH_TIMEOUT(reader->pageView()->topPage() > pagesAtFirst - 1, kWaitMs);
+    }
+
+    void twoDocumentsCanBeReadSideBySide()
+    {
+        openLibraryWindow();
+        const qint64 first = addLinkedPublication(QStringLiteral("reader_doc.pdf"));
+        const qint64 second = addLinkedPublication(QStringLiteral("smart_jump.pdf"));
+        ReaderTab *left = waitForReader(first);
+        QVERIFY(left && left->isReady());
+        QCOMPARE(m_window->lastDocumentTab(), left);
+
+        // From the library, beside the document last read.
+        const qint64 secondFile = m_window->formatChoices(second).first().id;
+        ReaderTab *right = m_window->openBeside(second, secondFile);
+        QVERIFY(right);
+        QTRY_VERIFY_WITH_TIMEOUT(right->isReady(), kWaitMs);
+        QTabWidget *tabs = m_window->documentTabs();
+        QCOMPARE(tabs->count(), 2);
+        auto *pair = qobject_cast<ReaderPair *>(tabs->currentWidget());
+        QVERIFY(pair);
+        QCOMPARE(pair->left(), left);
+        QCOMPARE(pair->right(), right);
+        QVERIFY(tabs->tabText(1).contains(QStringLiteral(" | ")));
+        QVERIFY(left->isInPair() && right->isInPair());
+        QVERIFY(left->closeSideButton()->isVisibleTo(left));
+        QCOMPARE(m_window->readersIn(pair).size(), 2);
+
+        // Shortcuts go to the side being read, which is the one last used.
+        QCOMPARE(m_window->activeReader(), right);
+        left->pageView()->setFocus();
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->activeReader(), left, kWaitMs);
+        m_window->goToAction()->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(left->contentsPopup() != nullptr, kWaitMs);
+        QVERIFY(right->contentsPopup() == nullptr);
+        left->contentsPopup()->close();
+
+        // Opening either again goes to it where it is.
+        QCOMPARE(m_window->openPublicationFile(second, secondFile), right);
+        QCOMPARE(tabs->count(), 2);
+        QCOMPARE(m_window->activeReader(), right);
+
+        // Separate makes two tabs again, and a tab's menu puts them back together.
+        std::unique_ptr<QMenu> pairMenu(m_window->documentTabMenu(1));
+        pairMenu->findChild<QAction *>(QStringLiteral("separate"))->trigger();
+        QTRY_COMPARE_WITH_TIMEOUT(tabs->count(), 3, kWaitMs);
+        QCOMPARE(tabs->widget(1), left);
+        QCOMPARE(tabs->widget(2), right);
+        QVERIFY(!left->isInPair());
+        std::unique_ptr<QMenu> menu(m_window->documentTabMenu(1));
+        QMenu *beside = menu->findChild<QMenu *>(QStringLiteral("showBeside"));
+        QVERIFY(beside);
+        beside->actions().first()->trigger();
+        QCOMPARE(tabs->count(), 2);
+        pair = qobject_cast<ReaderPair *>(tabs->widget(1));
+        QVERIFY(pair);
+
+        // Closing one side leaves the other as a tab of its own, at its own place.
+        right->pageView()->goToPage(2);
+        right->closeSideButton()->click();
+        QTRY_VERIFY_WITH_TIMEOUT(qobject_cast<ReaderTab *>(tabs->widget(1)) == left, kWaitMs);
+        QCOMPARE(tabs->count(), 2);
+        QVERIFY(!left->isInPair());
+        const QJsonObject kept = ReadingStateRepository(m_session->database()).placeFor(second, QStringLiteral("pdf"));
+        QCOMPARE(kept.value(QStringLiteral("page")).toInt(), 2);
+    }
+
+    void theSameDocumentCanBeOnBothSides()
+    {
+        openLibraryWindow();
+        const qint64 id = addLinkedPublication(QStringLiteral("reader_doc.pdf"));
+        ReaderTab *reader = waitForReader(id);
+        QVERIFY(reader && reader->isReady());
+        reader->pageView()->goToPage(1);
+
+        std::unique_ptr<QMenu> menu(m_window->documentTabMenu(1));
+        menu->findChild<QAction *>(QStringLiteral("again"))->trigger();
+        auto *pair = qobject_cast<ReaderPair *>(m_window->documentTabs()->widget(1));
+        QVERIFY(pair);
+        ReaderTab *again = pair->right();
+        QTRY_VERIFY_WITH_TIMEOUT(again->isReady(), kWaitMs);
+        QVERIFY(again != reader);
+        QCOMPARE(again->publicationId(), id);
+        // It opens where the first side was.
+        QTRY_COMPARE_WITH_TIMEOUT(again->pageView()->topPage(), 1, kWaitMs);
+
+        // Each keeps its own page, and only the side being read keeps its place for next time.
+        again->pageView()->goToPage(4);
+        pair->setActive(reader);
+        QVERIFY(reader->savesPlace());
+        QVERIFY(!again->savesPlace());
+        reader->pageView()->goToPage(3);
+        m_window->close();
+        m_window.reset();
+        const QJsonObject kept = ReadingStateRepository(m_session->database()).placeFor(id, QStringLiteral("pdf"));
+        QCOMPARE(kept.value(QStringLiteral("page")).toInt(), 3);
+    }
+
+    void removingAPublicationClosesOnlyItsSide()
+    {
+        openLibraryWindow();
+        const qint64 first = addLinkedPublication(QStringLiteral("reader_doc.pdf"));
+        const qint64 second = addLinkedPublication(QStringLiteral("smart_jump.pdf"));
+        ReaderTab *left = waitForReader(first);
+        QVERIFY(left && left->isReady());
+        ReaderTab *right = m_window->openBeside(second, m_window->formatChoices(second).first().id);
+        QTRY_VERIFY_WITH_TIMEOUT(right->isReady(), kWaitMs);
+        QVERIFY(qobject_cast<ReaderPair *>(m_window->documentTabs()->widget(1)));
+
+        m_window->removePublications({second});
+        QTRY_VERIFY_WITH_TIMEOUT(qobject_cast<ReaderTab *>(m_window->documentTabs()->widget(1)) == left, kWaitMs);
+        QCOMPARE(m_window->documentTabs()->count(), 2);
     }
 
     void eachFormatOpensInItsOwnTabAtItsOwnPlace()

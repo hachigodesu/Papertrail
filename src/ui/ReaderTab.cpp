@@ -350,6 +350,12 @@ void ReaderTab::buildToolbar()
         return tool;
     };
 
+    // Only beside another document. First, since a narrow side's toolbar runs out of room at its far end.
+    m_closeSide = button(QStringLiteral("×"), tr("Close this side"), [this] { emit closeSideRequested(); });
+    m_closeSide->setObjectName(QStringLiteral("closeSide"));
+    m_closeSideAction = m_toolbar->addWidget(m_closeSide);
+    m_closeSideAction->setVisible(false);
+
     m_sideToggle = button(tr("Contents"), tr("Show or hide the contents and page thumbnails"), [this] {
         setSidePanelVisible(!m_side->isVisible());
     });
@@ -460,6 +466,24 @@ void ReaderTab::buildToolbar()
     m_searchNext = button(QStringLiteral("↓"), tr("Next match"), [this] { nextHit(); });
     m_toolbar->addWidget(m_searchPrevious);
     m_toolbar->addWidget(m_searchNext);
+
+}
+
+void ReaderTab::setTitles(const QString &shortTitle, const QString &fullTitle)
+{
+    m_shortTitle = shortTitle;
+    m_fullTitle = fullTitle;
+}
+
+void ReaderTab::setInPair(bool inPair)
+{
+    m_inPair = inPair;
+    m_closeSideAction->setVisible(inPair);
+}
+
+void ReaderTab::setImageBudget(qint64 bytes)
+{
+    m_view->setImageBudget(bytes);
 }
 
 void ReaderTab::buildSidePanel()
@@ -755,7 +779,7 @@ void ReaderTab::restorePlace()
 
 void ReaderTab::saveState()
 {
-    if (!m_ready || m_failedToOpen)
+    if (!m_ready || m_failedToOpen || !m_savesPlace)
         return;
     m_saveTimer->stop();
     QJsonObject place;

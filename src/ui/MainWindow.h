@@ -56,6 +56,7 @@ class LibraryFoldersDialog;
 class LibrarySession;
 class PublicationListModel;
 class LookupThread;
+class ReaderPair;
 class ReaderTab;
 class ApiKeyStore;
 class IndexThread;
@@ -206,8 +207,21 @@ public:
     // Summaries on their way, to review, and what they've cost, opened at one publication's if it's given.
     void showSummariesDialog(std::optional<qint64> publicationId = std::nullopt);
     QPushButton *summaryStatusButton() const { return m_summaryStatus; }
-    // The document being read, if a document is what's showing.
+    // The document being read, if a document is what's showing: in a tab with two side by side, the one last used.
     ReaderTab *activeReader() const;
+    // The documents a tab shows: none, one, or two side by side.
+    QList<ReaderTab *> readersIn(QWidget *tab) const;
+
+    // Two documents side by side in one tab. The last document read is the one something opens beside, and in a tab
+    // that already has two, it takes the place of the side not being read.
+    ReaderTab *openBeside(qint64 publicationId, qint64 fileId);
+    void showBeside(int tabIndex, int otherTabIndex);
+    void showAgainBeside(int tabIndex); // The same document on both sides.
+    void separate(int tabIndex);
+    void closeSide(ReaderTab *reader);
+    QWidget *lastDocumentTab() const { return m_lastDocument; }
+    // What right-clicking a document's tab offers, for tests too.
+    QMenu *documentTabMenu(int tabIndex); // The caller owns it.
     QAction *goToAction() const { return m_goTo; }
     // What an empty library says, for tests.
     QPushButton *welcomeImportButton() const { return m_welcomeImport; }
@@ -341,6 +355,13 @@ private:
     QTimer *m_batchTimer = nullptr;
     QPushButton *m_summaryStatus = nullptr;
     QAction *m_goTo = nullptr;
+    QPointer<QWidget> m_lastDocument; // The document tab last shown.
+    ReaderTab *createReader(qint64 publicationId, qint64 fileId, bool articleOnly);
+    void insertReaderTab(ReaderTab *reader, int index);
+    int insertPair(ReaderTab *left, ReaderTab *right, int index);
+    void updatePairTitle(ReaderPair *pair);
+    // Closes the documents of these publications, leaving the other side of a tab with two.
+    void closeReadersOf(const QSet<qint64> &publicationIds);
     void refreshSummaryStatus();
     BackupsDialog *m_backupsDialog = nullptr;
     RemovedPublicationsDialog *m_removedDialog = nullptr;

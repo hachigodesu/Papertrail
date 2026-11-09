@@ -43,6 +43,8 @@ add_library(papertrail_ui STATIC
     PublicationListModel.h
     QueryThreads.cpp
     QueryThreads.h
+    ReaderPair.cpp
+    ReaderPair.h
     ReaderTab.cpp
     ReaderTab.h
     IndexThread.cpp
