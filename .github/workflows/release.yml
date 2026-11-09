@@ -1,13 +1,22 @@
 name: Release
 
-# Pushing a tag such as v1.0.0 builds every package and makes a draft release with them, which stays private
-# until someone publishes it on GitHub. The tag must match the version in CMakeLists.txt and the AppStream file.
+# Pushing a tag such as v1.0.0 makes a draft release with every package, which stays private until someone publishes
+# it on GitHub. The tag must match the version in CMakeLists.txt, the PKGBUILD and the AppStream file.
+#
+# A tag points at a commit already pushed to a branch, where the package workflows have built and self-tested it, so
+# their packages are taken from those runs (waiting for any still going). A package is only built again here when
+# there's no successful run to take it from, as for a commit with [skip ci].
+#
+# Started by hand, it's a dry run for the chosen branch's commit: it gathers the same files into a release-files
+# artifact and makes no release.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read # To find and download the package workflows' artifacts.
 
 jobs:
   check-version:
@@ -18,48 +27,133 @@ jobs:
       - uses: actions/checkout@v4
       - id: version
         run: |
-          tag="${GITHUB_REF_NAME#v}"
           cmake_version="$(sed -n 's/^    VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt | head -1)"
           pkgbuild_version="$(sed -n 's/^pkgver=//p' packaging/arch/PKGBUILD)"
-          [ "$tag" = "$cmake_version" ] || { echo "The tag says $tag, but CMakeLists.txt says $cmake_version"; exit 1; }
-          [ "$tag" = "$pkgbuild_version" ] || { echo "The tag says $tag, but the PKGBUILD says $pkgbuild_version"; exit 1; }
-          grep -q "<release version=\"$tag\"" packaging/linux/io.github.hachigodesu.Papertrail.metainfo.xml \
-              || { echo "The AppStream file has no release $tag"; exit 1; }
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+              tag="${GITHUB_REF_NAME#v}"
+              [ "$tag" = "$cmake_version" ] || { echo "The tag says $tag, but CMakeLists.txt says $cmake_version"; exit 1; }
+          fi
+          [ "$cmake_version" = "$pkgbuild_version" ] \
+              || { echo "CMakeLists.txt says $cmake_version, but the PKGBUILD says $pkgbuild_version"; exit 1; }
+          grep -q "<release version=\"$cmake_version\"" packaging/linux/io.github.hachigodesu.Papertrail.metainfo.xml \
+              || { echo "The AppStream file has no release $cmake_version"; exit 1; }
+          echo "version=$cmake_version" >> "$GITHUB_OUTPUT"
+
+  find-packages:
+    needs: check-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 120 # The AppImage's run, smoke tests included, can still be going.
+    outputs:
+      windows: ${{ steps.find.outputs.windows }}
+      appimage: ${{ steps.find.outputs.appimage }}
+      flatpak: ${{ steps.find.outputs.flatpak }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for package in windows:windows-package.yml:windows-package appimage:appimage.yml:appimage \
+                  flatpak:flatpak.yml:flatpak; do
+              IFS=: read -r key workflow artifact <<< "$package"
+              run="$(bash .github/scripts/find-ci-run.sh "$workflow" "$GITHUB_SHA" "$artifact")"
+              if [ -n "$run" ]; then
+                  echo "$artifact comes from run $run"
+              else
+                  echo "$artifact has no run to take it from, so it's built here"
+              fi
+              echo "$key=$run" >> "$GITHUB_OUTPUT"
+          done
 
   windows:
-    needs: check-version
+    needs: find-packages
+    if: needs.find-packages.outputs.windows == ''
     uses: ./.github/workflows/windows-package.yml
 
   appimage:
-    needs: check-version
+    needs: find-packages
+    if: needs.find-packages.outputs.appimage == ''
     uses: ./.github/workflows/appimage.yml
 
   flatpak:
-    needs: check-version
+    needs: find-packages
+    if: needs.find-packages.outputs.flatpak == ''
     uses: ./.github/workflows/flatpak.yml
 
   draft-release:
-    needs: [check-version, windows, appimage, flatpak]
+    needs: [check-version, find-packages, windows, appimage, flatpak]
+    # The build jobs are skipped when their package is taken from CI, which would otherwise skip this too.
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - name: Windows package, built here
+        if: needs.find-packages.outputs.windows == ''
+        uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: windows-package
+          path: artifacts/windows-package
+      - name: Windows package, from CI
+        if: needs.find-packages.outputs.windows != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: artifacts/windows-package
+          run-id: ${{ needs.find-packages.outputs.windows }}
+          github-token: ${{ github.token }}
+      - name: AppImage, built here
+        if: needs.find-packages.outputs.appimage == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: appimage
+          path: artifacts/appimage
+      - name: AppImage, from CI
+        if: needs.find-packages.outputs.appimage != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: appimage
+          path: artifacts/appimage
+          run-id: ${{ needs.find-packages.outputs.appimage }}
+          github-token: ${{ github.token }}
+      - name: Flatpak, built here
+        if: needs.find-packages.outputs.flatpak == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: flatpak
+          path: artifacts/flatpak
+      - name: Flatpak, from CI
+        if: needs.find-packages.outputs.flatpak != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: flatpak
+          path: artifacts/flatpak
+          run-id: ${{ needs.find-packages.outputs.flatpak }}
+          github-token: ${{ github.token }}
       - name: Gather the files
         run: |
           version="${{ needs.check-version.outputs.version }}"
           mkdir dist
-          cp artifacts/windows-package/* dist/
+          # The Windows files are named by the version they were built as, so this also catches a stale package.
+          for file in "Papertrail-$version-setup.exe" "Papertrail-$version-portable.zip"; do
+              [ -f "artifacts/windows-package/$file" ] || { echo "The Windows package has no $file"; ls artifacts/windows-package; exit 1; }
+              cp "artifacts/windows-package/$file" dist/
+          done
           cp artifacts/appimage/Papertrail-x86_64.AppImage "dist/Papertrail-$version-x86_64.AppImage"
           cp artifacts/flatpak/Papertrail.flatpak "dist/Papertrail-$version.flatpak"
           (cd dist && sha256sum * > SHA256SUMS)
           cat dist/SHA256SUMS
       - name: Make a draft release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag \
               --title "Papertrail ${{ needs.check-version.outputs.version }}" \
               --notes-file docs/release-notes.md
+      - name: Keep the files of a dry run
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: dist/
+          if-no-files-found: error

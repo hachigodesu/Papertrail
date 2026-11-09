@@ -3,7 +3,7 @@ name: Windows package
 # The installer and portable zip, built as a release would be, so packaging problems show up before one.
 on:
   push:
-    branches: ['**'] # Tags go through the release workflow, which runs this itself.
+    branches: ['**'] # Tags go through the release workflow, which reuses this run's package.
   pull_request:
   workflow_call: # From the release workflow.
 

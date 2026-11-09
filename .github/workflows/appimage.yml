@@ -2,7 +2,7 @@ name: AppImage
 
 on:
   push:
-    branches: ['**'] # Tags go through the release workflow, which runs this itself.
+    branches: ['**'] # Tags go through the release workflow, which reuses this run's package.
   pull_request:
   workflow_call: # From the release workflow.
 

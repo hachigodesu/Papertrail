@@ -124,8 +124,8 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 1. Ask the user first: a release is public.
 2. Set the new version in `CMakeLists.txt` (`project(... VERSION ...)`) and `pkgver` in `packaging/arch/PKGBUILD` (with `pkgrel=1`).
 3. Add a `<release version="..." date="...">` to `packaging/linux/io.github.hachigodesu.Papertrail.metainfo.xml`, newest first, and rewrite `docs/release-notes.md` for it.
-4. Test everywhere, commit and push, and wait for CI to pass.
-5. Make a signed tag (`git tag -s vX.Y.Z -m "Papertrail X.Y.Z"`) and push it. `release.yml` checks the versions match, builds every package, and makes a **draft** release with them, a `SHA256SUMS` and the release notes. A draft's address starts `untagged-` until it's published.
+4. Test everywhere, commit and push, and wait for CI to pass. Don't put `[skip ci]` on the version commit.
+5. Make a signed tag (`git tag -s vX.Y.Z -m "Papertrail X.Y.Z"`) and push it. `release.yml` checks the versions match, takes each package from the tagged commit's branch-push run of `windows-package.yml`, `appimage.yml` and `flatpak.yml` (`.github/scripts/find-ci-run.sh`, waiting for one still going), builds only those with no successful run, and makes a **draft** release with them, a `SHA256SUMS` and the release notes. A draft's address starts `untagged-` until it's published. Starting `release.yml` by hand is a dry run that keeps the files as a `release-files` artifact instead.
 6. The user tests the draft's packages and publishes it on GitHub.
 7. Then run `updpkgsums` on the PKGBUILD (or fill in the first checksum by hand from `https://github.com/hachigodesu/Papertrail/archive/refs/tags/vX.Y.Z.tar.gz`), and commit that.
 
