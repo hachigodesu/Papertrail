@@ -6,6 +6,7 @@
 #include <limits>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -56,6 +58,12 @@ FILE *claimStandardOutput()
 QJsonArray rectToJson(const QRectF &rect)
 {
     return QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()};
+}
+
+QRectF rectFromJson(const QJsonValue &value)
+{
+    const QJsonArray array = value.toArray();
+    return QRectF(array.at(0).toDouble(), array.at(1).toDouble(), array.at(2).toDouble(), array.at(3).toDouble());
 }
 
 QJsonArray rectsToJson(const QList<QRectF> &rects)
@@ -145,6 +153,12 @@ public:
                 sizes(request, reply);
             else if (op == QStringLiteral("render"))
                 data = render(request, reply);
+            else if (op == QStringLiteral("renderarea"))
+                data = renderArea(request, reply);
+            else if (op == QStringLiteral("lines"))
+                lines(request, reply);
+            else if (op == QStringLiteral("areatext"))
+                areaText(request, reply);
             else if (op == QStringLiteral("outline"))
                 outline(reply);
             else if (op == QStringLiteral("links"))
@@ -224,6 +238,7 @@ private:
     void layout(const QJsonObject &request, QJsonObject &reply)
     {
         const qint64 mark = m_document->bookmarkForPage(page(request));
+        m_lines.clear();
         applyLayout(request);
         describe(reply);
         reply.insert(QStringLiteral("page"), m_document->pageForBookmark(mark));
@@ -248,11 +263,9 @@ private:
         reply.insert(QStringLiteral("sizes"), values);
     }
 
-    QByteArray render(const QJsonObject &request, QJsonObject &reply)
+    // The scale asked for, made smaller where it would give an image too large to be sensible.
+    double boundedScale(int number, double scale)
     {
-        const int number = page(request);
-        applyPageFaults(m_path, number);
-        double scale = request.value(QStringLiteral("scale")).toDouble(1);
         const QSizeF size = m_document->pageSize(number);
         const double largest = qMax(size.width(), size.height());
         if (largest <= 0)
@@ -261,13 +274,90 @@ private:
         const double area = size.width() * size.height() * scale * scale;
         if (area > kMaxPixels)
             scale *= std::sqrt(kMaxPixels / area);
+        return scale;
+    }
 
+    QByteArray render(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        applyPageFaults(m_path, number);
+        const double scale = boundedScale(number, request.value(QStringLiteral("scale")).toDouble(1));
         const engine::DisplayImage image = m_document->renderForDisplay(number, scale);
         reply.insert(QStringLiteral("page"), number);
         reply.insert(QStringLiteral("width"), image.width);
         reply.insert(QStringLiteral("height"), image.height);
         reply.insert(QStringLiteral("stride"), image.stride);
         return image.pixels;
+    }
+
+    // Part of a page, in points, as a picture: for an area marked on it, or a preview of something it holds.
+    QByteArray renderArea(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        applyPageFaults(m_path, number);
+        const double scale = boundedScale(number, request.value(QStringLiteral("scale")).toDouble(1));
+        const engine::DisplayImage image = m_document->renderForDisplay(number, scale);
+        const QRect whole(0, 0, image.width, image.height);
+        const QRectF wanted = rectFromJson(request.value(QStringLiteral("rect")));
+        const QRect crop = QRect(int(std::floor(wanted.left() * scale)), int(std::floor(wanted.top() * scale)),
+                                 int(std::ceil(wanted.width() * scale)), int(std::ceil(wanted.height() * scale)))
+                               .intersected(whole);
+        if (crop.isEmpty())
+            throw engine::EngineError("that part of the page is empty");
+        const int stride = crop.width() * 4;
+        QByteArray pixels(qsizetype(stride) * crop.height(), Qt::Uninitialized);
+        for (int y = 0; y < crop.height(); ++y) {
+            std::memcpy(pixels.data() + qsizetype(y) * stride,
+                        image.pixels.constData() + qsizetype(crop.top() + y) * image.stride + qsizetype(crop.left()) * 4,
+                        size_t(stride));
+        }
+        reply.insert(QStringLiteral("page"), number);
+        reply.insert(QStringLiteral("width"), crop.width());
+        reply.insert(QStringLiteral("height"), crop.height());
+        reply.insert(QStringLiteral("stride"), stride);
+        return pixels;
+    }
+
+    // A page's lines, kept for a while since finding what a reference points at reads many pages, often again.
+    const QList<engine::TextLine> &linesOn(int number)
+    {
+        constexpr qsizetype kPagesKept = 200;
+        if (auto found = m_lines.constFind(number); found != m_lines.cend())
+            return *found;
+        if (m_lines.size() >= kPagesKept)
+            m_lines.clear();
+        applyPageFaults(m_path, number);
+        QList<engine::TextLine> read;
+        try {
+            read = m_document->textLines(number);
+        } catch (const engine::EngineError &) {
+            // A page that can't be read has no text to offer.
+        }
+        return *m_lines.insert(number, read);
+    }
+
+    void lines(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        const bool withChars = request.value(QStringLiteral("chars")).toBool();
+        QJsonArray items;
+        for (const engine::TextLine &line : linesOn(number)) {
+            QJsonObject item{{QStringLiteral("text"), line.text}, {QStringLiteral("rect"), rectToJson(line.rect)}};
+            if (withChars)
+                item.insert(QStringLiteral("chars"), rectsToJson(line.chars));
+            items.append(item);
+        }
+        reply.insert(QStringLiteral("page"), number);
+        reply.insert(QStringLiteral("lines"), items);
+    }
+
+    // The words inside an area marked on a page, so that searching finds it.
+    void areaText(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        applyPageFaults(m_path, number);
+        reply.insert(QStringLiteral("page"), number);
+        reply.insert(QStringLiteral("text"), m_document->textInRect(number, rectFromJson(request.value(QStringLiteral("rect")))));
     }
 
     void outline(QJsonObject &reply)
@@ -410,6 +500,7 @@ private:
     FILE *m_out;
     QString m_path;
     std::unique_ptr<engine::Document> m_document;
+    QHash<int, QList<engine::TextLine>> m_lines;
 };
 
 } // namespace

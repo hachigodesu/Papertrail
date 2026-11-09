@@ -505,9 +505,9 @@ public:
             throwCaught(QStringLiteral("the copy couldn't be written: %1").arg(QString::fromUtf8(fz_caught_message(m_ctx))));
     }
 
-    TextSelection selectText(int page, const QPointF &a, const QPointF &b) override
+    // The structured text of one page at a time, kept while it's asked about over and over, as a drag to select does.
+    fz_stext_page *selectionTextFor(int page)
     {
-        layoutIfNeeded();
         if (page != m_selectionPage) {
             forgetSelectionText();
             fz_try(m_ctx) {
@@ -518,7 +518,13 @@ public:
                 m_selectionText = nullptr;
             }
         }
-        if (!m_selectionText)
+        return m_selectionText;
+    }
+
+    TextSelection selectText(int page, const QPointF &a, const QPointF &b) override
+    {
+        layoutIfNeeded();
+        if (!selectionTextFor(page))
             return {};
 
         constexpr int kMaxQuads = 4096;
@@ -544,6 +550,37 @@ public:
             fz_free(m_ctx, copied);
         }
         return selection;
+    }
+
+    QList<TextLine> textLines(int page) override
+    {
+        layoutIfNeeded();
+        if (page < 0 || page >= pageCount())
+            return {};
+        fz_stext_page *text = selectionTextFor(page);
+        if (!text)
+            return {};
+
+        QList<TextLine> lines;
+        for (fz_stext_block *block = text->first_block; block; block = block->next) {
+            if (block->type != FZ_STEXT_BLOCK_TEXT)
+                continue;
+            for (fz_stext_line *line = block->u.t.first_line; line; line = line->next) {
+                TextLine out;
+                out.rect = QRectF(line->bbox.x0, line->bbox.y0, line->bbox.x1 - line->bbox.x0, line->bbox.y1 - line->bbox.y0);
+                for (fz_stext_char *ch = line->first_char; ch; ch = ch->next) {
+                    const QString unit = QString::fromUcs4(reinterpret_cast<const char32_t *>(&ch->c), 1);
+                    const QRectF box = rectFrom(ch->quad);
+                    for (qsizetype i = 0; i < unit.size(); ++i) {
+                        out.text += unit.at(i);
+                        out.chars << box;
+                    }
+                }
+                if (!out.text.trimmed().isEmpty())
+                    lines << out;
+            }
+        }
+        return lines;
     }
 
     QString largestTextOnPage(int page) override

@@ -240,6 +240,64 @@ private slots:
         QCOMPARE(hits.at(1).at(0).toInt(), 1);
     }
 
+    void readsLinesAndPartsOfAPage()
+    {
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy lines(&client, &DocumentClient::linesReady);
+        QSignalSpy hits(&client, &DocumentClient::searchHits);
+        QSignalSpy finished(&client, &DocumentClient::searchFinished);
+        QSignalSpy text(&client, &DocumentClient::areaTextReady);
+        QSignalSpy picture(&client, &DocumentClient::areaPictureReady);
+        client.open(sample(QStringLiteral("reader_doc.pdf")), {});
+        QVERIFY(opened.wait(kWaitMs));
+
+        client.startSearch(QStringLiteral("findme"), 4);
+        QVERIFY(finished.wait(kWaitMs));
+        QCOMPARE(hits.first().at(0).toInt(), 4);
+        const QRectF hit = hits.first().at(1).value<QList<QRectF>>().first();
+
+        // Each character has a box, and the word's agree with where searching found it.
+        client.requestLines(4);
+        QVERIFY(lines.wait(kWaitMs));
+        QCOMPARE(lines.first().at(0).toInt(), 4);
+        const auto found = lines.first().at(1).value<QList<ReaderTextLine>>();
+        QVERIFY(!found.isEmpty());
+        bool matched = false;
+        for (const ReaderTextLine &line : found) {
+            QCOMPARE(line.chars.size(), line.text.size());
+            const qsizetype at = line.text.indexOf(QStringLiteral("findme"));
+            if (at < 0)
+                continue;
+            QRectF word = line.chars.at(at);
+            for (qsizetype i = at; i < at + 6; ++i)
+                word = word.united(line.chars.at(i));
+            if (qAbs(word.left() - hit.left()) < 1.5 && qAbs(word.top() - hit.top()) < 3)
+                matched = true;
+        }
+        QVERIFY(matched);
+
+        // The text inside part of a page, and a picture of it at the scale asked for.
+        const QRectF area = hit.adjusted(-2, -2, 2, 2);
+        client.requestAreaText(7, 4, area);
+        QVERIFY(text.wait(kWaitMs));
+        QCOMPARE(text.first().at(0).toLongLong(), qint64(7));
+        QCOMPARE(text.first().at(2).toString(), QStringLiteral("findme"));
+        client.requestAreaPicture(8, 4, area, 2.0, true);
+        QVERIFY(picture.wait(kWaitMs));
+        QCOMPARE(picture.first().at(0).toLongLong(), qint64(8));
+        const QImage image = picture.first().at(2).value<QImage>();
+        QVERIFY(!image.isNull());
+        QVERIFY(qAbs(image.width() - area.width() * 2) <= 2);
+        QVERIFY(qAbs(image.height() - area.height() * 2) <= 2);
+
+        // Part of a page that isn't on it at all is answered all the same, with nothing.
+        picture.clear();
+        client.requestAreaPicture(9, 4, QRectF(-500, -500, 10, 10), 2.0, false);
+        QVERIFY(picture.wait(kWaitMs));
+        QVERIFY(picture.first().at(2).value<QImage>().isNull());
+    }
+
     void selectsTextBetweenTwoPoints()
     {
         DocumentClient client(worker());
@@ -445,6 +503,22 @@ private slots:
         client.requestSelection(0, QPointF(40, 50), QPointF(280, 100));
         QVERIFY(selected.wait(kWaitMs));
         QCOMPARE(selected.first().at(2).toString(), QStringLiteral("Plain findme words\nsecond line"));
+
+        // Its lines, with each word's box shared out among its letters, and the text inside part of the page.
+        QSignalSpy lines(&client, &DocumentClient::linesReady);
+        QSignalSpy text(&client, &DocumentClient::areaTextReady);
+        client.requestLines(0);
+        QVERIFY(lines.wait(kWaitMs));
+        const auto pageLines = lines.first().at(1).value<QList<ReaderTextLine>>();
+        QCOMPARE(pageLines.size(), 2);
+        QCOMPARE(pageLines.at(0).text, QStringLiteral("Plain findme words"));
+        QCOMPARE(pageLines.at(0).chars.size(), pageLines.at(0).text.size());
+        QCOMPARE(pageLines.at(1).text, QStringLiteral("second line"));
+        const qsizetype at = pageLines.at(0).text.indexOf(QStringLiteral("findme"));
+        QVERIFY(qAbs(pageLines.at(0).chars.at(at).left() - first.left()) < 0.5);
+        client.requestAreaText(1, 0, first.adjusted(-1, -1, 1, 1));
+        QVERIFY(text.wait(kWaitMs));
+        QCOMPARE(text.first().at(2).toString(), QStringLiteral("findme"));
         QCOMPARE(selected.first().at(1).value<QList<QRectF>>().size(), 5);
     }
 

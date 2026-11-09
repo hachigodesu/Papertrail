@@ -177,6 +177,37 @@ public:
         return rects;
     }
 
+    // DjVu's hidden text places words, not characters, so each word's box is shared out evenly among its characters.
+    QList<TextLine> textLines(int page) override
+    {
+        QList<TextLine> lines;
+        TextLine line;
+        const auto finish = [&] {
+            if (!line.text.trimmed().isEmpty())
+                lines << line;
+            line = TextLine();
+        };
+        for (const Word &word : wordsOn(page)) {
+            if (!line.text.isEmpty()) {
+                line.text += u' ';
+                const QRectF previous = line.chars.last();
+                line.chars << QRectF(previous.right(), previous.top(), qMax(0.0, word.rect.left() - previous.right()),
+                                     previous.height());
+            }
+            const qsizetype count = qMax<qsizetype>(1, word.text.size());
+            const double width = word.rect.width() / double(count);
+            for (qsizetype i = 0; i < word.text.size(); ++i) {
+                line.text += word.text.at(i);
+                line.chars << QRectF(word.rect.left() + width * double(i), word.rect.top(), width, word.rect.height());
+            }
+            line.rect = line.rect.isNull() ? word.rect : line.rect.united(word.rect);
+            if (word.endsLine)
+                finish();
+        }
+        finish();
+        return lines;
+    }
+
     TextSelection selectText(int page, const QPointF &a, const QPointF &b) override
     {
         const QList<Word> &words = wordsOn(page);

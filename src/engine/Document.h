@@ -60,6 +60,14 @@ struct TextSelection {
     QString text;
 };
 
+// One line of a page's text, in reading order, with a box in points for each UTF-16 unit of its text: both halves of
+// a character outside the Basic Multilingual Plane share its box.
+struct TextLine {
+    QString text;
+    QRectF rect;
+    QList<QRectF> chars;
+};
+
 // A highlight, underline or note to write into a copy of a document. Rectangles are in points in the page's own
 // space, as a selection gives them.
 struct MarkToWrite {
@@ -111,6 +119,12 @@ public:
 
     // The text between two points on a page, as a reader would select it by dragging.
     virtual TextSelection selectText(int, const QPointF &, const QPointF &) { return {}; }
+
+    // A page's lines of text with where each character is. Empty for a page with no text, or one that can't be read.
+    virtual QList<TextLine> textLines(int) { return {}; }
+
+    // The text whose characters' middles are inside `area`, line by line.
+    QString textInRect(int page, const QRectF &area);
 
     // The text on a page set in the largest type. On a first page, or the page an article starts on,
     // that's often the title.

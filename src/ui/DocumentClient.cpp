@@ -118,7 +118,7 @@ void DocumentClient::send(const Request &request)
     int timeout = kOtherTimeoutMs;
     if (request.kind == Kind::Open || request.kind == Kind::Layout)
         timeout = m_openTimeoutMs;
-    else if (request.kind == Kind::Render || request.kind == Kind::Thumbnail)
+    else if (request.kind == Kind::Render || request.kind == Kind::Thumbnail || request.kind == Kind::AreaPicture)
         timeout = m_renderTimeoutMs;
     m_timeout.start(timeout);
 }
@@ -274,6 +274,22 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
                 emit thumbnailReady(request.page, image);
         }
         break;
+    case Kind::AreaPicture:
+        emit areaPictureReady(request.token, request.page, ok ? imageFrom(reply, data) : QImage());
+        break;
+    case Kind::AreaText:
+        emit areaTextReady(request.token, request.page, ok ? reply.value(QStringLiteral("text")).toString() : QString());
+        break;
+    case Kind::Lines: {
+        QList<ReaderTextLine> lines;
+        for (const QJsonValue &value : reply.value(QStringLiteral("lines")).toArray()) {
+            const QJsonObject item = value.toObject();
+            lines << ReaderTextLine{item.value(QStringLiteral("text")).toString(), rectFromJson(item.value(QStringLiteral("rect"))),
+                                    rectsFromJson(item.value(QStringLiteral("chars")))};
+        }
+        emit linesReady(request.page, lines);
+        break;
+    }
     case Kind::Outline: {
         QList<ReaderOutlineItem> items;
         const QJsonArray array = reply.value(QStringLiteral("items")).toArray();
@@ -383,6 +399,15 @@ void DocumentClient::handleLostRequest()
         break;
     case Kind::Heading:
         emit headingReady(request.page, ReaderHeading{});
+        break;
+    case Kind::AreaPicture:
+        emit areaPictureReady(request.token, request.page, QImage());
+        break;
+    case Kind::AreaText:
+        emit areaTextReady(request.token, request.page, QString());
+        break;
+    case Kind::Lines:
+        emit linesReady(request.page, {});
         break;
     default:
         break;
@@ -518,6 +543,48 @@ void DocumentClient::requestThumbnail(int page, double scale)
     m_thumbnails << request;
     if (m_thumbnails.size() > kMaxWaitingThumbnails)
         m_thumbnails.removeFirst();
+    pump();
+}
+
+void DocumentClient::requestAreaPicture(qint64 token, int page, const QRectF &rect, double scale, bool now)
+{
+    Request request;
+    request.kind = Kind::AreaPicture;
+    request.token = token;
+    request.page = page;
+    request.scale = scale;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("renderarea")},
+                               {QStringLiteral("page"), page},
+                               {QStringLiteral("rect"), QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()}},
+                               {QStringLiteral("scale"), scale}};
+    if (now)
+        m_urgent << request;
+    else
+        m_background << request;
+    pump();
+}
+
+void DocumentClient::requestAreaText(qint64 token, int page, const QRectF &rect)
+{
+    Request request;
+    request.kind = Kind::AreaText;
+    request.token = token;
+    request.page = page;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("areatext")},
+                               {QStringLiteral("page"), page},
+                               {QStringLiteral("rect"), QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()}}};
+    m_urgent << request;
+    pump();
+}
+
+void DocumentClient::requestLines(int page)
+{
+    Request request;
+    request.kind = Kind::Lines;
+    request.page = page;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("lines")}, {QStringLiteral("page"), page},
+                               {QStringLiteral("chars"), true}};
+    m_background << request;
     pump();
 }
 

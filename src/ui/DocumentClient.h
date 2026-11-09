@@ -47,6 +47,13 @@ struct ReaderHeading {
     int year = 0;
 };
 
+// One line of a page's text, with a box for each of its characters, in points.
+struct ReaderTextLine {
+    QString text;
+    QRectF rect;
+    QList<QRectF> chars;
+};
+
 struct RenderRequest {
     int page = 0;
     double scale = 1; // Pixels per point.
@@ -94,6 +101,14 @@ public:
 
     void requestThumbnail(int page, double scale);
 
+    // Part of a page as a picture, `rect` in points. Pictures for a list wait their turn, and one wanted now doesn't.
+    // `token` comes back with the answer, which always comes: a null image if it couldn't be made.
+    void requestAreaPicture(qint64 token, int page, const QRectF &rect, double scale, bool now);
+    // The text inside part of a page. The answer always comes, empty if there's none or it couldn't be read.
+    void requestAreaText(qint64 token, int page, const QRectF &rect);
+    // A page's lines of text, with where each character is.
+    void requestLines(int page);
+
     // Only the newest selection on each page matters.
     void requestSelection(int page, const QPointF &a, const QPointF &b);
 
@@ -125,6 +140,9 @@ signals:
     void pageRendered(int page, double scale, const QImage &image);
     void pageFailed(int page);
     void thumbnailReady(int page, const QImage &image);
+    void areaPictureReady(qint64 token, int page, const QImage &image);
+    void areaTextReady(qint64 token, int page, const QString &text);
+    void linesReady(int page, const QList<papertrail::ui::ReaderTextLine> &lines);
     void outlineReady(const QList<papertrail::ui::ReaderOutlineItem> &items);
     void linksReady(int page, const QList<papertrail::ui::ReaderLink> &links);
     void imageAreasReady(int page, const QList<QRectF> &areas);
@@ -140,7 +158,10 @@ signals:
     void recovered(); // The helper crashed, and has been restarted.
 
 private:
-    enum class Kind { Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Images, Heading, Select, Bookmark, Anchor, Locate, Find, Search };
+    enum class Kind {
+        Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Images, Heading, Select, Bookmark, Anchor, Locate, Find,
+        Search, AreaPicture, AreaText, Lines
+    };
 
     struct Request {
         Kind kind = Kind::Open;
@@ -203,3 +224,4 @@ private:
 
 Q_DECLARE_METATYPE(papertrail::ui::ReaderOutlineItem)
 Q_DECLARE_METATYPE(papertrail::ui::ReaderLink)
+Q_DECLARE_METATYPE(papertrail::ui::ReaderTextLine)

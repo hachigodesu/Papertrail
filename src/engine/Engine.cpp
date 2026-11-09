@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QStringList>
 
 #include <mupdf/fitz.h>
 
@@ -51,6 +52,24 @@ DisplayImage Document::renderForDisplay(int page, double scale)
 }
 
 void Document::setLayout(double, double, double) {}
+
+QString Document::textInRect(int page, const QRectF &area)
+{
+    QStringList lines;
+    for (const TextLine &line : textLines(page)) {
+        if (!line.rect.intersects(area))
+            continue;
+        QString inside;
+        for (qsizetype i = 0; i < line.text.size() && i < line.chars.size(); ++i) {
+            if (area.contains(line.chars.at(i).center()))
+                inside += line.text.at(i);
+        }
+        inside = inside.simplified();
+        if (!inside.isEmpty())
+            lines << inside;
+    }
+    return lines.join(u'\n');
+}
 
 qint64 Document::bookmarkForPage(int page)
 {
