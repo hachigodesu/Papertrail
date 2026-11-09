@@ -365,6 +365,10 @@ private:
     QLabel *m_lookupLabel = nullptr;
     QPushButton *m_lookupStop = nullptr;
     std::optional<QString> m_lookupOverride;
+    // The folder a choice for one folder was made for, and whether it's been scanned yet: the choice lasts until the
+    // import that scanned it has finished, even if another was already running when it was added.
+    qint64 m_lookupOverrideRoot = 0;
+    bool m_lookupOverrideScanned = false;
     BulkChanges *m_bulk = nullptr;
     FolderWatcher *m_watcher = nullptr;
     CoverCache *m_covers = nullptr;

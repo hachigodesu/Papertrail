@@ -2780,15 +2780,22 @@ void MainWindow::addFolder(const QString &path, const std::optional<QString> &lo
         const QString folder = QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()));
         if (lookupOverride) {
             m_lookupOverride = lookupOverride;
+            m_lookupOverrideRoot = 0;
+            m_lookupOverrideScanned = false;
             m_import->setLookupMode(*lookupOverride == QLatin1StringView("offline") ? QString() : *lookupOverride);
         }
+        const auto scan = [&](qint64 rootId) {
+            if (lookupOverride)
+                m_lookupOverrideRoot = rootId;
+            m_import->scanRoots({rootId});
+        };
         m_session.settings().setValue(QStringLiteral("library.last_import_folder"), folder);
         m_importStoppedByHand = false;
 
         for (const LibraryRoot &root : m_session.files().roots()) {
             if (import::isPathInside(folder, root.path)) {
                 statusBar()->showMessage(tr("That folder is already in the library, so it's being scanned again."), 8000);
-                m_import->scanRoots({root.id});
+                scan(root.id);
                 return;
             }
         }
@@ -2796,7 +2803,7 @@ void MainWindow::addFolder(const QString &path, const std::optional<QString> &lo
         for (const LibraryRoot &root : m_session.files().removedRoots()) {
             if (import::isPathInside(folder, root.path) && import::isPathInside(root.path, folder)) {
                 m_session.files().restoreRoot(root.id);
-                m_import->scanRoots({root.id});
+                scan(root.id);
                 afterFoldersChanged();
                 return;
             }
@@ -2804,7 +2811,7 @@ void MainWindow::addFolder(const QString &path, const std::optional<QString> &lo
         // The top of a drive has no folder name of its own.
         const QString name = QFileInfo(folder).fileName();
         const qint64 root = m_session.files().addRoot(name.isEmpty() ? folder : name, folder);
-        m_import->scanRoots({root});
+        scan(root);
         if (m_foldersDialog)
             m_foldersDialog->reload();
         updateStack();
@@ -3076,6 +3083,8 @@ void MainWindow::onImportProgress(qint64 done, qint64 remaining, const QString &
 
 void MainWindow::onRootScanned(qint64 rootId, const import::ScanReport &report, const QStringList &folders)
 {
+    if (m_lookupOverride && rootId == m_lookupOverrideRoot)
+        m_lookupOverrideScanned = true;
     if (report.rootAvailable) {
         m_watcher->setFolders(rootId, folders);
         m_watcher->noteScanDuration(report.elapsedMs);
@@ -3093,9 +3102,11 @@ void MainWindow::onRootScanned(qint64 rootId, const import::ScanReport &report, 
 void MainWindow::onImportFinished(const import::ImportReport &report)
 {
     refreshNow();
-    // A choice made for one folder only lasts as long as that folder's import.
-    if (m_lookupOverride) {
+    // A choice made for one folder only lasts as long as that folder's import, which may not be this one.
+    if (m_lookupOverride && m_lookupOverrideScanned) {
         m_lookupOverride.reset();
+        m_lookupOverrideRoot = 0;
+        m_lookupOverrideScanned = false;
         const QString mode = lookupMode();
         m_import->setLookupMode(mode == QLatin1StringView("offline") ? QString() : mode);
     }
