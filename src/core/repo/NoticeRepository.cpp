@@ -2,6 +2,8 @@
 
 #include "core/db/Database.h"
 
+#include <QSet>
+
 namespace papertrail::core {
 
 // The kinds that call a work's findings into question. Corrections and the like are listed, but not warned about.
@@ -42,23 +44,43 @@ QList<QPair<qint64, QString>> NoticeRepository::dueForCheck(int limit, qint64 ch
 
 void NoticeRepository::record(const QList<qint64> &checked, const QHash<qint64, QList<Notice>> &found, qint64 when)
 {
+    // A notice found again keeps the time it was first found, which is how a new one is told from one already known.
     Transaction transaction(m_db);
-    auto clear = m_db.prepare("DELETE FROM publication_notice WHERE publication_id = ?");
+    auto existing = m_db.prepare("SELECT notice_doi, kind FROM publication_notice WHERE publication_id = ?");
+    auto drop = m_db.prepare("DELETE FROM publication_notice WHERE publication_id = ? AND notice_doi = ? AND kind = ?");
     auto insert = m_db.prepare(
-        "INSERT OR REPLACE INTO publication_notice (publication_id, notice_doi, kind, label, notice_date, source, found_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)");
+        "INSERT INTO publication_notice (publication_id, notice_doi, kind, label, notice_date, source, found_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (publication_id, notice_doi, kind) DO UPDATE SET "
+        "label = excluded.label, notice_date = excluded.notice_date, source = excluded.source");
     auto mark = m_db.prepare("INSERT OR REPLACE INTO notice_check (publication_id, checked_at) VALUES (?, ?)");
+    // A null string would be stored as NULL, which these don't take: unknown is empty.
+    const auto text = [](const QString &value) { return value.isNull() ? QStringLiteral("") : value; };
     for (const qint64 id : checked) {
-        clear->reset();
-        clear->bind(1, id);
-        clear->step();
-        for (const Notice &notice : found.value(id)) {
+        const QList<Notice> now = found.value(id);
+        QSet<QPair<QString, QString>> current;
+        for (const Notice &notice : now)
+            current.insert({text(notice.noticeDoi), notice.kind});
+
+        QList<QPair<QString, QString>> gone;
+        existing->reset();
+        existing->bind(1, id);
+        while (existing->step()) {
+            const QPair<QString, QString> key{existing->textAt(0), existing->textAt(1)};
+            if (!current.contains(key))
+                gone << key;
+        }
+        for (const auto &key : gone) {
+            drop->reset();
+            drop->bind(1, id);
+            drop->bind(2, key.first);
+            drop->bind(3, key.second);
+            drop->step();
+        }
+        for (const Notice &notice : now) {
             insert->reset();
             insert->bind(1, id);
-            insert->bind(2, notice.noticeDoi);
+            insert->bind(2, text(notice.noticeDoi));
             insert->bind(3, notice.kind);
-            // A null string would be stored as NULL, which these don't take: unknown is empty.
-            const auto text = [](const QString &value) { return value.isNull() ? QStringLiteral("") : value; };
             insert->bind(4, text(notice.label));
             insert->bind(5, text(notice.date));
             insert->bind(6, text(notice.source));
@@ -71,6 +93,40 @@ void NoticeRepository::record(const QList<qint64> &checked, const QHash<qint64, 
         mark->step();
     }
     transaction.commit();
+}
+
+QList<NewWarning> NoticeRepository::unseenWarnings(qint64 since)
+{
+    QList<NewWarning> warnings;
+    auto select = m_db.prepare(
+        QByteArray("SELECT n.publication_id, p.title, n.kind, n.label, n.notice_date, n.found_at "
+                   "FROM publication_notice n JOIN publication p ON p.id = n.publication_id WHERE n.kind IN ")
+        + kWarningKinds
+        + " AND n.found_at > ? AND n.publication_id NOT IN (SELECT publication_id FROM hidden_publication) "
+          "ORDER BY n.found_at DESC, p.title_sort, n.publication_id");
+    select->bind(1, since);
+    QSet<qint64> listed;
+    while (select->step()) {
+        // One line for each publication, with its newest warning.
+        const qint64 id = select->int64At(0);
+        if (listed.contains(id))
+            continue;
+        listed.insert(id);
+        NewWarning warning;
+        warning.publicationId = id;
+        warning.title = select->textAt(1);
+        warning.notice = {select->textAt(2), select->textAt(3), QString(), select->textAt(4), QString()};
+        warning.foundAt = select->int64At(5);
+        warnings << warning;
+    }
+    return warnings;
+}
+
+qint64 NoticeRepository::newestFoundAt()
+{
+    auto select = m_db.prepare("SELECT coalesce(max(found_at), 0) FROM publication_notice");
+    select->step();
+    return select->int64At(0);
 }
 
 qint64 NoticeRepository::warningCount()

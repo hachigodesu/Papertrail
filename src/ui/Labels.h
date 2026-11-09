@@ -17,6 +17,8 @@ QString readStatusLabelFromDb(const QString &value);
 QString fileStatusLabel(const QString &status); // Empty for a file with nothing wrong.
 // What the bar across a retracted or withdrawn publication's cover says. Empty for anything else.
 QString coverNoticeLabel(const QString &notice);
+// What a notice worth warning about says of its publication, such as "Retracted in 2026" or "Concerns raised".
+QString noticeWarningLabel(const QString &kind, const QString &date);
 QString tabLabel(core::LibraryTab tab);
 
 // A journal issue's numbers and date, such as "Vol. 7, No. 11, Nov 2026". Empty if there are none.

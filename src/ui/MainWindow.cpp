@@ -5,6 +5,7 @@
 #include "core/repo/FileRepository.h"
 #include "core/repo/RemovedContent.h"
 #include "core/repo/LookupRepository.h"
+#include "core/repo/NoticeRepository.h"
 #include "core/repo/PublicationMerge.h"
 #include "metadata/Matching.h"
 #include "ui/BulkChanges.h"
@@ -254,6 +255,15 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     m_summaryStatus->setToolTip(tr("Summaries from Claude, on their way or waiting for you to review them."));
     connect(m_summaryStatus, &QPushButton::clicked, this, [this] { showSummariesDialog(); });
     statusBar()->addPermanentWidget(m_summaryStatus);
+    // New retractions and concerns stay counted here until they've been looked at, even across restarts.
+    m_retractionStatus = new QPushButton(this);
+    m_retractionStatus->setObjectName(QStringLiteral("retractionStatus"));
+    m_retractionStatus->setFlat(true);
+    m_retractionStatus->setToolTip(tr("Publications in the library newly retracted, withdrawn or of concern. "
+                                      "Click to show them."));
+    m_retractionStatus->hide();
+    connect(m_retractionStatus, &QPushButton::clicked, this, &MainWindow::showNewRetractions);
+    statusBar()->addPermanentWidget(m_retractionStatus);
     connect(m_batches, &summary::SummaryBatches::changed, this, [this] {
         refreshSummaryStatus();
         if (m_details->currentId())
@@ -362,6 +372,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
             if (LookupRepository(m_session.database()).pendingCount() > 0)
                 m_lookup->kick();
         });
+        updateRetractionWarning();
         const QList<LibraryRoot> roots = m_session.files().roots();
         if (m_session.settings().value(QStringLiteral("library.rescan_on_startup")).toBool() && !roots.isEmpty())
             rescanAll();
@@ -394,7 +405,7 @@ void MainWindow::changeEvent(QEvent *event)
     if (event->type() == QEvent::ActivationChange && isActiveWindow() && m_watcher)
         m_watcher->windowActivated();
     if (event->type() == QEvent::WindowStateChange && m_lookup && !isMinimized())
-        offerReviewIfDue();
+        offerWhatsDue();
     QMainWindow::changeEvent(event);
 }
 
@@ -796,7 +807,7 @@ void MainWindow::buildCentre()
     connect(m_documentTabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeDocumentTab);
     connect(m_documentTabs, &QTabWidget::currentChanged, this, [this](int index) {
         if (index == 0 && m_lookup)
-            offerReviewIfDue();
+            offerWhatsDue();
     });
     setCentralWidget(m_documentTabs);
     syncSortControls();
@@ -996,7 +1007,7 @@ void MainWindow::connectImport()
         if (busy)
             m_lookupLabel->setText(tr("Looking up details..."));
         else
-            offerReviewIfDue();
+            offerWhatsDue();
     });
     connect(m_index, &IndexThread::busyChanged, this, [this](bool busy) {
         m_indexLabel->setVisible(busy);
@@ -1026,17 +1037,7 @@ void MainWindow::connectImport()
         if (const std::optional<qint64> shown = m_details->currentId(); shown && ids.contains(*shown))
             m_details->reload();
     });
-    connect(m_lookup, &LookupThread::noticesChecked, this, [this](int, int newWarnings) {
-        if (newWarnings > 0) {
-            statusBar()->showMessage(newWarnings == 1
-                                         ? tr("1 publication in the library has been retracted or had concerns raised. See Retracted or "
-                                              "of concern in the filters.")
-                                         : tr("%1 publications in the library have been retracted or had concerns raised. See Retracted "
-                                              "or of concern in the filters.")
-                                               .arg(newWarnings),
-                                     30000);
-        }
-    });
+    connect(m_lookup, &LookupThread::noticesChecked, this, [this](int, int) { updateRetractionWarning(); });
     // Notices come out long after a paper does, so the library's checked now and then: a little after opening,
     // then every few hours, each publication at most once a month.
     if (m_session.paths().noticeCheckIntervalMs < 0) {
@@ -2588,6 +2589,115 @@ void MainWindow::updateReviewButton()
     });
 }
 
+void MainWindow::offerWhatsDue()
+{
+    offerRetractionsIfDue();
+    offerReviewIfDue();
+}
+
+// What's new since the user last looked is counted in the status bar. The first time a library's opened by a version
+// that does this, whatever it already had counts as seen: the status bar and covers said so then.
+void MainWindow::updateRetractionWarning()
+{
+    guarded(tr("Reading the notices"), [&] {
+        NoticeRepository notices(m_session.database());
+        SettingsStore &settings = m_session.settings();
+        const QString key = QStringLiteral("notices.seen_until");
+        auto seenUntil = qint64(settings.value(key).toDouble());
+        if (seenUntil == 0) {
+            seenUntil = std::max<qint64>(notices.newestFoundAt(), 1);
+            settings.setValue(key, double(seenUntil));
+        }
+        const qint64 count = notices.unseenWarnings(seenUntil).size();
+        m_retractionStatus->setText(count == 1 ? tr("1 new retraction or concern")
+                                               : tr("%1 new retractions or concerns").arg(QLocale().toString(count)));
+        m_retractionStatus->setVisible(count > 0);
+        if (count == 0 && m_retractionOffer)
+            m_retractionOffer->close();
+    });
+    offerWhatsDue();
+}
+
+// Like the offer to review, it doesn't block the window or take the keyboard, and waits rather than interrupt someone
+// reading. Each one is offered once; after that the status bar keeps count.
+void MainWindow::offerRetractionsIfDue()
+{
+    guarded(tr("Reading the notices"), [&] {
+        if (m_retractionOffer || m_reviewOffer)
+            return;
+        if (m_documentTabs->currentIndex() != 0 || QApplication::activeModalWidget() || isMinimized())
+            return;
+        SettingsStore &settings = m_session.settings();
+        const auto seenUntil = qint64(settings.value(QStringLiteral("notices.seen_until")).toDouble());
+        const auto offeredUntil = qint64(settings.value(QStringLiteral("notices.offered_until")).toDouble());
+        const QList<NewWarning> warnings = NoticeRepository(m_session.database()).unseenWarnings(seenUntil);
+        if (warnings.isEmpty() || warnings.first().foundAt <= offeredUntil)
+            return;
+        settings.setValue(QStringLiteral("notices.offered_until"), double(warnings.first().foundAt));
+
+        // Titles come from documents, so this is all plain text.
+        QStringList lines;
+        constexpr int kListed = 5;
+        for (int i = 0; i < std::min<int>(kListed, int(warnings.size())); ++i) {
+            const NewWarning &warning = warnings.at(i);
+            const QString title = warning.title.trimmed().isEmpty() ? tr("Untitled") : warning.title.simplified();
+            lines << tr("%1: %2").arg(noticeWarningLabel(warning.notice.kind, warning.notice.date), title);
+        }
+        if (warnings.size() > kListed)
+            lines << tr("And %1 more.").arg(QLocale().toString(warnings.size() - kListed));
+
+        auto *box = new QMessageBox(
+            QMessageBox::Warning, tr("New retractions"),
+            warnings.size() == 1
+                ? tr("A publication in your library has been retracted, withdrawn or had concerns raised about it.")
+                : tr("%1 in your library have been retracted, withdrawn or had concerns raised about them.")
+                      .arg(publicationCount(warnings.size())),
+            QMessageBox::NoButton, this);
+        box->setObjectName(QStringLiteral("retractionOffer"));
+        box->setTextFormat(Qt::PlainText);
+        box->setInformativeText(lines.join(u'\n'));
+        box->setWindowModality(Qt::NonModal);
+        box->setAttribute(Qt::WA_DeleteOnClose);
+        box->setAttribute(Qt::WA_ShowWithoutActivating);
+        QPushButton *show = box->addButton(tr("Show them"), QMessageBox::AcceptRole);
+        show->setObjectName(QStringLiteral("showRetractions"));
+        QPushButton *later = box->addButton(tr("Later"), QMessageBox::RejectRole);
+        later->setObjectName(QStringLiteral("retractionsLater"));
+        box->setDefaultButton(show);
+        box->setEscapeButton(later);
+        connect(show, &QPushButton::clicked, this, &MainWindow::showNewRetractions);
+        // The offer to review waits for this one.
+        connect(box, &QObject::destroyed, this, [this] { QTimer::singleShot(0, this, &MainWindow::offerReviewIfDue); });
+        m_retractionOffer = box;
+        box->show();
+    });
+}
+
+// Shows everything retracted or of concern, and counts what's new as seen.
+void MainWindow::showNewRetractions()
+{
+    guarded(tr("Reading the notices"), [&] {
+        SettingsStore &settings = m_session.settings();
+        const QString key = QStringLiteral("notices.seen_until");
+        const QList<NewWarning> warnings =
+            NoticeRepository(m_session.database()).unseenWarnings(qint64(settings.value(key).toDouble()));
+        if (!warnings.isEmpty())
+            settings.setValue(key, double(warnings.first().foundAt));
+    });
+    m_documentTabs->setCurrentIndex(0);
+    SidebarChoices choices = m_sidebar->choices();
+    QList<QPair<QString, QString>> &status = choices.values[FilterSidebar::Status];
+    const bool chosen = std::any_of(status.cbegin(), status.cend(), [](const QPair<QString, QString> &value) {
+        return value.first == QLatin1StringView("retracted");
+    });
+    if (!chosen) {
+        status.append({QStringLiteral("retracted"), tr("Retracted or of concern")});
+        m_sidebar->setChoices(choices);
+        applyFilters();
+    }
+    updateRetractionWarning();
+}
+
 // Comes up once everything has finished, so that a large import doesn't bring up one after another. It
 // doesn't block the window or take the keyboard, and it waits rather than interrupt someone reading.
 void MainWindow::offerReviewIfDue()
@@ -2595,7 +2705,7 @@ void MainWindow::offerReviewIfDue()
     guarded(tr("Reading the lookups"), [&] {
         LookupRepository lookups(m_session.database());
         const qint64 count = lookups.waitingForReviewCount();
-        if (count <= m_reviewCountSeen || m_reviewOffer)
+        if (count <= m_reviewCountSeen || m_reviewOffer || m_retractionOffer)
             return;
         if (m_import->isBusy() || m_lookup->isBusy() || lookups.pendingCount() > 0)
             return;
@@ -2721,7 +2831,7 @@ void MainWindow::showFoldersDialog()
     connect(&dialog, &LibraryFoldersDialog::removedListRequested, this, &MainWindow::showRemovedPublications);
     dialog.exec();
     m_foldersDialog = nullptr;
-    offerReviewIfDue();
+    offerWhatsDue();
 }
 
 void MainWindow::changeRootLocation(qint64 rootId)
@@ -2939,7 +3049,7 @@ void MainWindow::onImportBusyChanged(bool busy)
         m_foldersDialog->setImportRunning(busy);
     updateStack();
     if (!busy) {
-        offerReviewIfDue();
+        offerWhatsDue();
         kickIndexing();
     }
 }

@@ -80,6 +80,18 @@ QString coverNoticeLabel(const QString &notice)
     return {};
 }
 
+QString noticeWarningLabel(const QString &kind, const QString &date)
+{
+    const QString year = date.left(4);
+    if (kind == QLatin1StringView("expression_of_concern"))
+        return year.isEmpty() ? tr("Concerns raised") : tr("Concerns raised in %1").arg(year);
+    if (kind == QLatin1StringView("withdrawal") || kind == QLatin1StringView("removal"))
+        return year.isEmpty() ? tr("Withdrawn") : tr("Withdrawn in %1").arg(year);
+    if (kind == QLatin1StringView("partial_retraction"))
+        return year.isEmpty() ? tr("Partly retracted") : tr("Partly retracted in %1").arg(year);
+    return year.isEmpty() ? tr("Retracted") : tr("Retracted in %1").arg(year);
+}
+
 QString issueNumbering(const QString &volume, const QString &issue, std::optional<int> month, std::optional<int> year)
 {
     QStringList parts;

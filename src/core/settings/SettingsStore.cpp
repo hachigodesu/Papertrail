@@ -80,6 +80,11 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("window.geometry"), QStringLiteral(""), K::ThisComputer, {}},
         {QStringLiteral("window.splitter"), QStringLiteral(""), K::ThisComputer, {}},
         {QStringLiteral("window.list_columns"), QStringLiteral(""), K::ThisComputer, {}},
+        // When the newest retraction or concern the user has been told about was first found, in ms since the epoch.
+        // Kept out of exports, since another library's notices are found at other times.
+        {QStringLiteral("notices.seen_until"), 0.0, K::ThisComputer, {}},
+        // The same for the newest one offered, so each is only offered once.
+        {QStringLiteral("notices.offered_until"), 0.0, K::ThisComputer, {}},
         {QStringLiteral("reader.page_layout"), QStringLiteral("continuous"), K::Value,
          {QStringLiteral("single"), QStringLiteral("two_page"), QStringLiteral("continuous")}},
         {QStringLiteral("reader.page_colours"), QStringLiteral("light"), K::Value,

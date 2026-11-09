@@ -14,6 +14,7 @@
 #include "metadata/Transport.h"
 #include "ui/Delegates.h"
 #include "ui/DetailsPanel.h"
+#include "ui/FilterSidebar.h"
 #include "ui/ImportThread.h"
 #include "ui/LibrarySession.h"
 #include "ui/LookupThread.h"
@@ -1267,6 +1268,104 @@ private slots:
         QVERIFY(listed);
     }
 
+    void noticesKeepWhenTheyWereFirstFound()
+    {
+        const qint64 one = addPublication(QStringLiteral("Made Up Study One"), QStringLiteral("10.1000/one"), false);
+        const qint64 two = addPublication(QStringLiteral("Made Up Study Two"), QStringLiteral("10.1000/two"), false);
+        const Notice concern{QStringLiteral("expression_of_concern"), QStringLiteral("Expression of concern"),
+                             QStringLiteral("10.1000/n1"), QStringLiteral("2021"), QStringLiteral("publisher")};
+        const Notice correction{QStringLiteral("correction"), QStringLiteral("Correction"), QStringLiteral("10.1000/n2"),
+                                QString(), QString()};
+        NoticeRepository notices(*m_db);
+        QCOMPARE(notices.newestFoundAt(), qint64(0));
+        notices.record({one, two}, {{one, {concern}}, {two, {correction}}}, 1000);
+
+        // Only the concern is worth warning about.
+        QList<NewWarning> unseen = notices.unseenWarnings(500);
+        QCOMPARE(unseen.size(), 1);
+        QCOMPARE(unseen.first().publicationId, one);
+        QCOMPARE(unseen.first().title, QStringLiteral("Made Up Study One"));
+        QCOMPARE(unseen.first().notice.kind, QStringLiteral("expression_of_concern"));
+        QCOMPARE(unseen.first().foundAt, qint64(1000));
+
+        // Found again, it's still from when it was first found, so nothing's new.
+        notices.record({one, two}, {{one, {concern}}, {two, {correction}}}, 2000);
+        QVERIFY(notices.unseenWarnings(1000).isEmpty());
+        QCOMPARE(notices.forPublication(one).size(), 1);
+
+        // A concern that becomes a retraction is new.
+        const Notice retraction{QStringLiteral("retraction"), QStringLiteral("Retraction"), QStringLiteral("10.1000/n3"),
+                                QStringLiteral("2022-05"), QStringLiteral("publisher")};
+        notices.record({one}, {{one, {concern, retraction}}}, 3000);
+        unseen = notices.unseenWarnings(1000);
+        QCOMPARE(unseen.size(), 1); // Listed once, with its newest.
+        QCOMPARE(unseen.first().notice.kind, QStringLiteral("retraction"));
+        QCOMPARE(unseen.first().notice.date, QStringLiteral("2022-05"));
+        QCOMPARE(unseen.first().foundAt, qint64(3000));
+        QCOMPARE(notices.newestFoundAt(), qint64(3000));
+
+        // One that's gone when checked again is gone here too.
+        notices.record({one}, {{one, {retraction}}}, 4000);
+        QCOMPARE(notices.forPublication(one).size(), 1);
+        QCOMPARE(notices.forPublication(one).first().kind, QStringLiteral("retraction"));
+
+        // Nothing in a removed folder is warned about.
+        m_db->exec(QStringLiteral("INSERT INTO hidden_publication (publication_id) VALUES (%1)").arg(one).toUtf8().constData());
+        QVERIFY(notices.unseenWarnings(0).isEmpty());
+    }
+
+    void newRetractionsAreCountedAndOffered()
+    {
+        openFakeWindow();
+        const qint64 id = addSessionPublication(QStringLiteral("Made Up Study"), QStringLiteral("10.1000/made.up"));
+        SettingsStore &settings = m_session->settings();
+        const QString key = QStringLiteral("notices.seen_until");
+        // An empty library has nothing it's already been told about.
+        QTRY_VERIFY_WITH_TIMEOUT(settings.value(key).toDouble() > 0, kWaitMs);
+        QPushButton *status = m_window->retractionStatusButton();
+        QVERIFY(!status->isVisibleTo(m_window.get()));
+
+        const qint64 found = qint64(settings.value(key).toDouble()) + 1000;
+        const Notice retraction{QStringLiteral("retraction"), QStringLiteral("Retraction"), QStringLiteral("10.1000/notice"),
+                                QStringLiteral("2022-01-02"), QStringLiteral("publisher")};
+        NoticeRepository(m_session->database()).record({id}, {{id, {retraction}}}, found);
+        m_window->updateRetractionWarning();
+        QVERIFY(status->isVisibleTo(m_window.get()));
+        QCOMPARE(status->text(), QStringLiteral("1 new retraction or concern"));
+
+        // It's offered without taking the keyboard, naming the publication as plain text.
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->retractionOffer() != nullptr, kWaitMs);
+        QMessageBox *offer = m_window->retractionOffer();
+        QCOMPARE(offer->textFormat(), Qt::PlainText);
+        QVERIFY(offer->testAttribute(Qt::WA_ShowWithoutActivating));
+        QVERIFY2(offer->informativeText().contains(QStringLiteral("Retracted in 2022: Made Up Study")),
+                 qPrintable(offer->informativeText()));
+        // Only once: asking again doesn't bring up another.
+        offer->findChild<QPushButton *>(QStringLiteral("retractionsLater"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->retractionOffer() == nullptr, kWaitMs);
+        m_window->updateRetractionWarning();
+        QVERIFY(m_window->retractionOffer() == nullptr);
+        QVERIFY(status->isVisibleTo(m_window.get())); // Still counted until it's looked at.
+
+        // Counted across restarts, but not offered again.
+        m_window.reset();
+        m_session.reset();
+        openFakeWindow();
+        status = m_window->retractionStatusButton();
+        QTRY_VERIFY_WITH_TIMEOUT(status->isVisibleTo(m_window.get()), kWaitMs);
+        QTest::qWait(200);
+        QVERIFY(m_window->retractionOffer() == nullptr);
+
+        // Showing them chooses the filter, and counts them as seen.
+        status->click();
+        QCOMPARE(qint64(m_session->settings().value(key).toDouble()), found);
+        QVERIFY(!status->isVisibleTo(m_window.get()));
+        PublicationFilter filter;
+        m_window->sidebar()->applyTo(filter);
+        QVERIFY(filter.retracted);
+        QCOMPARE(m_window->documentTabs()->currentIndex(), 0);
+    }
+
     void goingOfflineDropsWhatsWaiting()
     {
         LocalServer server; // It never answers usefully, so jobs are still queued or in progress.
@@ -1600,6 +1699,8 @@ private:
         m_window = std::make_unique<MainWindow>(*m_session);
         m_window->resize(1200, 800);
         m_window->show();
+        // Lets the window finish starting, which notes what was already waiting, before a test adds to it.
+        QCoreApplication::processEvents();
     }
 
     // With the real network code, and every source pointed at a server in this test.

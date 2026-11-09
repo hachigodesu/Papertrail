@@ -96,6 +96,11 @@ public:
     QAction *indexContentsAction() const { return m_indexContents; }
     QPushButton *reviewButton() const { return m_reviewButton; }
     QMessageBox *reviewOffer() const { return m_reviewOffer; }
+    // New retractions and concerns: the count in the status bar, the offer to show them, and showing them.
+    QPushButton *retractionStatusButton() const { return m_retractionStatus; }
+    QMessageBox *retractionOffer() const { return m_retractionOffer; }
+    void updateRetractionWarning();
+    void showNewRetractions();
 
     // Stops importing until something asks for it again by hand, or until the next start.
     void stopImport();
@@ -283,6 +288,8 @@ private:
     void afterFoldersChanged();
     void letGoOfHidden();
     void offerReviewIfDue();
+    void offerRetractionsIfDue();
+    void offerWhatsDue(); // Retractions first, then details to review.
     void deletePublications(const QList<qint64> &ids);
     void askForBulkTag();
     void askToAddSelectedToNewCollection();
@@ -348,6 +355,8 @@ private:
     QPointer<ReviewTab> m_reviewTab; // Cleared when its tab is closed, even while the window itself is closing.
     QPointer<QMessageBox> m_reviewOffer;
     qint64 m_reviewCountSeen = 0; // Offers are only for what's been added since the last one.
+    QPointer<QMessageBox> m_retractionOffer;
+    QPushButton *m_retractionStatus = nullptr;
     QPushButton *m_reviewButton = nullptr;
     QLabel *m_lookupLabel = nullptr;
     QPushButton *m_lookupStop = nullptr;
