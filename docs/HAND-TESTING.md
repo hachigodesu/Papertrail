@@ -1,8 +1,8 @@
 # Testing M12 by hand
 
-M12 makes Papertrail into packages you can install. These were built and tested automatically, but nobody has installed them by hand yet. This list covers Windows. [LINUX-CHECKLIST.md](LINUX-CHECKLIST.md) covers your Linux machine.
+M12 makes Papertrail into packages you can install. This list covers Windows. [LINUX-CHECKLIST.md](LINUX-CHECKLIST.md) covers a Linux machine.
 
-Nothing from M12 is committed yet.
+**Done:** you went through this list on Windows, and the AUR package on Arch, before releasing 1.0.0. It's kept for trying later releases the same way, with the packages from the release's page rather than `build/package-output`.
 
 ## Before you start
 

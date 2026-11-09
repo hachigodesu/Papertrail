@@ -3,7 +3,7 @@
 # Papertrail for Arch, built from a release's source with Arch's own Qt, MuPDF and DjVuLibre. The libraries
 # Papertrail pins and builds itself are listed as sources, so nothing is downloaded during build().
 #
-# For a release, set pkgver and run `updpkgsums`. To try the current checkout instead, see test-pkgbuild.sh.
+# For a new release, set pkgver, push its tag, then run `updpkgsums`. To try the current checkout, see test-pkgbuild.sh.
 
 pkgname=papertrail
 pkgver=1.0.0
@@ -19,7 +19,7 @@ source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         "libmobi-0.12.tar.gz::https://github.com/bfabiszewski/libmobi/archive/refs/tags/v0.12.tar.gz"
         "qtkeychain-0.15.0.tar.gz::https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz")
 noextract=("sqlite-amalgamation-3540100.zip")
-sha256sums=('SKIP'
+sha256sums=('d843e6ada72707d605b186e778f6955d665269c7323bb1b001f81fc8e24bfdaa'
             '0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9'
             '78826d161c02ce93ff1cd62838b4d749df754f52185474b82e4093badf4689c1'
             'f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22')

@@ -19,6 +19,9 @@ git -c safe.directory="$src" -C "$src" ls-files -z --cached --others --exclude-s
 sed "s|^source=(\"\$pkgname-\$pkgver.tar.gz::[^\"]*\"|source=(\"\$pkgname-\$pkgver.tar.gz\"|" \
     "$src/packaging/arch/PKGBUILD" > "$work/PKGBUILD"
 grep -q '^source=("$pkgname-$pkgver.tar.gz"' "$work/PKGBUILD" || { echo "FAILED: couldn't point the PKGBUILD at the checkout" >&2; exit 1; }
+# The checkout's own archive isn't the release's, so its checksum is skipped. The libraries' are still checked.
+sed -i "s/^sha256sums=('[0-9a-f]*'/sha256sums=('SKIP'/" "$work/PKGBUILD"
+grep -q "^sha256sums=('SKIP'" "$work/PKGBUILD" || { echo "FAILED: couldn't skip the checkout's checksum" >&2; exit 1; }
 
 mkdir -p "$out"
 (cd "$work" && PKGDEST="$out" makepkg --force --cleanbuild --noconfirm)

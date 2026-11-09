@@ -1,6 +1,8 @@
 # M12 results
 
-Built and tested on 9 November 2026 on the development PC. The Windows packages were built and self-tested here. The Linux packages are built by CI. Nothing has been installed by hand yet: see `docs/HAND-TESTING.md` for Windows and `docs/LINUX-CHECKLIST.md` for a Linux desktop.
+Built and tested on 9 November 2026 on the development PC. The Windows packages were built and self-tested here, and every package is built and self-tested by CI. You tried the Windows installer and portable zip by hand, and the AUR package on your Arch machine.
+
+**Papertrail 1.0.0 is released.** The repository is public, [v1.0.0](https://github.com/hachigodesu/Papertrail/releases/tag/v1.0.0) is published as the latest release with every package, and private vulnerability reporting is on, as `SECURITY.md` describes.
 
 M12 turns Papertrail into something to install: a Windows installer and portable zip, an AppImage, a Flatpak and an AUR package, with a first-run welcome, licences, a self-test every package runs, tests against damaged files, and a release workflow that makes a draft release.
 
@@ -82,14 +84,15 @@ Pushing a tag such as `v1.0.0` runs `.github/workflows/release.yml`. It checks t
 - **Automated:** all 19 test programs pass on Windows, Arch and Ubuntu. The speed tests pass with a release build on Windows.
 - **The Windows packages** were built here, and the packaged program's self-test passed with nothing but Windows' own folders on its path.
 - **The AUR package** was built on Arch from this checkout with `test-pkgbuild.sh`. Its self-test passed in `check()`, and it installs the program, its worker, the desktop file, icon, AppStream file and licences where Arch expects them.
+- **CI:** every workflow passes, including the Windows package's silent install, self-test and uninstall, the AppImage's self-test on six distros, the Flatpak's self-test in its sandbox, and the sanitizers. The release workflow built v1.0.0's packages from its tag.
+- **By you:** the Windows installer, for just you and for everyone, uninstalling, the portable zip, the welcome page, and choosing several notes at once, on Windows. The AUR package on Arch.
+- **The AUR package's source checksum** was filled in after the tag existed, from two downloads of GitHub's archive that agreed. The other three sources' checksums match the ones CMake and the Flatpak already check.
 - **Not tested yet:**
-  - Installing anything by hand, on Windows or Linux.
-  - The new CI workflows (Windows package, Flatpak, sanitizers and release), which run once this is pushed.
-  - The Flatpak, which has only been written. CI builds it for the first time.
+  - The AppImage and Flatpak on a desktop by hand, and Ubuntu or any other distro by hand. CI's checks on six distros cover starting and reading documents, but not using it.
   - A clean Windows machine without MSYS2. The self-test runs without MSYS2 on PATH, but MSYS2 is still installed here.
 
 ## Known limits
 
 - **SmartScreen warns** about the unsigned installer until enough people have run it.
-- **The AppStream release date** is set to today, and should be updated to the real date when the release is published.
+- **The AppStream file needs a new `<release>` for each version,** which the release workflow checks for, as it does the version in `CMakeLists.txt` and the PKGBUILD.
 - **The icon is a placeholder.**
