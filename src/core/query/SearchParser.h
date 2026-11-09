@@ -19,6 +19,7 @@ namespace papertrail::core {
 //   tag:name            a tag whose name starts with this, plus everything beneath it
 //   doi: isbn: issn: arxiv:   identifiers, in any common written form
 //   type:thesis         a publication type
+//   in:"issue title"    an article in an issue, proceedings or book whose title has these words
 //   year:2010  year:>2010  year:>=2010  year:<2010  year:<=2010  year:2010..2020
 //
 // Anything else with a colon is treated as ordinary text, so it never causes an error.
@@ -32,6 +33,9 @@ struct ParsedSearch {
     // What note: asks for, matched against highlights, notes on pages and a publication's own notes. Each is an
     // FTS5 expression, and all of them must match.
     QStringList notesMatches;
+    // What in: asks for, matched against the title of what holds an article. Each is an FTS5 expression on the
+    // title column, and all of them must match.
+    QStringList inMatches;
     QStringList tagPrefixes;
     QStringList doiPrefixes;
     QStringList isbns;

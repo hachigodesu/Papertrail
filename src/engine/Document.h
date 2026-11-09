@@ -105,6 +105,8 @@ public:
     // These are empty where a format doesn't support them.
     virtual QList<OutlineItem> outline() { return {}; }
     virtual QList<PageLink> links(int) { return {}; }
+    // Where a page's pictures are, in points, so dark pages can leave them as they are.
+    virtual QList<QRectF> imageAreas(int) { return {}; }
     virtual QList<QRectF> search(int, const QString &) { return {}; }
 
     // The text between two points on a page, as a reader would select it by dragging.

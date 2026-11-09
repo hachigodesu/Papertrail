@@ -358,10 +358,7 @@ void ReaderTab::buildToolbar()
     m_wholeFile->setCheckable(true);
     m_wholeFileAction = m_toolbar->addWidget(m_wholeFile);
     m_wholeFileAction->setVisible(false);
-    m_toolbar->addSeparator();
-    m_highlightAction = m_toolbar->addAction(tr("Highlight"), this, [this] { annotateSelection(AnnotationType::Highlight); });
-    m_highlightAction->setToolTip(tr("Highlights the selected text. Right-click it for colours, underlining and notes."));
-    m_highlightAction->setEnabled(false);
+    // Highlighting is in the menu from right-clicking a selection, with its colours, underlining and notes.
     m_toolbar->addSeparator();
 
     m_backButton = button(QStringLiteral("←"), tr("Back to where the last link was followed"), [this] { m_view->goBack(); });
@@ -567,6 +564,7 @@ void ReaderTab::connectClient()
     connect(m_client, &DocumentClient::pageFailed, m_view, &PageView::setPageFailed);
     connect(m_client, &DocumentClient::thumbnailReady, m_thumbnailModel, &ThumbnailModel::setThumbnail);
     connect(m_client, &DocumentClient::linksReady, m_view, &PageView::setLinks);
+    connect(m_client, &DocumentClient::imageAreasReady, m_view, &PageView::setImageAreas);
     connect(m_client, &DocumentClient::outlineReady, this, &ReaderTab::onOutline);
     connect(m_client, &DocumentClient::selectionReady, m_view, &PageView::setSelection);
     connect(m_client, &DocumentClient::searchHits, this, &ReaderTab::onSearchHits);
@@ -606,12 +604,9 @@ void ReaderTab::connectClient()
 
     connect(m_view, &PageView::pagesWanted, m_client, &DocumentClient::setWantedPages);
     connect(m_view, &PageView::linksWanted, m_client, &DocumentClient::requestLinks);
+    connect(m_view, &PageView::imageAreasWanted, m_client, &DocumentClient::requestImageAreas);
     connect(m_view, &PageView::selectionWanted, m_client, &DocumentClient::requestSelection);
     connect(m_view, &PageView::contextMenuWanted, this, &ReaderTab::addAnnotationActions);
-    connect(m_view, &PageView::selectionChanged, this, [this] {
-        if (m_highlightAction)
-            m_highlightAction->setEnabled(m_view->hasSelection());
-    });
     connect(m_client, &DocumentClient::anchored, this, &ReaderTab::onAnchored);
     connect(m_client, &DocumentClient::located, this, &ReaderTab::onLocated);
     connect(m_view, &PageView::currentPageChanged, this, [this] { updatePageBox(); });
@@ -879,6 +874,24 @@ void ReaderTab::onOutline(const QList<ReaderOutlineItem> &items)
         entry->setData(0, kPointRole, item.y);
         entry->setData(0, kNoPageRole, item.page < 0);
         parents << entry;
+    }
+    // Entries that are still only a number, such as an issue's cover and front pages, say nothing beside
+    // titled ones, so they go. Where every entry is a number they're all there is to go by, so they stay.
+    QList<QTreeWidgetItem *> numberOnly;
+    bool anyTitled = false;
+    for (QTreeWidgetItemIterator it(m_contents); *it; ++it) {
+        if (isPlaceholderTitle((*it)->text(0)))
+            numberOnly << *it;
+        else
+            anyTitled = true;
+    }
+    if (anyTitled) {
+        // Deepest first, so an entry left with nothing beneath it can go too. One with titled entries
+        // beneath it stays, since it holds them together.
+        for (auto it = numberOnly.crbegin(); it != numberOnly.crend(); ++it) {
+            if ((*it)->childCount() == 0)
+                delete *it;
+        }
     }
     m_contents->expandToDepth(0);
     applyArticleRange();

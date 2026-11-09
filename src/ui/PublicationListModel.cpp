@@ -190,6 +190,8 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
         if (index.column() != TitleColumn)
             return {};
         QString text = row->title;
+        if (const QString notice = coverNoticeLabel(row->coverNotice); !notice.isEmpty())
+            text += u'\n' + notice;
         if (row->needsReview)
             text += u'\n' + tr("Needs checking");
         const QString problem = fileStatusLabel(row->fileStatus);
@@ -216,6 +218,7 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
     case FormatsRole: return row->formats.join(QStringLiteral(", ")).toUpper();
     case FileStatusRole: return row->fileStatus;
     case NeedsReviewRole: return row->needsReview;
+    case CoverNoticeRole: return row->coverNotice;
     case NumberingRole:
         return row->type == PublicationType::JournalIssue ? issueNumbering(row->volume, row->issue, row->month, row->year)
                                                           : QString();

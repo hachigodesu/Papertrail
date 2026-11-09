@@ -280,6 +280,49 @@ private slots:
         QCOMPARE(titlesFor(QStringLiteral("isbn:978-0-306-40615-7")), (QSet<QString>{QStringLiteral("The Art of Bridges")}));
     }
 
+    void inFindsTheArticlesOfAnIssue()
+    {
+        QCOMPARE(titlesFor(QStringLiteral("in:\"Structures Volume 1\"")), (QSet<QString>{QStringLiteral("Old Beams")}));
+        QCOMPARE(titlesFor(QStringLiteral("in:struct")), (QSet<QString>{QStringLiteral("Old Beams")})); // Prefix.
+        QCOMPARE(titlesFor(QStringLiteral("in:struct beams")), (QSet<QString>{QStringLiteral("Old Beams")}));
+        QCOMPARE(titlesFor(QStringLiteral("in:struct fatigue")).size(), 0); // Its own words must match too.
+        QCOMPARE(titlesFor(QStringLiteral("in:\"Volume 2\"")).size(), 0);
+        // Only what holds an article is looked at, not the article's own title.
+        QCOMPARE(titlesFor(QStringLiteral("in:beams")).size(), 0);
+    }
+
+    void anIssuesArticlesAreBestMatchedInPageOrder()
+    {
+        // Added out of order, and titled so that title order differs from page order.
+        Publication issue;
+        issue.type = PublicationType::JournalIssue;
+        issue.title = QStringLiteral("Ordered Issue 7");
+        const qint64 issueId = m_publications->create(issue);
+        const QList<QPair<QString, int>> articles = {
+            {QStringLiteral("Alpha Comes Last"), 30}, {QStringLiteral("Zeta Comes First"), 2}, {QStringLiteral("Middle Piece"), 11}};
+        for (const auto &[title, page] : articles) {
+            Publication article;
+            article.type = PublicationType::JournalArticle;
+            article.title = title;
+            article.parentId = issueId;
+            article.pageStart = page;
+            m_publications->create(article);
+        }
+        PublicationFilter filter;
+        filter.searchText = QStringLiteral("in:\"Ordered Issue 7\"");
+        const auto titlesInOrder = [&](SortField field) {
+            QStringList titles;
+            for (const qint64 id : m_query->ids(filter, PublicationSort{field, true}))
+                titles << m_publications->get(id)->title;
+            return titles;
+        };
+        QCOMPARE(titlesInOrder(SortField::Relevance),
+                 (QStringList{QStringLiteral("Zeta Comes First"), QStringLiteral("Middle Piece"), QStringLiteral("Alpha Comes Last")}));
+        // A sort chosen by hand still applies.
+        QCOMPARE(titlesInOrder(SortField::Title),
+                 (QStringList{QStringLiteral("Alpha Comes Last"), QStringLiteral("Middle Piece"), QStringLiteral("Zeta Comes First")}));
+    }
+
     void searchFindsHighlightsAndNotes()
     {
         AnnotationRepository annotations(*m_db);

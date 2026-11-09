@@ -187,7 +187,6 @@ private:
 
     QWidget *m_annotationPanel = nullptr;
     QListWidget *m_annotationList = nullptr;
-    QAction *m_highlightAction = nullptr;
 
     qint64 m_publicationId;
     qint64 m_fileId;

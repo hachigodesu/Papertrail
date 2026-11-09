@@ -115,6 +115,17 @@ private slots:
         QCOMPARE(parsed.ftsMatch, QStringLiteral("\"recent\"*"));
     }
 
+    void inLooksAtTheTitleOfWhatHoldsAnArticle()
+    {
+        // Its words are for the holder's title, not the article's own details.
+        const ParsedSearch parsed = parseSearch(QStringLiteral("in:\"structures volume 1\" beams in:old"));
+        QCOMPARE(parsed.inMatches, (QStringList{QStringLiteral("title : \"structures volume 1\""), QStringLiteral("title : \"old\"*")}));
+        QCOMPARE(parsed.ftsMatch, QStringLiteral("\"beams\"*"));
+        QVERIFY(parseSearch(QStringLiteral("in:")).inMatches.isEmpty());
+        // A quote in the value can't escape the expression.
+        QCOMPARE(parseSearch(QStringLiteral("in:\"a\"\"b\"")).inMatches.size(), 1);
+    }
+
     void typesMatchByNameOrWord()
     {
         QCOMPARE(parseSearch(QStringLiteral("type:thesis")).types, QList<PublicationType>{PublicationType::Thesis});

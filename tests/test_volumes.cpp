@@ -11,12 +11,14 @@
 #include "import/ImportService.h"
 #include "import/JournalIssues.h"
 #include "ui/CitationActions.h"
+#include "ui/Delegates.h"
 #include "ui/DetailsPanel.h"
 #include "ui/Labels.h"
 #include "ui/ImportThread.h"
 #include "ui/LibrarySession.h"
 #include "ui/MainWindow.h"
 #include "ui/PageView.h"
+#include "ui/PublicationListModel.h"
 #include "ui/ReaderTab.h"
 #include "ui/VolumeDialogs.h"
 
@@ -886,6 +888,11 @@ private slots:
         QVERIFY(list->item(0)->text().startsWith(QStringLiteral("Earlier Article"))); // In page order.
         QVERIFY(list->item(0)->text().contains(QStringLiteral("1")));
         QCOMPARE(list->item(0)->data(Qt::UserRole).toLongLong(), ids.at(1));
+        // The title and pages are drawn apart, the title wrapping rather than cut off.
+        QCOMPARE(list->item(0)->data(ArticleDelegate::TitleRole).toString(), QStringLiteral("Earlier Article"));
+        QVERIFY(list->item(0)->data(ArticleDelegate::PagesRole).toString().contains(QStringLiteral("1")));
+        QVERIFY(list->wordWrap());
+        QVERIFY(qobject_cast<ArticleDelegate *>(list->itemDelegate()) != nullptr);
         QVERIFY(!details->partOfLabel()->isVisibleTo(details));
 
         // Opening one from the list.
@@ -1007,11 +1014,19 @@ private slots:
         draft.lastPage = 3;
         createArticles(m_session->database(), volume, {draft}, false);
 
+        // Entries that are still only numbers say nothing beside it, so they're left out.
+        ReaderTab *reader = m_window->openPublication(volume);
+        QTRY_COMPARE_WITH_TIMEOUT(reader->contents()->topLevelItemCount(), 1, kLongWaitMs);
+        QCOMPARE(reader->contents()->topLevelItem(0)->text(0), QStringLiteral("Named In The Library"));
+    }
+
+    void contentsOfOnlyNumbersAreKept()
+    {
+        // With no titled entry, the numbers are all there is to find the way by.
+        const qint64 volume = importVolume(QStringLiteral("numbered_issue.pdf"));
         ReaderTab *reader = m_window->openPublication(volume);
         QTRY_COMPARE_WITH_TIMEOUT(reader->contents()->topLevelItemCount(), 3, kLongWaitMs);
         QCOMPARE(reader->contents()->topLevelItem(0)->text(0), QStringLiteral("01"));
-        QCOMPARE(reader->contents()->topLevelItem(1)->text(0), QStringLiteral("Named In The Library"));
-        QCOMPARE(reader->contents()->topLevelItem(2)->text(0), QStringLiteral("03"));
     }
 
     void longContentsTitlesWrapToThePanelsWidth()
@@ -1027,15 +1042,16 @@ private slots:
         m_window->resize(1200, 800);
         ReaderTab *reader = m_window->openPublication(volume);
         QTreeWidget *contents = reader->contents();
-        QTRY_COMPARE_WITH_TIMEOUT(contents->topLevelItemCount(), 3, kLongWaitMs);
+        // Only the titled entry is left: the others are only numbers.
+        QTRY_COMPARE_WITH_TIMEOUT(contents->topLevelItemCount(), 1, kLongWaitMs);
         reader->setSidePanelVisible(true);
         QTRY_VERIFY(contents->isVisible());
         QTest::qWait(100);
 
         // The long title takes several lines, and nothing needs scrolling sideways to read.
-        const QRect shortRow = contents->visualItemRect(contents->topLevelItem(0));
-        QRect longRow = contents->visualItemRect(contents->topLevelItem(1));
-        QVERIFY2(longRow.height() >= 2 * shortRow.height() - 8, qPrintable(QStringLiteral("%1 and %2").arg(longRow.height()).arg(shortRow.height())));
+        const int oneLine = contents->fontMetrics().lineSpacing();
+        QRect longRow = contents->visualItemRect(contents->topLevelItem(0));
+        QVERIFY2(longRow.height() >= 2 * oneLine, qPrintable(QStringLiteral("%1 and %2").arg(longRow.height()).arg(oneLine)));
         QVERIFY(longRow.right() <= contents->viewport()->width());
         QVERIFY(!contents->horizontalScrollBar()->isVisible());
 
@@ -1044,7 +1060,7 @@ private slots:
         contents->parentWidget()->parentWidget()->findChild<QSplitter *>();
         if (auto *splitter = qobject_cast<QSplitter *>(contents->parentWidget()->parentWidget())) {
             splitter->setSizes({700, 500});
-            QTRY_VERIFY(contents->visualItemRect(contents->topLevelItem(1)).height() < narrowHeight);
+            QTRY_VERIFY(contents->visualItemRect(contents->topLevelItem(0)).height() < narrowHeight);
         }
 
         const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES");
@@ -1089,6 +1105,43 @@ private slots:
         QCOMPARE(hashOf(issueCover), issueBefore);
         QVERIFY(hashOf(articleCover) != issueBefore);
         QCOMPARE(hashOf(volumePath()), fileBefore);
+    }
+
+    void anIssuesArticlesCanBeListedInTheLibrary()
+    {
+        const qint64 volume = importVolume();
+        ArticleDraft first;
+        first.title = QStringLiteral("Made Up First Piece With a Title Long Enough to Need Several Lines in the Details");
+        first.firstPage = 1;
+        first.lastPage = 1;
+        ArticleDraft second;
+        second.title = QStringLiteral("Made Up Second Piece");
+        second.firstPage = 2;
+        second.lastPage = 2;
+        const QList<qint64> ids = createArticles(m_session->database(), volume, {first, second}, false);
+        QCOMPARE(ids.size(), 2);
+
+        // From a tab that would leave articles out, and while reading.
+        m_window->setTab(LibraryTab::JournalIssues);
+        QVERIFY(m_window->openPublication(volume) != nullptr);
+        m_window->showArticlesOf(volume);
+        QCOMPARE(m_window->documentTabs()->currentIndex(), 0);
+        QVERIFY(m_window->searchBox()->text().startsWith(QStringLiteral("in:\"")));
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->model()->rowCount(), 2, kLongWaitMs);
+        QSet<qint64> shown;
+        for (int row = 0; row < 2; ++row)
+            QTRY_VERIFY_WITH_TIMEOUT(m_window->model()->idAt(row).has_value(), kLongWaitMs);
+        for (int row = 0; row < 2; ++row)
+            shown.insert(*m_window->model()->idAt(row));
+        QCOMPARE(shown, (QSet<qint64>{ids.at(0), ids.at(1)}));
+
+        // The issue's list of articles, for looking at by eye if asked for.
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {
+            m_window->resize(1200, 800);
+            m_window->details()->showPublication(volume);
+            QTest::qWait(500);
+            m_window->details()->articlesSection()->grab().save(QDir(pictures).filePath(QStringLiteral("articles-list.png")));
+        }
     }
 
     void typingASearchWhileReadingShowsTheResults()

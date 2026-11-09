@@ -1,6 +1,7 @@
 #include "SelfTest.h"
 #include "ui/LibrarySession.h"
 #include "ui/MainWindow.h"
+#include "ui/Theme.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -44,14 +45,6 @@ int main(int argc, char *argv[])
     if (parser.isSet(selfTest))
         return papertrail::app::runSelfTest(parser.value(report)) ? 0 : 1;
 
-#ifdef Q_OS_WIN
-    // The Windows 10 style has no dark version, so dark mode needs a style that does.
-    if (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark
-        && QApplication::style()->name().compare(QStringLiteral("windows11"), Qt::CaseInsensitive) != 0) {
-        QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
-    }
-#endif
-
     const papertrail::ui::LibraryPaths paths = parser.isSet(library) ? papertrail::ui::LibraryPaths::inFolder(parser.value(library))
                                                                      : papertrail::ui::LibraryPaths::forThisCopy();
     std::unique_ptr<papertrail::ui::LibrarySession> session;
@@ -67,6 +60,14 @@ int main(int argc, char *argv[])
                                   .arg(QString::fromUtf8(error.what())));
         return 1;
     }
+
+    // The library's theme, or the system's if it can't be read.
+    QString theme;
+    try {
+        theme = session->settings().value(QStringLiteral("appearance.theme")).toString();
+    } catch (const std::exception &) {
+    }
+    papertrail::ui::applyTheme(papertrail::ui::themeFromSetting(theme));
 
     papertrail::ui::MainWindow window(*session);
     window.show();

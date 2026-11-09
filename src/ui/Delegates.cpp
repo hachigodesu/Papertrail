@@ -93,9 +93,11 @@ void drawCover(QPainter *painter, const QRect &area, const QPixmap &cover, const
 
 void drawNotices(QPainter *painter, const QRect &cover, const QModelIndex &index, const QPalette &palette, int dot)
 {
+    // A retraction goes along the very bottom, and a problem with the file just above it.
+    const int bar = drawNoticeBar(painter, cover, coverNoticeLabel(index.data(PublicationListModel::CoverNoticeRole).toString()));
     const QString problem = fileStatusLabel(index.data(PublicationListModel::FileStatusRole).toString());
     if (!problem.isEmpty() && cover.height() > 60) {
-        const QRect strip(cover.left(), cover.bottom() - 22, cover.width(), 23);
+        const QRect strip(cover.left(), cover.bottom() - bar - 22, cover.width(), 23);
         painter->fillRect(strip, palette.color(QPalette::Window));
         painter->setPen(palette.color(QPalette::WindowText));
         painter->drawText(strip, Qt::AlignCenter, problem);
@@ -224,7 +226,80 @@ int layOutAnnotation(QPainter *painter, const QStyleOptionViewItem &option, cons
     return y - area.top();
 }
 
+// Lays out one article of a list, drawing it when given a painter, and returns its height.
+int layOutArticle(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index, const QRect &area)
+{
+    const QString title = index.data(ArticleDelegate::TitleRole).toString();
+    const QString pages = index.data(ArticleDelegate::PagesRole).toString();
+    QColor dimmed = itemTextColour(option);
+    dimmed.setAlphaF(0.65f);
+    QFont small = option.font;
+    small.setPointSizeF(small.pointSizeF() * 0.85);
+
+    if (painter) {
+        painter->setFont(option.font);
+        painter->setPen(itemTextColour(option));
+    }
+    int height = wrappedText(painter, option.font, area.left(), area.top(), area.width(), title);
+    if (!pages.isEmpty()) {
+        height += 2;
+        if (painter) {
+            painter->setFont(small);
+            painter->setPen(dimmed);
+        }
+        height += wrappedText(painter, small, area.left(), area.top() + height, area.width(), pages);
+    }
+    return height;
+}
+
+// The style's background, selection and focus for an item, without its text or icon, which the
+// delegates draw themselves.
+void drawItemBackground(QPainter *painter, QStyleOptionViewItem opt)
+{
+    opt.text.clear();
+    opt.icon = QIcon();
+    opt.features &= ~(QStyleOptionViewItem::HasDisplay | QStyleOptionViewItem::HasDecoration);
+    const QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
+    style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+}
+
+// A rule under each entry of a list, so where one ends is plain.
+void drawRuleBelow(QPainter *painter, const QStyleOptionViewItem &option)
+{
+    painter->setPen(faint(option.palette));
+    painter->drawLine(option.rect.left(), option.rect.bottom(), option.rect.right(), option.rect.bottom());
+}
+
+// The width a list's entries wrap to, which the option's rect doesn't reliably give in sizeHint.
+int listWidth(const QStyleOptionViewItem &option)
+{
+    if (const auto *view = qobject_cast<const QAbstractScrollArea *>(option.widget))
+        return view->viewport()->width();
+    return option.rect.width();
+}
+
 } // namespace
+
+int drawNoticeBar(QPainter *painter, const QRect &cover, const QString &label)
+{
+    if (label.isEmpty() || cover.isEmpty())
+        return 0;
+    painter->save();
+    QFont font = painter->font();
+    font.setBold(true);
+    const QFontMetrics metrics(font);
+    const bool words = metrics.horizontalAdvance(label) + 6 <= cover.width() && cover.height() > 3 * metrics.height();
+    const int height = words ? metrics.height() + 6 : qMax(4, cover.height() / 6);
+    const QRect bar(cover.left(), cover.bottom() + 1 - height, cover.width(), height);
+    painter->fillRect(bar, QColor(0xc6, 0x28, 0x28));
+    if (words) {
+        painter->setFont(font);
+        painter->setPen(Qt::white);
+        painter->drawText(bar, Qt::AlignCenter, label);
+    }
+    painter->restore();
+    return height;
+}
 
 GridDelegate::GridDelegate(CoverCache &covers, QObject *parent)
     : QStyledItemDelegate(parent), m_covers(covers)
@@ -368,30 +443,39 @@ void AnnotationDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     painter->save();
     QStyleOptionViewItem opt = option;
     initStyleOption(&opt, index);
-    opt.text.clear();
-    opt.icon = QIcon();
-    opt.features &= ~(QStyleOptionViewItem::HasDisplay | QStyleOptionViewItem::HasDecoration);
-    const QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
-    style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
-
+    drawItemBackground(painter, opt);
     layOutAnnotation(painter, opt, index, option.rect.adjusted(kNotePadding, kNotePadding, -kNotePadding, -kNotePadding));
-
-    // A rule between entries, so where one ends is plain.
-    painter->setPen(faint(option.palette));
-    painter->drawLine(option.rect.left(), option.rect.bottom(), option.rect.right(), option.rect.bottom());
+    drawRuleBelow(painter, option);
     painter->restore();
 }
 
 QSize AnnotationDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
-    // The list wraps to its own width, which the option's rect doesn't reliably give here.
-    int width = option.rect.width();
-    if (const auto *view = qobject_cast<const QAbstractScrollArea *>(option.widget))
-        width = view->viewport()->width();
+    const int width = listWidth(option);
     QStyleOptionViewItem opt = option;
     initStyleOption(&opt, index);
     const QRect area(0, 0, std::max(width - 2 * kNotePadding, 40), 0);
     return {width, layOutAnnotation(nullptr, opt, index, area) + 2 * kNotePadding + 1};
+}
+
+void ArticleDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
+{
+    painter->save();
+    QStyleOptionViewItem opt = option;
+    initStyleOption(&opt, index);
+    drawItemBackground(painter, opt);
+    layOutArticle(painter, opt, index, option.rect.adjusted(kNotePadding, kNotePadding, -kNotePadding, -kNotePadding));
+    drawRuleBelow(painter, option);
+    painter->restore();
+}
+
+QSize ArticleDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
+{
+    const int width = listWidth(option);
+    QStyleOptionViewItem opt = option;
+    initStyleOption(&opt, index);
+    const QRect area(0, 0, std::max(width - 2 * kNotePadding, 40), 0);
+    return {width, layOutArticle(nullptr, opt, index, area) + 2 * kNotePadding + 1};
 }
 
 } // namespace papertrail::ui

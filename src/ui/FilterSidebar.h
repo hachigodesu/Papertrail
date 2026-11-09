@@ -4,6 +4,8 @@
 #include "ui/QueryThreads.h"
 
 #include <QHash>
+#include <QList>
+#include <QPair>
 #include <QSet>
 #include <QWidget>
 
@@ -21,6 +23,13 @@ class TagRepository;
 }
 
 namespace papertrail::ui {
+
+// Everything chosen in the sidebar: for each section, each chosen value's key with its label, and the years.
+struct SidebarChoices {
+    QHash<int, QList<QPair<QString, QString>>> values;
+    QString yearFrom;
+    QString yearTo;
+};
 
 // The filters beside the library: tags, year range, and every value that can be narrowed down by,
 // each with a live count. Values within one filter combine with OR, and filters with each other by AND.
@@ -61,6 +70,15 @@ public:
     // Chooses or clears one value, as ticking it would.
     void setValueChosen(Section section, const QString &key, bool chosen);
 
+    // What's chosen, and replacing all of it at once, as a saved search does. Values not listed yet are
+    // chosen all the same, and shown with their labels.
+    SidebarChoices choices() const;
+    void setChoices(const SidebarChoices &choices);
+
+    // The saved searches listed at the top, by id and name.
+    void setSavedSearches(const QList<QPair<qint64, QString>> &searches);
+    QTreeWidgetItem *savedSearchesItem() const { return m_savedSearches; }
+
     // How many values a section is showing, and its text and count, mainly for tests.
     QTreeWidget *tree() const { return m_tree; }
     QTreeWidgetItem *sectionItem(Section section) const { return m_sections[section]; }
@@ -72,6 +90,11 @@ signals:
     void collectionsChanged();
     // The publications chosen in the library were dragged onto a collection or tag.
     void publicationsDropped(Section section, qint64 id);
+    void savedSearchChosen(qint64 id);
+    void saveSearchRequested();
+    void savedSearchReplaceRequested(qint64 id);
+    void savedSearchRenameRequested(qint64 id);
+    void savedSearchDeleteRequested(qint64 id);
 
 private:
     void buildSections();
@@ -109,6 +132,7 @@ private:
     QLineEdit *m_yearTo = nullptr;
     QPushButton *m_clear = nullptr;
     QTreeWidgetItem *m_sections[SectionCount] = {};
+    QTreeWidgetItem *m_savedSearches = nullptr;
     QSet<QString> m_chosen[SectionCount];
     QHash<QString, QString> m_chosenLabels[SectionCount]; // Chosen values may drop out of the results.
     QString m_tagSignature;

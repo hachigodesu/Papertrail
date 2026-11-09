@@ -12,6 +12,7 @@
 #include "ui/PageView.h"
 #include "ui/PublicationListModel.h"
 #include "ui/ReaderTab.h"
+#include "ui/Theme.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -837,6 +838,79 @@ private slots:
         QCOMPARE(view->colours(), PageView::Colours::Dark);
         QCOMPARE(m_session->settings().value(QStringLiteral("reader.page_colours")).toString(), QStringLiteral("dark"));
         QCOMPARE(rendered.size(), 0);
+    }
+
+    void theWindowsThemeAndPageColoursAreSeparate()
+    {
+        // A dark window with light pages, each chosen on its own.
+        openLibraryWindow();
+        const QString styleBefore = QApplication::style()->name();
+        m_session->settings().setValue(QStringLiteral("appearance.theme"), QStringLiteral("dark"));
+        m_session->settings().setValue(QStringLiteral("reader.page_colours"), QStringLiteral("light"));
+        applyTheme(Theme::Dark);
+        ReaderTab *reader = openSample(QStringLiteral("reader_doc.pdf"));
+        PageView *view = reader->pageView();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        QVERIFY(QApplication::palette().color(QPalette::Window).lightness() < 128);
+        QCOMPARE(view->colours(), PageView::Colours::Light);
+        const QPoint blank = view->viewportPointFor(0, QPointF(10, 10));
+        QCOMPARE(view->viewport()->grab().toImage().pixelColor(blank).lightness(), 255);
+
+        // And the other way round: a light window with dark pages.
+        m_session->settings().setValue(QStringLiteral("appearance.theme"), QStringLiteral("light"));
+        applyTheme(Theme::Light);
+        QVERIFY(QApplication::palette().color(QPalette::Window).lightness() >= 128);
+        QCOMPARE(view->colours(), PageView::Colours::Light); // The window's theme changes nothing in a document.
+        reader->coloursBox()->setCurrentIndex(reader->coloursBox()->findData(int(PageView::Colours::Dark)));
+        QVERIFY(view->viewport()->grab().toImage().pixelColor(blank).lightness() < 60);
+        QCOMPARE(m_session->settings().value(QStringLiteral("appearance.theme")).toString(), QStringLiteral("light"));
+
+        // Left as the other tests expect it.
+        QApplication::setStyle(styleBefore);
+        QApplication::setPalette(QPalette());
+    }
+
+    void darkPagesLeavePicturesAlone()
+    {
+        // The sample's picture is a grey square, 200 points across, its top-left 100 points in and 342 down.
+        ReaderTab *reader = openSample(QStringLiteral("picture_page.pdf"));
+        PageView *view = reader->pageView();
+        view->setZoomMode(PageView::ZoomMode::FitPage); // So all of it is in view.
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        QTest::qWait(300);
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        const QPoint paper = view->viewportPointFor(0, QPointF(30, 600));
+        const QPoint picture = view->viewportPointFor(0, QPointF(200, 360));
+        const auto colourAt = [&](const QPoint &point) { return view->viewport()->grab().toImage().pixelColor(point); };
+        const int pictureBefore = colourAt(picture).lightness();
+        QVERIFY2(pictureBefore > 120 && pictureBefore < 200, qPrintable(QString::number(pictureBefore)));
+
+        // Light pages don't need to know where it is.
+        QTest::qWait(200);
+        QVERIFY(view->imageAreasOn(0).isEmpty());
+
+        view->setColours(PageView::Colours::Dark);
+        QTRY_COMPARE_WITH_TIMEOUT(view->imageAreasOn(0).size(), 1, kWaitMs);
+        const QRectF area = view->imageAreasOn(0).first();
+        QVERIFY2(qAbs(area.x() - 100) < 2 && qAbs(area.y() - 342) < 2 && qAbs(area.width() - 200) < 2,
+                 qPrintable(QStringLiteral("%1,%2 %3x%4").arg(area.x()).arg(area.y()).arg(area.width()).arg(area.height())));
+        QTRY_VERIFY_WITH_TIMEOUT(qAbs(colourAt(picture).lightness() - pictureBefore) < 6, kWaitMs);
+        QVERIFY(colourAt(paper).lightness() < 60);
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty())
+            view->viewport()->grab().save(QDir(pictures).filePath(QStringLiteral("dark-page-picture.png")));
+    }
+
+    void aScanIsStillDarkened()
+    {
+        // A picture covering the whole page is the page itself, so it goes dark like any other.
+        ReaderTab *reader = openSample(QStringLiteral("reader_doc.pdf"));
+        PageView *view = reader->pageView();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        view->setImageAreas(0, {QRectF(0, 0, 595, 842)});
+        QVERIFY(view->imageAreasOn(0).isEmpty());
+        view->setImageAreas(0, {QRectF(500, 800, 400, 400)});
+        QCOMPARE(view->imageAreasOn(0).size(), 1); // Kept to the page.
+        QVERIFY(view->imageAreasOn(0).first().right() <= 595.5);
     }
 
     void aPageThatCantBeShownDoesNotAffectTheOthers()

@@ -40,7 +40,11 @@
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
 #include "ui/ReaderTab.h"
+#include "core/repo/SavedSearchRepository.h"
+#include "ui/SettingsDialog.h"
+#include "ui/Theme.h"
 
+#include <QStyleHints>
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
@@ -54,6 +58,7 @@
 #include <QHeaderView>
 #include <QCheckBox>
 #include <QInputDialog>
+#include <QJsonArray>
 #include <QItemSelectionModel>
 #include <QJsonValue>
 #include <QLabel>
@@ -202,6 +207,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
                 // Whatever happened, the library is looked at afresh, and anything paused carries on.
                 m_covers->forgetMissing();
                 refreshNow();
+                refreshSavedSearches();
                 m_details->reload();
                 rescanAll(); // Finds the files that imported publications are waiting for.
                 if (m_session.settings().value(QStringLiteral("library.index_contents")).toBool())
@@ -298,6 +304,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     buildCentre();
     buildStatusBar();
     buildMenus();
+    refreshSavedSearches();
     connectImport();
     restoreWindowState();
 
@@ -453,6 +460,7 @@ void MainWindow::buildToolbar()
     example(QStringLiteral("institution:leeds"), tr("From a university or other institution"));
     example(QStringLiteral("tag:maths"), tr("With a tag, or one inside it"));
     example(QStringLiteral("note:welds"), tr("In your highlights and notes"));
+    example(QStringLiteral("in:\"nature 2024\""), tr("Articles in an issue, proceedings or book with this title"));
     heading(tr("Kind and date"));
     example(QStringLiteral("type:thesis"), tr("Of a type: thesis, issue, book, standard..."));
     example(QStringLiteral("year:2020"), tr("From a year"));
@@ -466,6 +474,7 @@ void MainWindow::buildToolbar()
     heading(tr("Together"));
     example(QStringLiteral("author:knuth year:>2010"), tr("Several at once: all must match"));
     help->addSeparator();
+    help->addAction(tr("Save this search..."), this, &MainWindow::askToSaveSearch);
     QAction *inside = help->addAction(tr("Tick Inside documents to search the text of documents too"));
     connect(inside, &QAction::triggered, this, [this] { m_searchInside->setChecked(true); });
     m_searchHelp->setMenu(help);
@@ -569,6 +578,36 @@ void MainWindow::buildCentre()
             if (!path.isEmpty())
                 tagSelected(path);
         }
+    });
+    connect(m_sidebar, &FilterSidebar::savedSearchChosen, this, &MainWindow::showSavedSearch);
+    connect(m_sidebar, &FilterSidebar::saveSearchRequested, this, &MainWindow::askToSaveSearch);
+    connect(m_sidebar, &FilterSidebar::savedSearchReplaceRequested, this, [this](qint64 id) {
+        const QJsonObject definition = currentSearchDefinition();
+        if (guarded(tr("Saving the search"), [&] { SavedSearchRepository(m_session.database()).setDefinition(id, definition); }))
+            statusBar()->showMessage(tr("The saved search now shows what's shown here."), 8000);
+    });
+    connect(m_sidebar, &FilterSidebar::savedSearchRenameRequested, this, [this](qint64 id) {
+        std::optional<SavedSearch> search;
+        guarded(tr("Reading the saved search"), [&] { search = SavedSearchRepository(m_session.database()).get(id); });
+        if (!search)
+            return;
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, tr("Rename saved search"), tr("Name:"), QLineEdit::Normal, search->name, &ok);
+        if (ok && guarded(tr("Renaming the saved search"), [&] { SavedSearchRepository(m_session.database()).rename(id, name); }))
+            refreshSavedSearches();
+    });
+    connect(m_sidebar, &FilterSidebar::savedSearchDeleteRequested, this, [this](qint64 id) {
+        std::optional<SavedSearch> search;
+        guarded(tr("Reading the saved search"), [&] { search = SavedSearchRepository(m_session.database()).get(id); });
+        if (!search)
+            return;
+        // Only the search goes: nothing it found is touched.
+        if (QMessageBox::question(this, tr("Delete saved search"),
+                                  tr("Delete the saved search \"%1\"? What it finds isn't affected.").arg(search->name))
+            != QMessageBox::Yes)
+            return;
+        if (guarded(tr("Deleting the saved search"), [&] { SavedSearchRepository(m_session.database()).remove(id); }))
+            refreshSavedSearches();
     });
     m_splitter->addWidget(m_sidebar);
 
@@ -820,11 +859,8 @@ void MainWindow::buildMenus()
     file->addAction(tr("Library &folders..."), this, &MainWindow::showFoldersDialog);
     file->addAction(tr("&Scan folders again"), QKeySequence(Qt::Key_F5), this, &MainWindow::rescanAll);
     file->addSeparator();
-    file->addAction(tr("Claude API key..."), this, [this] {
-        ApiKeyDialog dialog(*m_keys, this);
-        dialog.exec();
-    });
-    m_indexContents = file->addAction(tr("Index document text"));
+    // These switches are in the Settings window, which passes changes to them.
+    m_indexContents = new QAction(tr("Index document text"), this);
     m_indexContents->setCheckable(true);
     m_indexContents->setChecked(m_session.settings().value(QStringLiteral("library.index_contents")).toBool());
     m_indexContents->setToolTip(tr("Reads documents' text so that it can be searched. It stays on this computer, and your files aren't changed."));
@@ -835,19 +871,20 @@ void MainWindow::buildMenus()
         else
             m_index->stopIndexing();
     });
-    m_rescanOnStartup = file->addAction(tr("Scan folders when Papertrail starts"));
+    m_rescanOnStartup = new QAction(tr("Scan folders when Papertrail starts"), this);
     m_rescanOnStartup->setCheckable(true);
     m_rescanOnStartup->setChecked(m_session.settings().value(QStringLiteral("library.rescan_on_startup")).toBool());
     connect(m_rescanOnStartup, &QAction::toggled, this, [this](bool on) {
         m_session.settings().setValue(QStringLiteral("library.rescan_on_startup"), on);
     });
-    m_watchFolders = file->addAction(tr("Watch folders for changes"));
+    m_watchFolders = new QAction(tr("Watch folders for changes"), this);
     m_watchFolders->setCheckable(true);
     m_watchFolders->setChecked(m_watcher->isEnabled());
     connect(m_watchFolders, &QAction::toggled, this, [this](bool on) {
         m_session.settings().setValue(QStringLiteral("library.watch_folders"), on);
         m_watcher->setEnabled(on);
     });
+    file->addAction(tr("Se&ttings..."), QKeySequence(Qt::CTRL | Qt::Key_Comma), this, &MainWindow::showSettings);
     file->addSeparator();
     file->addAction(tr("&Export citations..."), this, &MainWindow::exportCitations);
     file->addSeparator();
@@ -857,7 +894,6 @@ void MainWindow::buildMenus()
     updateSuggestedFilesAction();
     file->addSeparator();
     file->addAction(tr("&Backups..."), this, &MainWindow::showBackupsDialog);
-    file->addAction(tr("&Online lookups..."), this, &MainWindow::showLookupSettings);
     file->addAction(tr("Look up details for the whole library..."), this, &MainWindow::askAndLookUpLibrary);
     file->addSeparator();
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
@@ -906,6 +942,37 @@ void MainWindow::buildMenus()
 
     QMenu *help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("&About Papertrail"), this, &MainWindow::showAbout);
+
+    // Following the system means following it while open, too, where the style has to change with it.
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] {
+        static bool applying = false;
+        if (applying)
+            return;
+        QString theme;
+        guarded(tr("Reading settings"), [&] { theme = m_session.settings().value(QStringLiteral("appearance.theme")).toString(); });
+        if (themeFromSetting(theme) != Theme::System)
+            return;
+        applying = true;
+        applyTheme(Theme::System);
+        applying = false;
+    });
+}
+
+void MainWindow::showSettings()
+{
+    SettingsActions actions;
+    actions.rescanOnStartup = m_rescanOnStartup;
+    actions.watchFolders = m_watchFolders;
+    actions.indexContents = m_indexContents;
+    actions.showFolders = [this] { showFoldersDialog(); };
+    actions.showOnlineLookups = [this] { showLookupSettings(); };
+    actions.showApiKey = [this] {
+        ApiKeyDialog dialog(*m_keys, this);
+        dialog.exec();
+    };
+    actions.showBackups = [this] { showBackupsDialog(); };
+    SettingsDialog dialog(m_session, actions, this);
+    dialog.exec();
 }
 
 void MainWindow::connectImport()
@@ -1159,6 +1226,189 @@ void MainWindow::syncSortControls()
 void MainWindow::setTab(LibraryTab tab)
 {
     m_tabs->setCurrentIndex(int(kTabs.indexOf(tab)));
+}
+
+namespace {
+
+// How a saved search names a tab and each part of the sidebar, which mustn't change between versions.
+const QList<QPair<LibraryTab, QString>> kTabKeys = {
+    {LibraryTab::All, QStringLiteral("all")},
+    {LibraryTab::JournalIssues, QStringLiteral("journal_issues")},
+    {LibraryTab::JournalArticles, QStringLiteral("journal_articles")},
+    {LibraryTab::Preprints, QStringLiteral("preprints")},
+    {LibraryTab::ConferencePapers, QStringLiteral("conference_papers")},
+    {LibraryTab::Textbooks, QStringLiteral("textbooks")},
+    {LibraryTab::ThesesAndDissertations, QStringLiteral("theses_and_dissertations")},
+    {LibraryTab::TechnicalReports, QStringLiteral("technical_reports")},
+    {LibraryTab::Standards, QStringLiteral("standards")},
+    {LibraryTab::Other, QStringLiteral("other")},
+};
+
+const QList<QPair<FilterSidebar::Section, QString>> kSectionKeys = {
+    {FilterSidebar::Tags, QStringLiteral("tags")},
+    {FilterSidebar::Status, QStringLiteral("status")},
+    {FilterSidebar::Collections, QStringLiteral("collections")},
+    {FilterSidebar::Authors, QStringLiteral("authors")},
+    {FilterSidebar::Journals, QStringLiteral("journals")},
+    {FilterSidebar::Publishers, QStringLiteral("publishers")},
+    {FilterSidebar::Conferences, QStringLiteral("conferences")},
+    {FilterSidebar::Languages, QStringLiteral("languages")},
+    {FilterSidebar::Formats, QStringLiteral("formats")},
+    {FilterSidebar::ReadStatuses, QStringLiteral("read_statuses")},
+};
+
+// Tags, collections and people are chosen by id here, but kept by what names them in any library.
+bool keptByName(FilterSidebar::Section section)
+{
+    return section == FilterSidebar::Tags || section == FilterSidebar::Collections || section == FilterSidebar::Authors;
+}
+
+} // namespace
+
+QJsonObject MainWindow::currentSearchDefinition()
+{
+    QJsonObject definition;
+    definition.insert(QStringLiteral("search"), m_search->text().trimmed());
+    definition.insert(QStringLiteral("inside"), m_searchInside->isChecked());
+    const LibraryTab tab = kTabs.value(m_tabs->currentIndex(), LibraryTab::All);
+    for (const auto &[value, key] : kTabKeys) {
+        if (value == tab)
+            definition.insert(QStringLiteral("tab"), key);
+    }
+
+    const SidebarChoices choices = m_sidebar->choices();
+    QJsonObject filters;
+    guarded(tr("Reading the filters"), [&] {
+        SavedSearchRepository searches(m_session.database());
+        for (const auto &[section, name] : kSectionKeys) {
+            QJsonArray values;
+            for (const auto &[key, label] : choices.values.value(section)) {
+                QString kept = key;
+                if (section == FilterSidebar::Tags)
+                    kept = searches.tagKey(key.toLongLong());
+                else if (section == FilterSidebar::Collections)
+                    kept = searches.collectionKey(key.toLongLong());
+                else if (section == FilterSidebar::Authors)
+                    kept = searches.personKey(key.toLongLong());
+                if (!kept.isEmpty())
+                    values.append(QJsonObject{{QStringLiteral("key"), kept}, {QStringLiteral("label"), label}});
+            }
+            if (!values.isEmpty())
+                filters.insert(name, values);
+        }
+    });
+    definition.insert(QStringLiteral("filters"), filters);
+    if (!choices.yearFrom.isEmpty())
+        definition.insert(QStringLiteral("year_from"), choices.yearFrom);
+    if (!choices.yearTo.isEmpty())
+        definition.insert(QStringLiteral("year_to"), choices.yearTo);
+    return definition;
+}
+
+std::optional<qint64> MainWindow::saveCurrentSearch(const QString &name)
+{
+    const QJsonObject definition = currentSearchDefinition();
+    std::optional<qint64> id;
+    if (!guarded(tr("Saving the search"), [&] { id = SavedSearchRepository(m_session.database()).create(name, definition); }))
+        return std::nullopt;
+    refreshSavedSearches();
+    return id;
+}
+
+void MainWindow::askToSaveSearch()
+{
+    const QString search = m_search->text().trimmed();
+    if (search.isEmpty() && !m_sidebar->hasSelection() && m_tabs->currentIndex() == 0) {
+        QMessageBox::information(this, tr("Save this search"),
+                                 tr("Search, or choose a tab or filters, first. A saved search shows them all again."));
+        return;
+    }
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Save this search"), tr("A name for the search, tab and filters shown now:"),
+                                               QLineEdit::Normal, search.left(60), &ok);
+    if (ok && saveCurrentSearch(name))
+        statusBar()->showMessage(tr("Saved. It's in the sidebar, under Saved searches."), 8000);
+}
+
+void MainWindow::showSavedSearch(qint64 id)
+{
+    std::optional<SavedSearch> search;
+    SidebarChoices choices;
+    guarded(tr("Reading the saved search"), [&] {
+        SavedSearchRepository searches(m_session.database());
+        search = searches.get(id);
+        if (!search)
+            return;
+        // Anything deleted since, such as a tag, is left out.
+        const QJsonObject filters = search->definition.value(QStringLiteral("filters")).toObject();
+        for (const auto &[section, name] : kSectionKeys) {
+            for (const QJsonValue &value : filters.value(name).toArray()) {
+                const QString kept = value.toObject().value(QStringLiteral("key")).toString();
+                const QString label = value.toObject().value(QStringLiteral("label")).toString();
+                QString key = kept;
+                if (keptByName(section)) {
+                    std::optional<qint64> local;
+                    if (section == FilterSidebar::Tags)
+                        local = searches.tagFromKey(kept);
+                    else if (section == FilterSidebar::Collections)
+                        local = searches.collectionFromKey(kept);
+                    else
+                        local = searches.personFromKey(kept);
+                    if (!local)
+                        continue;
+                    key = QString::number(*local);
+                }
+                if (!key.isEmpty())
+                    choices.values[section] << qMakePair(key, label.isEmpty() ? key : label);
+            }
+        }
+    });
+    if (!search)
+        return;
+    const QJsonObject &definition = search->definition;
+    choices.yearFrom = definition.value(QStringLiteral("year_from")).toString();
+    choices.yearTo = definition.value(QStringLiteral("year_to")).toString();
+
+    if (m_documentTabs)
+        m_documentTabs->setCurrentIndex(0);
+    const QString tab = definition.value(QStringLiteral("tab")).toString();
+    LibraryTab chosenTab = LibraryTab::All;
+    for (const auto &[value, key] : kTabKeys) {
+        if (key == tab)
+            chosenTab = value;
+    }
+    setTab(chosenTab);
+    m_searchInside->setChecked(definition.value(QStringLiteral("inside")).toBool());
+    m_sidebar->setChoices(choices);
+    m_search->setText(definition.value(QStringLiteral("search")).toString());
+}
+
+void MainWindow::refreshSavedSearches()
+{
+    QList<QPair<qint64, QString>> listed;
+    guarded(tr("Reading the saved searches"), [&] {
+        for (const SavedSearch &search : SavedSearchRepository(m_session.database()).all())
+            listed << qMakePair(search.id, search.name);
+    });
+    m_sidebar->setSavedSearches(listed);
+}
+
+void MainWindow::showArticlesOf(qint64 holder)
+{
+    guarded(tr("Reading the publication"), [&] {
+        const std::optional<Publication> publication = m_session.publications().get(holder);
+        if (!publication)
+            return;
+        // A quote would end the search's own quotes early, so it's left out: the words still match.
+        QString title = publication->title.simplified();
+        title.remove(u'"');
+        // Everything else is cleared, since a tab or filter for issues would leave out their articles.
+        m_sidebar->clearSelection();
+        setTab(LibraryTab::All);
+        if (m_documentTabs)
+            m_documentTabs->setCurrentIndex(0);
+        m_search->setText(QStringLiteral("in:\"%1\"").arg(title));
+    });
 }
 
 void MainWindow::setViewMode(ViewMode mode)
@@ -1622,6 +1872,7 @@ bool MainWindow::restoreBackup(const QString &backupPath)
     // Whatever happened, the library is looked at afresh.
     m_covers->forgetMissing();
     afterFoldersChanged();
+    refreshSavedSearches();
     m_details->reload();
     updateSuggestedFilesAction();
     refreshSummaryStatus();
@@ -1801,6 +2052,8 @@ void MainWindow::showContextMenu(const QPoint &position)
             guarded(tr("Reading the publication"), [&] {
                 const std::optional<Publication> details = m_session.publications().get(publication);
                 if (details && !details->parentId && canHoldArticles(details->type)) {
+                    if (!m_session.publications().childIds(publication).isEmpty())
+                        menu.addAction(tr("Show its articles"), this, [this, publication] { showArticlesOf(publication); });
                     menu.addAction(tr("Create articles from contents..."), this, [this, publication] { showContentsDialog(publication); });
                     menu.addAction(tr("Add an article..."), this, [this, publication] { showAddArticleDialog(publication); });
                 } else if (details && details->parentId) {

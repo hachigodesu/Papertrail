@@ -69,6 +69,17 @@ QString fileStatusLabel(const QString &status)
     return {};
 }
 
+QString coverNoticeLabel(const QString &notice)
+{
+    if (notice == QLatin1StringView("retraction"))
+        return tr("Retracted");
+    if (notice == QLatin1StringView("partial_retraction"))
+        return tr("Partly retracted");
+    if (notice == QLatin1StringView("withdrawal"))
+        return tr("Withdrawn");
+    return {};
+}
+
 QString issueNumbering(const QString &volume, const QString &issue, std::optional<int> month, std::optional<int> year)
 {
     QStringList parts;

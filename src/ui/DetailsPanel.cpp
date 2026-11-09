@@ -11,6 +11,7 @@
 #include "core/repo/PublicationMerge.h"
 #include "metadata/Matching.h"
 #include "ui/CoverCache.h"
+#include "ui/Delegates.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
 
@@ -31,6 +32,7 @@
 #include <QLocale>
 #include <QListWidget>
 #include <QMenu>
+#include <QPainter>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -43,6 +45,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <exception>
 #include <utility>
 
@@ -303,8 +306,12 @@ void DetailsPanel::buildSinglePage()
     articles->addWidget(sectionHeading(tr("Articles")));
     m_articleList = new QListWidget; // List items show text as it is, so a title can't become formatting.
     m_articleList->setAccessibleName(tr("Articles in this publication"));
-    m_articleList->setMaximumHeight(170);
-    m_articleList->setTextElideMode(Qt::ElideRight);
+    m_articleList->setMaximumHeight(320);
+    m_articleList->setWordWrap(true);
+    m_articleList->setItemDelegate(new ArticleDelegate(m_articleList));
+    m_articleList->setResizeMode(QListView::Adjust); // Titles wrap to the panel's width.
+    m_articleList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_articleList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_articleList->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_articleList, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
         emit openInVolumeRequested(item->data(Qt::UserRole).toLongLong());
@@ -529,6 +536,10 @@ void DetailsPanel::updateCover()
     const qreal ratio = devicePixelRatioF();
     QPixmap scaled = QPixmap::fromImage(cover.scaled(QSize(220, 300) * ratio, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     scaled.setDevicePixelRatio(ratio);
+    if (const QString label = coverNoticeLabel(m_coverNotice); !label.isEmpty()) {
+        QPainter painter(&scaled);
+        drawNoticeBar(&painter, QRect(QPoint(0, 0), scaled.deviceIndependentSize().toSize()), label);
+    }
     m_cover->setPixmap(scaled);
 }
 
@@ -569,6 +580,14 @@ void DetailsPanel::reload()
     } catch (const std::exception &) {
     }
     QStringList warnings;
+    // The cover shows the gravest of them, as the library does.
+    m_coverNotice.clear();
+    for (const QString &kind : {QStringLiteral("retraction"), QStringLiteral("partial_retraction"), QStringLiteral("withdrawal"),
+                                QStringLiteral("removal")}) {
+        const bool found = std::any_of(notices.cbegin(), notices.cend(), [&](const Notice &notice) { return notice.kind == kind; });
+        if (found && m_coverNotice.isEmpty())
+            m_coverNotice = kind == QLatin1StringView("removal") ? QStringLiteral("withdrawal") : kind;
+    }
     for (const Notice &notice : std::as_const(notices)) {
         if (!notice.isWarning())
             continue;
@@ -747,15 +766,17 @@ void DetailsPanel::reload()
             const std::optional<Publication> article = m_session.publications().get(articleId);
             if (!article)
                 continue;
-            QString text = article->title;
+            QString pages;
             if (article->pageStart) {
-                text += article->pageEnd && *article->pageEnd != *article->pageStart
-                    ? tr(" (pages %1 to %2)").arg(*article->pageStart).arg(*article->pageEnd)
-                    : tr(" (page %1)").arg(*article->pageStart);
+                pages = article->pageEnd && *article->pageEnd != *article->pageStart
+                    ? tr("Pages %1 to %2").arg(*article->pageStart).arg(*article->pageEnd)
+                    : tr("Page %1").arg(*article->pageStart);
             }
-            auto *item = new QListWidgetItem(text, m_articleList);
+            // The item's text holds all of it, for screen readers; ArticleDelegate draws the parts apart.
+            auto *item = new QListWidgetItem(pages.isEmpty() ? article->title : article->title + u'\n' + pages, m_articleList);
             item->setData(Qt::UserRole, articleId);
-            item->setToolTip(article->title);
+            item->setData(ArticleDelegate::TitleRole, article->title);
+            item->setData(ArticleDelegate::PagesRole, pages);
         }
     }
 

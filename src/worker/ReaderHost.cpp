@@ -149,6 +149,8 @@ public:
                 outline(reply);
             else if (op == QStringLiteral("links"))
                 links(request, reply);
+            else if (op == QStringLiteral("images"))
+                images(request, reply);
             else if (op == QStringLiteral("heading"))
                 heading(request, reply);
             else if (op == QStringLiteral("anchor"))
@@ -291,6 +293,15 @@ private:
         }
         reply.insert(QStringLiteral("page"), page(request));
         reply.insert(QStringLiteral("links"), items);
+    }
+
+    void images(const QJsonObject &request, QJsonObject &reply)
+    {
+        QJsonArray areas;
+        for (const QRectF &area : m_document->imageAreas(page(request)))
+            areas.append(rectToJson(area));
+        reply.insert(QStringLiteral("page"), page(request));
+        reply.insert(QStringLiteral("areas"), areas);
     }
 
     // What an article starting on this page is probably called, for a table of contents that only numbers them.

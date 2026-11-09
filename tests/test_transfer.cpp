@@ -262,6 +262,7 @@ private slots:
         QCOMPARE(to.scalar("SELECT count(*) FROM metadata_provenance"), history);
         QCOMPARE(to.scalar("SELECT count(*) FROM collection"), qint64(1));
         QCOMPARE(to.scalar("SELECT count(*) FROM annotation"), qint64(1));
+        QCOMPARE(to.scalar("SELECT count(*) FROM saved_search"), qint64(1));
 
         // And back again: the original library knows them all.
         ExportReport back;
@@ -269,6 +270,30 @@ private slots:
         const ImportReport home = importBundle(*m_from->db, *returned, {});
         QCOMPARE(home.added, qint64(0));
         QCOMPARE(m_from->count(), publications);
+    }
+
+    void savedSearchesComeAcrossWithoutTakingANameThatsUsed()
+    {
+        Library to;
+        to.db->exec("INSERT INTO saved_search (uuid, name, definition, created_at) VALUES "
+                    "('66666666-0000-0000-0000-000000000001', 'crystal PAPERS', '{}', 1)");
+        ExportReport exported;
+        importBundle(*to.db, *readBundle(buildBundle(*m_from->db, exported), nullptr), {});
+        QCOMPARE(to.scalar("SELECT count(*) FROM saved_search"), qint64(2));
+        QCOMPARE(to.text("SELECT name FROM saved_search WHERE uuid = '55555555-0000-0000-0000-000000000001'"),
+                 QStringLiteral("Crystal papers (imported)"));
+        // Its tag is named by uuid, which came across with the tag.
+        const QString definition = to.text("SELECT definition FROM saved_search WHERE uuid = '55555555-0000-0000-0000-000000000001'");
+        QVERIFY(definition.contains(QStringLiteral("11111111-0000-0000-0000-000000000002")));
+        QCOMPARE(to.scalar("SELECT count(*) FROM tag WHERE uuid = '11111111-0000-0000-0000-000000000002'"), qint64(1));
+
+        // Replacing the library leaves only the export's.
+        ImportOptions replace;
+        replace.mode = ImportMode::Replace;
+        replace.backupPath = to.dir.filePath(QStringLiteral("backup.db"));
+        importBundle(*to.db, *readBundle(buildBundle(*m_from->db, exported), nullptr), replace);
+        QCOMPARE(to.scalar("SELECT count(*) FROM saved_search"), qint64(1));
+        QCOMPARE(to.text("SELECT name FROM saved_search"), QStringLiteral("Crystal papers"));
     }
 
     void whatWasRemovedStaysOutOnTheOtherComputer()
@@ -406,6 +431,7 @@ private slots:
         QCOMPARE(to.scalar("SELECT count(*) FROM tag"), qint64(0));
         QCOMPARE(to.scalar("SELECT count(*) FROM collection"), qint64(0));
         QCOMPARE(to.scalar("SELECT count(*) FROM annotation"), qint64(0));
+        QCOMPARE(to.scalar("SELECT count(*) FROM saved_search"), qint64(0));
         QCOMPARE(SettingsStore(*to.db).value(QStringLiteral("citation.style")).toString(), QStringLiteral("harvard"));
     }
 
@@ -503,7 +529,8 @@ private slots:
         ZipReader zip;
         QVERIFY(zip.open(data));
         for (const QString &name : {QStringLiteral("manifest.json"), QStringLiteral("publications.json"), QStringLiteral("tags.json"),
-                                    QStringLiteral("collections.json"), QStringLiteral("annotations.json"),
+                                    QStringLiteral("collections.json"), QStringLiteral("saved_searches.json"),
+                                    QStringLiteral("annotations.json"),
                                     QStringLiteral("reading.json"), QStringLiteral("provenance.json"),
                                     QStringLiteral("summaries.json"), QStringLiteral("settings.json")})
             QVERIFY2(zip.contains(name), qPrintable(name));
@@ -651,6 +678,11 @@ private:
                                   "'A made-up summary.', '[]', 1)");
         summary->bind(1, book);
         summary->step();
+
+        // A saved search, naming its tag as any library would.
+        db.exec("INSERT INTO saved_search (uuid, name, definition, created_at) VALUES ('55555555-0000-0000-0000-000000000001', "
+                "'Crystal papers', '{\"search\":\"beams\",\"tab\":\"all\",\"filters\":{\"tags\":"
+                "[{\"key\":\"11111111-0000-0000-0000-000000000002\",\"label\":\"Crystals\"}]}}', 1)");
 
         SettingsStore settings(db);
         settings.setValue(QStringLiteral("citation.style"), QStringLiteral("apa"));

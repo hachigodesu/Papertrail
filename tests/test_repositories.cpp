@@ -8,6 +8,7 @@
 #include "core/repo/PublicationMerge.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/ReadingStateRepository.h"
+#include "core/repo/SavedSearchRepository.h"
 #include "core/repo/TagRepository.h"
 
 #include <QTemporaryDir>
@@ -698,6 +699,56 @@ private slots:
         QCOMPARE(query.ids({}, {}), QList<qint64>{fine});
         QCOMPARE(m_files->hiddenPublications(), QList<qint64>{orphan});
         QVERIFY(m_publications->get(orphan).has_value());
+    }
+
+    void aSavedSearchKeepsItsNameAndDefinition()
+    {
+        SavedSearchRepository searches(*m_db);
+        const QJsonObject definition{{QStringLiteral("search"), QStringLiteral("in:\"Made Up Issue\"")}, {QStringLiteral("tab"), QStringLiteral("all")}};
+        const qint64 id = searches.create(QStringLiteral("  Reading list  "), definition);
+        QCOMPARE(searches.get(id)->name, QStringLiteral("Reading list"));
+        QCOMPARE(searches.get(id)->definition, definition);
+        QVERIFY(!searches.get(id)->uuid.isEmpty());
+
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, searches.create(QStringLiteral("reading LIST"), definition));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, searches.create(QStringLiteral("  "), definition));
+        const qint64 other = searches.create(QStringLiteral("Another"), {});
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, searches.rename(other, QStringLiteral("Reading List")));
+        searches.rename(id, QStringLiteral("A reading list"));
+        searches.setDefinition(id, {{QStringLiteral("search"), QStringLiteral("beams")}});
+        QCOMPARE(searches.get(id)->definition.value(QStringLiteral("search")).toString(), QStringLiteral("beams"));
+
+        // By name, ignoring case.
+        QCOMPARE(searches.all().size(), 2);
+        QCOMPARE(searches.all().first().name, QStringLiteral("A reading list"));
+        searches.remove(id);
+        QVERIFY(!searches.get(id).has_value());
+        QCOMPARE(searches.all().size(), 1);
+    }
+
+    void aSavedSearchNamesTagsCollectionsAndPeopleTheSameEverywhere()
+    {
+        SavedSearchRepository searches(*m_db);
+        const qint64 tag = m_tags->ensurePath(QStringLiteral("Made Up > Topic"));
+        QCOMPARE(searches.tagKey(tag), m_tags->get(tag)->uuid);
+        QCOMPARE(searches.tagFromKey(m_tags->get(tag)->uuid), std::optional<qint64>(tag));
+        QVERIFY(!searches.tagFromKey(QStringLiteral("no-such-uuid")).has_value());
+        QVERIFY(searches.tagKey(999999).isEmpty());
+
+        CollectionRepository collections(*m_db);
+        const qint64 collection = collections.create(QStringLiteral("Project"));
+        QCOMPARE(searches.collectionFromKey(searches.collectionKey(collection)), std::optional<qint64>(collection));
+
+        Publication p;
+        p.title = QStringLiteral("Someone's Paper");
+        p.authors = {{QStringLiteral("Example"), QStringLiteral("Ada")}};
+        m_publications->create(p);
+        auto person = m_db->prepare("SELECT id FROM person");
+        QVERIFY(person->step());
+        const qint64 personId = person->int64At(0);
+        const QString key = searches.personKey(personId);
+        QVERIFY(!key.isEmpty());
+        QCOMPARE(searches.personFromKey(key), std::optional<qint64>(personId));
     }
 
     void aCollectionHasAUniqueName()

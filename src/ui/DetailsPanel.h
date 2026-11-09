@@ -117,6 +117,7 @@ private:
     void changePublication(const std::function<void(core::Publication &)> &change);
     void setMarkedAsPreprint(bool marked);
     void updateCover();
+    QString m_coverNotice; // For the bar across the cover, such as "retraction". Empty if none.
 
     LibrarySession &m_session;
     CoverCache &m_covers;

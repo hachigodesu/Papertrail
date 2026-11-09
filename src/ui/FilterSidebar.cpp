@@ -37,6 +37,7 @@ constexpr int kKeyRole = Qt::UserRole + 1;
 constexpr int kSectionRole = Qt::UserRole + 2;
 constexpr int kFacetLimit = 50;
 constexpr int kNoSection = -1;
+constexpr int kSavedSearch = -2; // An entry under Saved searches, which isn't a filter.
 
 const QLatin1StringView kFlagReview("review");
 const QLatin1StringView kFlagNoText("no_text");
@@ -204,6 +205,72 @@ FilterSidebar::FilterSidebar(TagRepository &tags, CollectionRepository &collecti
     buildSections();
     connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) { onItemChanged(item); });
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &FilterSidebar::showContextMenu);
+    connect(m_tree, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
+        if (item->data(0, kSectionRole).toInt() == kSavedSearch)
+            emit savedSearchChosen(item->data(0, kKeyRole).toLongLong());
+    });
+}
+
+SidebarChoices FilterSidebar::choices() const
+{
+    SidebarChoices choices;
+    for (int section = 0; section < SectionCount; ++section) {
+        QStringList keys(m_chosen[section].cbegin(), m_chosen[section].cend());
+        keys.sort();
+        for (const QString &key : keys)
+            choices.values[section] << qMakePair(key, m_chosenLabels[section].value(key, key));
+    }
+    choices.yearFrom = m_yearFrom->text();
+    choices.yearTo = m_yearTo->text();
+    return choices;
+}
+
+void FilterSidebar::setChoices(const SidebarChoices &choices)
+{
+    {
+        const QSignalBlocker blocker(m_tree);
+        for (int section = 0; section < SectionCount; ++section) {
+            m_chosen[section].clear();
+            m_chosenLabels[section].clear();
+            for (const auto &[key, label] : choices.values.value(section)) {
+                m_chosen[section].insert(key);
+                m_chosenLabels[section].insert(key, label);
+            }
+        }
+        QTreeWidgetItemIterator it(m_tree);
+        while (*it) {
+            const int section = (*it)->data(0, kSectionRole).toInt();
+            if (((*it)->flags() & Qt::ItemIsUserCheckable) && section >= 0 && section < SectionCount) {
+                const bool chosen = m_chosen[section].contains((*it)->data(0, kKeyRole).toString());
+                (*it)->setCheckState(0, chosen ? Qt::Checked : Qt::Unchecked);
+            }
+            ++it;
+        }
+    }
+    m_yearFrom->setText(choices.yearFrom);
+    m_yearTo->setText(choices.yearTo);
+    updateClearButton();
+    emit filterChanged();
+}
+
+void FilterSidebar::setSavedSearches(const QList<QPair<qint64, QString>> &searches)
+{
+    qDeleteAll(m_savedSearches->takeChildren());
+    for (const auto &[id, name] : searches) {
+        // Shown as it is, since a name could be anything.
+        auto *item = new QTreeWidgetItem(m_savedSearches, {name});
+        item->setFlags(Qt::ItemIsEnabled);
+        item->setToolTip(0, tr("Shows this search. Right-click to change it."));
+        item->setData(0, kKeyRole, id);
+        item->setData(0, kSectionRole, kSavedSearch);
+    }
+    if (searches.isEmpty()) {
+        auto *note = new QTreeWidgetItem(m_savedSearches, {tr("Right-click to save the current search.")});
+        note->setFlags(Qt::ItemIsEnabled);
+        note->setData(0, kSectionRole, kNoSection);
+        note->setForeground(0, palette().color(QPalette::PlaceholderText));
+    }
+    m_savedSearches->setExpanded(true);
 }
 
 void FilterSidebar::buildSections()
@@ -218,6 +285,13 @@ void FilterSidebar::buildSections()
         m_sections[section] = item;
     };
     add(Collections, tr("Collections"));
+    m_savedSearches = new QTreeWidgetItem(m_tree, {tr("Saved searches")});
+    m_savedSearches->setFlags(Qt::ItemIsEnabled);
+    m_savedSearches->setData(0, kSectionRole, kNoSection);
+    QFont savedFont = m_savedSearches->font(0);
+    savedFont.setBold(true);
+    m_savedSearches->setFont(0, savedFont);
+    setSavedSearches({});
     add(Tags, tr("Tags"));
     add(Status, tr("Needs attention"));
     add(Authors, tr("Author"));
@@ -636,6 +710,19 @@ void FilterSidebar::showContextMenu(const QPoint &position)
     QTreeWidgetItem *item = m_tree->itemAt(position);
     if (!item)
         return;
+    if (item == m_savedSearches || item->parent() == m_savedSearches) {
+        QMenu menu(this);
+        menu.addAction(tr("Save the current search..."), this, &FilterSidebar::saveSearchRequested);
+        if (item->data(0, kSectionRole).toInt() == kSavedSearch) {
+            const qint64 id = item->data(0, kKeyRole).toLongLong();
+            menu.addAction(tr("Replace with the current search"), this, [this, id] { emit savedSearchReplaceRequested(id); });
+            menu.addSeparator();
+            menu.addAction(tr("Rename..."), this, [this, id] { emit savedSearchRenameRequested(id); });
+            menu.addAction(tr("Delete"), this, [this, id] { emit savedSearchDeleteRequested(id); });
+        }
+        menu.exec(m_tree->viewport()->mapToGlobal(position));
+        return;
+    }
     const bool isCollection = item->data(0, kSectionRole).toInt() == Collections;
     if (item == m_sections[Collections] || isCollection || (item->parent() == m_sections[Collections])) {
         QMenu menu(this);

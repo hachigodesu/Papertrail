@@ -679,6 +679,17 @@ FROM publication_summary s JOIN publication p ON p.id = s.publication_id
 WHERE NOT EXISTS (SELECT 1 FROM summary_spend WHERE key NOT LIKE 'summary:%');
 )sql";
 
+// Searches kept with their filters, by name. What they choose is kept by names that mean the same in an export.
+const char *const kMigration19 = R"sql(
+CREATE TABLE IF NOT EXISTS saved_search (
+    id          INTEGER PRIMARY KEY,
+    uuid        TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    definition  TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+) STRICT;
+)sql";
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -702,6 +713,7 @@ const std::vector<Migration> &libraryMigrations()
         {16, kMigration16},
         {17, kMigration17},
         {18, kMigration18},
+        {19, kMigration19},
     };
     return migrations;
 }

@@ -148,6 +148,8 @@ struct PublicationSummary {
     std::optional<int> month;
     ReadStatus readStatus = ReadStatus::Unread;
     bool needsReview = false;
+    // The gravest notice about it that its cover shows: "retraction", "partial_retraction" or "withdrawal". Empty if none.
+    QString coverNotice;
 
     // From the publication's main file, or its volume's. All null if it has no file. An article's cover is
     // its own first page, so its key also says which page: see articleCoverKey.

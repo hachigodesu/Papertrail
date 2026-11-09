@@ -162,7 +162,7 @@ This is a real risk: Arch's MuPDF hits a double free on `tests/samples/truncated
 
 `DocumentClient` runs one `papertrail-worker --reader` process (`src/worker/ReaderHost.cpp`) per open document, so nothing in the window ever parses a document. Replies are a JSON line, optionally followed by raw bytes, so stdout has to stay binary-clean: the host takes a private copy of it and points the original at stderr. Nothing in the client waits. It sends one request at a time, in order of importance: urgent requests, selections, the wanted pages (replaced wholesale as the view scrolls, so skipped pages are never rendered), thumbnails, then background work such as measuring pages and searching. If the process dies mid-request, that request's page is marked bad for the session and the process restarts.
 
-`PageView` paints, and holds only pages near the view. Page colours are applied at paint time. `setPageRange` limits it to some pages, which is how an article opened from the library shows only its own: everything that counts pages goes through `rowStart` and `shownEnd` so the range holds. `ReaderTab` holds the toolbar and side panel, and saves the place in `reading_state`. Store a place with `placeForPage`, not `bookmarkForPage`: MuPDF's EPUB bookmarks are only valid inside one process.
+`PageView` paints, and holds only pages near the view. Page colours are applied at paint time, and dark pages leave pictures alone, from the worker's `images` op (asked for only while dark), except one covering most of a page, which is a scan. `setPageRange` limits it to some pages, which is how an article opened from the library shows only its own: everything that counts pages goes through `rowStart` and `shownEnd` so the range holds. `ReaderTab` holds the toolbar and side panel, and saves the place in `reading_state`. Store a place with `placeForPage`, not `bookmarkForPage`: MuPDF's EPUB bookmarks are only valid inside one process.
 
 ### Import pipeline
 
@@ -248,6 +248,14 @@ An issue's title from a file is usually its cover's largest text. `import/Journa
 ### Collections
 
 `CollectionRepository` holds named groupings, which can sit inside one another (`collection_parent`, a table of its own so the migration can run again). They're a filter like any other: `PublicationFilter::collectionIds` narrows every query, including the collections inside those chosen, and `FilterSidebar` lists them as a tree with counts from `LibraryQuery::collectionCounts`. Adding an issue adds its articles, and new articles join their issue's collections.
+
+### Saved searches
+
+`SavedSearchRepository` keeps a search box's text, tab, "Inside documents" and sidebar choices as JSON (`MainWindow::currentSearchDefinition`). Tags and collections are kept by uuid and people by `name_key`, never by id, so they still work after an export (`saved_searches.json`). `FilterSidebar::choices` and `setChoices` read and replace everything chosen at once, and its Saved searches section isn't a filter. `in:` matches the title of what holds an article (`ParsedSearch::inMatches`), and with best match sorts by page.
+
+### Settings and theme
+
+`SettingsDialog` gathers the window's switches, which stay `QAction`s in `MainWindow`, and the reader's defaults. `ui/Theme` applies `appearance.theme` with `QStyleHints::setColorScheme`, swapping the Windows 10 style for Fusion when dark, and setting a palette itself where a platform can't. The window's theme and the reader's page colours are separate on purpose.
 
 ### Removed folders
 

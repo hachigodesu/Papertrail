@@ -9,6 +9,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QScrollBar>
 #include <QToolTip>
 #include <QWheelEvent>
@@ -102,6 +103,8 @@ void PageView::forgetAllPages()
     m_failedPages.clear();
     m_links.clear();
     m_linksAsked.clear();
+    m_imageAreas.clear();
+    m_imageAreasAsked.clear();
     m_searchHits.clear();
     m_currentHitPage = -1;
     m_selected.clear();
@@ -398,6 +401,8 @@ void PageView::setLayoutMode(LayoutMode mode)
 void PageView::setColours(Colours colours)
 {
     m_colours = colours;
+    if (m_colours == Colours::Dark)
+        scheduleWanted(); // For where the pictures are.
     viewport()->update();
 }
 
@@ -474,6 +479,11 @@ void PageView::sendWanted()
             m_linksAsked.insert(page);
             emit linksWanted(page);
         }
+        // Only dark pages need to know, and finding them means reading the page's contents.
+        if (m_colours == Colours::Dark && !m_imageAreasAsked.contains(page)) {
+            m_imageAreasAsked.insert(page);
+            emit imageAreasWanted(page);
+        }
     }
     // Pages either side, so that turning a page is immediate.
     if (!order.isEmpty()) {
@@ -542,6 +552,22 @@ void PageView::setPageFailed(int page)
 void PageView::setLinks(int page, const QList<ReaderLink> &links)
 {
     m_links.insert(page, links);
+}
+
+void PageView::setImageAreas(int page, const QList<QRectF> &areas)
+{
+    // A picture covering most of the page is most likely a scan of it, whose text should go dark like any other.
+    const QSizeF size = m_sizes.value(page, m_typicalPageSize);
+    const double pageArea = size.width() * size.height();
+    QList<QRectF> pictures;
+    for (const QRectF &area : areas) {
+        const QRectF onPage = area.intersected(QRectF(QPointF(0, 0), size));
+        if (!onPage.isEmpty() && (pageArea <= 0 || onPage.width() * onPage.height() < 0.6 * pageArea))
+            pictures << onPage;
+    }
+    m_imageAreas.insert(page, pictures);
+    if (m_colours == Colours::Dark && !pictures.isEmpty())
+        viewport()->update();
 }
 
 void PageView::setSearchHits(int page, const QList<QRectF> &rects)
@@ -757,9 +783,25 @@ void PageView::drawPage(QPainter &painter, int page, const QRectF &target)
 
     // Colours are applied as it's drawn, so changing them doesn't mean rendering anything again.
     if (m_colours == Colours::Dark) {
+        // Everything but the pictures, which would look like negatives.
+        const QList<QRectF> pictures = cached != m_images.end() ? m_imageAreas.value(page) : QList<QRectF>();
+        if (!pictures.isEmpty()) {
+            painter.save();
+            QPainterPath outside;
+            outside.addRect(target);
+            for (const QRectF &picture : pictures) {
+                QPainterPath inside;
+                inside.addRect(QRectF(target.x() + picture.x() * m_scale, target.y() + picture.y() * m_scale,
+                                      picture.width() * m_scale, picture.height() * m_scale));
+                outside = outside.subtracted(inside);
+            }
+            painter.setClipPath(outside, Qt::IntersectClip);
+        }
         painter.setCompositionMode(QPainter::CompositionMode_Difference);
         painter.fillRect(target, QColor(232, 232, 232));
         painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        if (!pictures.isEmpty())
+            painter.restore();
     } else if (m_colours == Colours::Sepia) {
         painter.setCompositionMode(QPainter::CompositionMode_Multiply);
         painter.fillRect(target, QColor(244, 233, 208));

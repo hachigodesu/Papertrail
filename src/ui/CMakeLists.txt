@@ -64,7 +64,11 @@ add_library(papertrail_ui STATIC
     VolumeDialogs.cpp
     VolumeDialogs.h
     ReviewTab.cpp
-    ReviewTab.h)
+    ReviewTab.h
+    SettingsDialog.cpp
+    SettingsDialog.h
+    Theme.cpp
+    Theme.h)
 
 target_include_directories(papertrail_ui PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(papertrail_ui PUBLIC papertrail_summary papertrail_citation papertrail_transfer Papertrail::Keychain papertrail_core papertrail_import papertrail_metadata Qt6::Widgets)

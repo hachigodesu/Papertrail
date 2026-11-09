@@ -12,14 +12,18 @@
 #include "metadata/NoticeChecker.h"
 #include "metadata/Providers.h"
 #include "metadata/Transport.h"
+#include "ui/Delegates.h"
 #include "ui/DetailsPanel.h"
 #include "ui/ImportThread.h"
 #include "ui/LibrarySession.h"
 #include "ui/LookupThread.h"
 #include "ui/MainWindow.h"
 #include "ui/OnlineLookupDialog.h"
+#include "ui/PublicationListModel.h"
 #include "ui/ReviewTab.h"
 
+#include <QListView>
+#include <QPainter>
 #include <QApplication>
 #include <QCheckBox>
 #include <QFile>
@@ -1187,6 +1191,65 @@ private slots:
         QVERIFY(m_window->details()->noticeWarning()->isVisibleTo(m_window->details()));
         QCOMPARE(m_window->details()->noticeWarning()->text(), QStringLiteral("This was retracted in 2022."));
         QCOMPARE(m_window->details()->noticeWarning()->textFormat(), Qt::PlainText);
+
+        // In the library, its cover has a red bar along the bottom saying so, and the corrected one's doesn't.
+        for (const PublicationSummary &row : m_session->query().page({}, {}, 0, 10))
+            QCOMPARE(row.coverNotice, row.id == id ? QStringLiteral("retraction") : QString());
+        m_window->refreshNow();
+        PublicationListModel *model = m_window->model();
+        QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, kWaitMs);
+        for (int row = 0; row < 2; ++row)
+            QTRY_VERIFY_WITH_TIMEOUT(model->idAt(row).has_value(), kWaitMs);
+        const int retractedRow = *model->idAt(0) == id ? 0 : 1;
+        QCOMPARE(model->index(retractedRow, 0).data(PublicationListModel::CoverNoticeRole).toString(), QStringLiteral("retraction"));
+        QVERIFY(model->index(retractedRow, 0).data(Qt::ToolTipRole).toString().contains(QStringLiteral("Retracted")));
+        const auto redRowsInCard = [&](int row) {
+            QStyleOptionViewItem option;
+            option.initFrom(m_window->gridView());
+            option.widget = m_window->gridView();
+            option.rect = QRect(QPoint(0, 0), GridDelegate::cardSize());
+            QImage image(option.rect.size(), QImage::Format_ARGB32);
+            image.fill(Qt::white);
+            {
+                QPainter painter(&image);
+                m_window->gridView()->itemDelegate()->paint(&painter, option, model->index(row, 0));
+            }
+            // Rows with red across the middle, and the lowest of them.
+            int count = 0;
+            int lowest = -1;
+            for (int y = 0; y < image.height(); ++y) {
+                const QColor colour = image.pixelColor(image.width() / 2 - 20, y);
+                if (colour.red() > 150 && colour.green() < 80 && colour.blue() < 80) {
+                    ++count;
+                    lowest = y;
+                }
+            }
+            return qMakePair(count, lowest);
+        };
+        const auto retracted = redRowsInCard(retractedRow);
+        QVERIFY2(retracted.first >= 10, qPrintable(QString::number(retracted.first)));
+        // At the bottom of the front page, not the top: the title and authors are below it.
+        QVERIFY(retracted.second > GridDelegate::cardSize().height() / 2);
+        QCOMPARE(redRowsInCard(1 - retractedRow).first, 0);
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {
+            m_window->resize(1200, 700);
+            m_window->show();
+            m_window->details()->showPublication(id);
+            QTest::qWait(500);
+            m_window->grab().save(QDir(pictures).filePath(QStringLiteral("retracted.png")));
+        }
+
+        // A small cover gets the bar without the words, which wouldn't fit.
+        QImage small(30, 40, QImage::Format_ARGB32);
+        small.fill(Qt::white);
+        int height = 0;
+        {
+            QPainter painter(&small);
+            height = drawNoticeBar(&painter, small.rect(), QStringLiteral("Retracted"));
+        }
+        QVERIFY(height >= 4 && height < 20);
+        QCOMPARE(small.pixelColor(15, 39).red(), 0xc6);
+        QCOMPARE(small.pixelColor(15, 0), QColor(Qt::white));
 
         // A correction is listed with the details, but isn't warned about.
         m_window->details()->showPublication(other);

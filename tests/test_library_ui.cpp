@@ -18,6 +18,9 @@
 #include "ui/MainWindow.h"
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
+#include "core/repo/SavedSearchRepository.h"
+#include "ui/SettingsDialog.h"
+#include "ui/Theme.h"
 #include "import/ImportService.h"
 
 #include <QCheckBox>
@@ -30,6 +33,7 @@
 #include <QMenuBar>
 #include <QMimeData>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QCryptographicHash>
 #include <QDirIterator>
 #include <QFile>
@@ -1951,6 +1955,124 @@ private slots:
         for (QAction *action : m_window->menuBar()->actions().first()->menu()->actions())
             listed = listed || action->text() == QStringLiteral("&Backups...");
         QVERIFY(listed);
+    }
+
+    void aSavedSearchShowsItsSearchTabAndFiltersAgain()
+    {
+        const qint64 tagged = addPublication(QStringLiteral("Made Up Beams"), PublicationType::JournalArticle, QStringLiteral("Hooke"), 2015);
+        addPublication(QStringLiteral("Made Up Bridges"), PublicationType::JournalArticle, QStringLiteral("Euler"), 2018);
+        addPublication(QStringLiteral("Made Up Book of Beams"), PublicationType::Textbook, QStringLiteral("Hooke"), 2016);
+        const qint64 tag = m_session->tags().ensurePath(QStringLiteral("Made Up Topic"));
+        m_session->tags().assign(tagged, tag);
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+        QCOMPARE(m_window->sidebar()->savedSearchesItem()->childCount(), 1); // Only the hint.
+
+        // A search, a tab and a tag, kept by name.
+        m_window->setTab(LibraryTab::JournalArticles);
+        SidebarChoices choices;
+        choices.values[FilterSidebar::Tags] << qMakePair(QString::number(tag), QStringLiteral("Made Up Topic"));
+        choices.yearFrom = QStringLiteral("2010");
+        m_window->sidebar()->setChoices(choices);
+        m_window->searchBox()->setText(QStringLiteral("beams"));
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        const std::optional<qint64> saved = m_window->saveCurrentSearch(QStringLiteral("Tagged beams"));
+        QVERIFY(saved.has_value());
+        QTreeWidgetItem *listed = m_window->sidebar()->savedSearchesItem()->child(0);
+        QCOMPARE(m_window->sidebar()->savedSearchesItem()->childCount(), 1);
+        QCOMPARE(listed->text(0), QStringLiteral("Tagged beams"));
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {
+            m_window->resize(1200, 700);
+            QTest::qWait(300);
+            m_window->sidebar()->grab().save(QDir(pictures).filePath(QStringLiteral("saved-searches.png")));
+        }
+        // The tag is kept by its uuid, which means the same in an export.
+        const QJsonObject definition = SavedSearchRepository(m_session->database()).get(*saved)->definition;
+        QCOMPARE(definition.value(QStringLiteral("filters")).toObject().value(QStringLiteral("tags")).toArray().first().toObject()
+                     .value(QStringLiteral("key")).toString(),
+                 m_session->tags().get(tag)->uuid);
+
+        // Everything cleared, then shown again from the sidebar.
+        m_window->searchBox()->clear();
+        m_window->sidebar()->clearSelection();
+        m_window->setTab(LibraryTab::All);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+        emit m_window->sidebar()->tree()->itemClicked(listed, 0);
+        QCOMPARE(m_window->searchBox()->text(), QStringLiteral("beams"));
+        QCOMPARE(m_window->tabBar()->tabText(m_window->tabBar()->currentIndex()), m_window->tabBar()->tabText(2));
+        const SidebarChoices shown = m_window->sidebar()->choices();
+        QCOMPARE(shown.values.value(FilterSidebar::Tags).size(), 1);
+        QCOMPARE(shown.values.value(FilterSidebar::Tags).first().first, QString::number(tag));
+        QCOMPARE(shown.yearFrom, QStringLiteral("2010"));
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+
+        // A tag deleted since is left out, and the rest still applies.
+        m_session->tags().remove(tag);
+        m_window->sidebar()->clearSelection();
+        m_window->showSavedSearch(*saved);
+        QVERIFY(m_window->sidebar()->choices().values.value(FilterSidebar::Tags).isEmpty());
+        QCOMPARE(m_window->searchBox()->text(), QStringLiteral("beams"));
+
+        // Names can't repeat, and deleting it leaves the hint.
+        QVERIFY(!SavedSearchRepository(m_session->database()).all().isEmpty());
+        SavedSearchRepository(m_session->database()).remove(*saved);
+        m_window->refreshSavedSearches();
+        QCOMPARE(m_window->sidebar()->savedSearchesItem()->childCount(), 1);
+        QVERIFY(m_window->sidebar()->savedSearchesItem()->child(0)->text(0) != QStringLiteral("Tagged beams"));
+    }
+
+    void settingsGatherTheSwitchesAndChooseTheTheme()
+    {
+        openWindow();
+        // The switches left the File menu for the Settings window.
+        QStringList fileMenu;
+        for (QAction *action : m_window->menuBar()->actions().first()->menu()->actions())
+            fileMenu << action->text();
+        QVERIFY(fileMenu.contains(QStringLiteral("Se&ttings...")));
+        QVERIFY(!fileMenu.contains(QStringLiteral("Index document text")));
+        QVERIFY(!fileMenu.contains(QStringLiteral("&Online lookups...")));
+
+        // A box follows its switch both ways.
+        QAction index(QStringLiteral("Index"));
+        index.setCheckable(true);
+        index.setChecked(true);
+        SettingsActions actions;
+        actions.indexContents = &index;
+        SettingsDialog dialog(*m_session, actions, m_window.get());
+        QVERIFY(dialog.indexContentsBox()->isChecked());
+        dialog.indexContentsBox()->setChecked(false);
+        QVERIFY(!index.isChecked());
+        index.setChecked(true);
+        QVERIFY(dialog.indexContentsBox()->isChecked());
+
+        // What documents open with, which the reader also changes.
+        dialog.pageColoursBox()->setCurrentIndex(dialog.pageColoursBox()->findData(QStringLiteral("sepia")));
+        QCOMPARE(m_session->settings().value(QStringLiteral("reader.page_colours")).toString(), QStringLiteral("sepia"));
+        dialog.pageLayoutBox()->setCurrentIndex(dialog.pageLayoutBox()->findData(QStringLiteral("two_page")));
+        QCOMPARE(m_session->settings().value(QStringLiteral("reader.page_layout")).toString(), QStringLiteral("two_page"));
+        dialog.textSizeBox()->setValue(16);
+        QCOMPARE(m_session->settings().value(QStringLiteral("reader.font_size")).toDouble(), 16.0);
+        dialog.textSizeBox()->setValue(99); // Kept to what the reader allows.
+        QCOMPARE(m_session->settings().value(QStringLiteral("reader.font_size")).toDouble(), 32.0);
+
+        // Choosing a theme keeps it, and changes the window's colours straight away.
+        const QString styleBefore = QApplication::style()->name();
+        const auto windowLightness = [] { return QApplication::palette().color(QPalette::Window).lightness(); };
+        QCOMPARE(dialog.themeBox()->currentData().toString(), QStringLiteral("system"));
+        dialog.themeBox()->setCurrentIndex(dialog.themeBox()->findData(QStringLiteral("dark")));
+        QCOMPARE(m_session->settings().value(QStringLiteral("appearance.theme")).toString(), QStringLiteral("dark"));
+        QVERIFY2(windowLightness() < 128, qPrintable(QString::number(windowLightness())));
+        dialog.themeBox()->setCurrentIndex(dialog.themeBox()->findData(QStringLiteral("light")));
+        QCOMPARE(m_session->settings().value(QStringLiteral("appearance.theme")).toString(), QStringLiteral("light"));
+        QVERIFY2(windowLightness() >= 128, qPrintable(QString::number(windowLightness())));
+        dialog.themeBox()->setCurrentIndex(dialog.themeBox()->findData(QStringLiteral("system")));
+        QCOMPARE(m_session->settings().value(QStringLiteral("appearance.theme")).toString(), QStringLiteral("system"));
+        // Left as the other tests expect it.
+        QApplication::setStyle(styleBefore);
+        QApplication::setPalette(QPalette());
+
+        QCOMPARE(themeFromSetting(QStringLiteral("nonsense")), Theme::System);
+        QCOMPARE(settingFor(Theme::Dark), QStringLiteral("dark"));
     }
 
     void theEditorSuggestsWhatsAlreadyInTheLibrary()

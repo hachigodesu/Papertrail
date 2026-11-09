@@ -361,6 +361,18 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
     }
     report.collections = collectionArray.size();
 
+    // A saved search refers to tags, collections and people by what names them in any library, so it's copied as it is.
+    QJsonArray savedSearchArray;
+    {
+        auto select = db.prepare("SELECT uuid, name, definition, created_at FROM saved_search ORDER BY id");
+        while (select->step()) {
+            savedSearchArray.append(QJsonObject{{QStringLiteral("uuid"), select->textAt(0)},
+                                                {QStringLiteral("name"), select->textAt(1)},
+                                                {QStringLiteral("definition"), QJsonDocument::fromJson(select->textAt(2).toUtf8()).object()},
+                                                {QStringLiteral("createdAt"), double(select->int64At(3))}});
+        }
+    }
+
     const QJsonArray annotationArray = rows(
         db,
         "SELECT a.uuid, p.uuid, a.content_hash, a.location_json, a.type, a.colour, a.selected_text, a.note, a.needs_review, "
@@ -461,6 +473,7 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
     zip.add(QStringLiteral("publications.json"), json(publicationArray));
     zip.add(QStringLiteral("tags.json"), json(tagArray));
     zip.add(QStringLiteral("collections.json"), json(collectionArray));
+    zip.add(QStringLiteral("saved_searches.json"), json(savedSearchArray));
     zip.add(QStringLiteral("annotations.json"), json(annotationArray));
     zip.add(QStringLiteral("reading.json"), json(readingArray));
     zip.add(QStringLiteral("provenance.json"), json(provenanceArray));
@@ -525,6 +538,7 @@ std::optional<Bundle> readBundle(const QByteArray &data, QString *error)
     };
     if (!array(QStringLiteral("publications.json"), bundle.publications) || !array(QStringLiteral("tags.json"), bundle.tags)
         || !array(QStringLiteral("collections.json"), bundle.collections)
+        || !array(QStringLiteral("saved_searches.json"), bundle.savedSearches)
         || !array(QStringLiteral("annotations.json"), bundle.annotations)
         || !array(QStringLiteral("reading.json"), bundle.readingStates)
         || !array(QStringLiteral("provenance.json"), bundle.provenance)
@@ -571,8 +585,10 @@ public:
             importTags();
         if (!importPublications(total))
             return false;
-        if (m_options.parts.tags)
+        if (m_options.parts.tags) {
             importCollections();
+            importSavedSearches();
+        }
         if (m_options.parts.annotations)
             importAnnotations();
         if (m_options.parts.readingPlaces)
@@ -910,6 +926,39 @@ private:
         return !proposed.isEmpty();
     }
 
+    // ---- Saved searches. One already here, by uuid, is left as it is.
+    void importSavedSearches()
+    {
+        auto byUuid = m_db.prepare("SELECT 1 FROM saved_search WHERE uuid = ?");
+        auto byName = m_db.prepare("SELECT 1 FROM saved_search WHERE name = ? COLLATE NOCASE");
+        auto insert = m_db.prepare("INSERT INTO saved_search (uuid, name, definition, created_at) VALUES (?, ?, ?, ?)");
+        const auto has = [](core::Statement &select, const QString &value) {
+            select.bind(1, value);
+            const bool found = select.step();
+            select.reset();
+            return found;
+        };
+        for (const QJsonValue &value : m_bundle.savedSearches) {
+            const QJsonObject search = value.toObject();
+            const QString uuid = search.value(QStringLiteral("uuid")).toString();
+            QString name = search.value(QStringLiteral("name")).toString().trimmed();
+            if (uuid.isEmpty() || name.isEmpty() || has(*byUuid, uuid))
+                continue;
+            // A different search with the same name keeps its name, and this one says where it came from.
+            if (has(*byName, name)) {
+                name = QStringLiteral("%1 (imported)").arg(name);
+                if (has(*byName, name))
+                    continue;
+            }
+            insert->bind(1, uuid);
+            insert->bind(2, name);
+            insert->bind(3, QString::fromUtf8(QJsonDocument(search.value(QStringLiteral("definition")).toObject()).toJson(QJsonDocument::Compact)));
+            insert->bind(4, int64Value(search.value(QStringLiteral("createdAt"))));
+            insert->step();
+            insert->reset();
+        }
+    }
+
     // ---- Collections
     void importCollections()
     {
@@ -1195,6 +1244,7 @@ void clearLibrary(Database &db)
     db.exec("DELETE FROM collection_publication");
     db.exec("DELETE FROM collection_parent");
     db.exec("DELETE FROM collection");
+    db.exec("DELETE FROM saved_search");
     db.exec("DELETE FROM publication_summary");
     db.exec("DELETE FROM annotation");
     db.exec("DELETE FROM reading_state");

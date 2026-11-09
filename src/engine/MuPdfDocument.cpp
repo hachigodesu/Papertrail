@@ -377,6 +377,30 @@ public:
         return links;
     }
 
+    QList<QRectF> imageAreas(int page) override
+    {
+        layoutIfNeeded();
+        if (page < 0 || page >= pageCount())
+            return {};
+        fz_stext_options options{};
+        options.flags = FZ_STEXT_PRESERVE_IMAGES;
+        fz_stext_page *text = nullptr;
+        fz_var(text);
+        fz_try(m_ctx) {
+            text = fz_new_stext_page_from_page_number(m_ctx, m_doc, page, &options);
+        }
+        fz_catch(m_ctx) {
+            return {};
+        }
+        QList<QRectF> areas;
+        for (fz_stext_block *block = text->first_block; block; block = block->next) {
+            if (block->type == FZ_STEXT_BLOCK_IMAGE && !fz_is_empty_rect(block->bbox))
+                areas << QRectF(block->bbox.x0, block->bbox.y0, block->bbox.x1 - block->bbox.x0, block->bbox.y1 - block->bbox.y0);
+        }
+        fz_drop_stext_page(m_ctx, text);
+        return areas;
+    }
+
     QList<QRectF> search(int page, const QString &query) override
     {
         layoutIfNeeded();

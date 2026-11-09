@@ -296,6 +296,13 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
         emit linksReady(request.page, links);
         break;
     }
+    case Kind::Images: {
+        QList<QRectF> areas;
+        for (const QJsonValue &value : reply.value(QStringLiteral("areas")).toArray())
+            areas << rectFromJson(value);
+        emit imageAreasReady(request.page, areas);
+        break;
+    }
     case Kind::Heading: {
         ReaderHeading heading;
         if (ok) {
@@ -431,8 +438,8 @@ void DocumentClient::setLayout(const ReaderLayout &layout, int page)
     m_wanted.clear();
     m_thumbnails.clear();
     m_selections.clear();
-    // Sizes from the old layout are no use now.
-    m_background.removeIf([](const Request &request) { return request.kind == Kind::Sizes; });
+    // Sizes and pictures' places from the old layout are no use now.
+    m_background.removeIf([](const Request &request) { return request.kind == Kind::Sizes || request.kind == Kind::Images; });
     Request request;
     request.kind = Kind::Layout;
     request.body = layoutBody();
@@ -476,6 +483,16 @@ void DocumentClient::requestLinks(int page)
     request.page = page;
     request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("links")}, {QStringLiteral("page"), page}};
     m_urgent << request;
+    pump();
+}
+
+void DocumentClient::requestImageAreas(int page)
+{
+    Request request;
+    request.kind = Kind::Images;
+    request.page = page;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("images")}, {QStringLiteral("page"), page}};
+    m_background << request;
     pump();
 }
 

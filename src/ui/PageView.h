@@ -53,6 +53,9 @@ public:
     void setPageImage(int page, double scale, const QImage &image);
     void setPageFailed(int page);
     void setLinks(int page, const QList<ReaderLink> &links);
+    // Where a page's pictures are, in points. Dark pages leave them as they are.
+    void setImageAreas(int page, const QList<QRectF> &areas);
+    QList<QRectF> imageAreasOn(int page) const { return m_imageAreas.value(page); }
 
     void setLayoutMode(LayoutMode mode);
     LayoutMode layoutMode() const { return m_layoutMode; }
@@ -123,6 +126,7 @@ signals:
     // Replaces any earlier list.
     void pagesWanted(const QList<papertrail::ui::RenderRequest> &pages);
     void linksWanted(int page);
+    void imageAreasWanted(int page);
     void selectionWanted(int page, const QPointF &a, const QPointF &b);
     void currentPageChanged(int page);
     void zoomChanged();
@@ -212,6 +216,8 @@ private:
 
     QHash<int, QList<ReaderLink>> m_links;
     QSet<int> m_linksAsked;
+    QHash<int, QList<QRectF>> m_imageAreas;
+    QSet<int> m_imageAreasAsked;
 
     QHash<int, QList<AnnotationMark>> m_marks;
     QHash<int, QList<QRectF>> m_searchHits;

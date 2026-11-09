@@ -369,6 +369,37 @@ def drawing_only_pdf(path):
     path.write_bytes(build_pdf([content]))
 
 
+def picture_pdf(path):
+    """Text above a made-up picture, a grey square with a dark bar, which dark pages should leave alone.
+    The picture is 200 by 200 points, at 100 points from the left and 300 from the bottom."""
+    width = height = 64
+    pixels = bytes((40 if 24 <= y < 40 else 160) for y in range(height) for _ in range(width))
+    image = zlib.compress(pixels)
+    text = page_stream([(20, "A Page With a Picture"), (10, "The picture below should keep its colours on dark pages.")])
+    content = text + b"\nq 200 0 0 200 100 300 cm /Im1 Do Q"
+    objects = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        4: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R "
+           b"/Resources << /Font << /F1 3 0 R >> /XObject << /Im1 6 0 R >> >> >>",
+        5: b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content),
+        6: b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 8 "
+           b"/Filter /FlateDecode /Length %d >>\nstream\n%s\nendstream" % (width, height, len(image), image),
+    }
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for number in sorted(objects):
+        offsets[number] = len(out)
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, objects[number])
+    xref = len(out)
+    out += b"xref\n0 7\n0000000000 65535 f \n"
+    for number in range(1, 7):
+        out += b"%010d 00000 n \n" % offsets[number]
+    out += b"trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % xref
+    path.write_bytes(bytes(out))
+
+
 def make_epub(path):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", zipfile.ZIP_STORED)
@@ -611,6 +642,7 @@ def main():
     reader_epub(out / "reader_ncx.epub", "ncx")
 
     drawing_only_pdf(out / "scanned_no_text.pdf")
+    picture_pdf(out / "picture_page.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))
     encrypted_pdf(out / "encrypted.pdf", [(20, "Locked Paper"), (10, "You should not be able to read this text.")])
 

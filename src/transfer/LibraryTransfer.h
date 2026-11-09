@@ -51,6 +51,7 @@ struct Bundle {
     QJsonArray publications;
     QJsonArray tags;
     QJsonArray collections;
+    QJsonArray savedSearches;
     QJsonArray annotations;
     QJsonArray readingStates;
     QJsonArray provenance;
@@ -71,7 +72,7 @@ enum class ImportMode {
 // Which parts of an export to bring in.
 struct ImportParts {
     bool details = true;      // Publications, their read status, ratings, notes, summaries and history.
-    bool tags = true;         // Tags and collections.
+    bool tags = true;         // Tags, collections and saved searches.
     bool annotations = true;  // Highlights and notes in documents.
     bool readingPlaces = true;
     bool settings = true;

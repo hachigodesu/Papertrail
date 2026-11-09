@@ -74,6 +74,8 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("library.watch_folders"), true, K::Value, {}},
         {QStringLiteral("library.show_filters"), true, K::Value, {}},
         {QStringLiteral("library.show_details"), true, K::Value, {}},
+        {QStringLiteral("appearance.theme"), QStringLiteral("system"), K::Value,
+         {QStringLiteral("system"), QStringLiteral("light"), QStringLiteral("dark")}},
         {QStringLiteral("library.last_import_folder"), QStringLiteral(""), K::MachinePath, {}},
         {QStringLiteral("window.geometry"), QStringLiteral(""), K::ThisComputer, {}},
         {QStringLiteral("window.splitter"), QStringLiteral(""), K::ThisComputer, {}},

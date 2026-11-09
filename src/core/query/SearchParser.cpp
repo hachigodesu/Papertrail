@@ -24,6 +24,7 @@ bool isFieldName(const QString &name)
         QStringLiteral("institution"), QStringLiteral("tag"), QStringLiteral("doi"),
         QStringLiteral("isbn"), QStringLiteral("issn"), QStringLiteral("arxiv"),
         QStringLiteral("type"), QStringLiteral("year"), QStringLiteral("note"),
+        QStringLiteral("in"),
     };
     return fields.contains(name);
 }
@@ -218,6 +219,13 @@ ParsedSearch parseSearch(const QString &text)
             addFtsTerms(terms, Token{QString(), token.value, token.quoted});
             if (!terms.isEmpty())
                 result.notesMatches << terms.join(u' ');
+        } else if (token.field == QStringLiteral("in")) {
+            // Words of the title of what holds an article, such as its issue. Not the article's own words,
+            // so they stay out of the search of its details.
+            QStringList terms;
+            addFtsTerms(terms, Token{QStringLiteral("title"), token.value, token.quoted});
+            if (!terms.isEmpty())
+                result.inMatches << terms.join(u' ');
         } else if (token.field == QStringLiteral("year")) {
             if (!parseYear(token.value, result))
                 addWords(Token{QString(), token.value, token.quoted});

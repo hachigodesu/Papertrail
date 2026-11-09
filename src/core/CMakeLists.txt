@@ -42,6 +42,8 @@ add_library(papertrail_core STATIC
     repo/VolumeArticles.h
     repo/CollectionRepository.cpp
     repo/CollectionRepository.h
+    repo/SavedSearchRepository.cpp
+    repo/SavedSearchRepository.h
     settings/SettingsStore.cpp
     settings/SettingsStore.h)
 

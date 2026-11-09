@@ -8,6 +8,7 @@
 #include "ui/QueryThreads.h"
 
 #include <QHash>
+#include <QJsonObject>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPointer>
@@ -100,6 +101,15 @@ public:
     void stopImport();
 
     void setTab(core::LibraryTab tab);
+    // Lists the articles of an issue, proceedings or book in the library, through an in: search.
+    void showArticlesOf(qint64 holder);
+
+    // The search box, tab and filters, kept by name and shown again from the sidebar.
+    QJsonObject currentSearchDefinition();
+    std::optional<qint64> saveCurrentSearch(const QString &name);
+    void showSavedSearch(qint64 id);
+    // Lists the saved searches in the sidebar again, after they change.
+    void refreshSavedSearches();
     void setViewMode(ViewMode mode);
     ViewMode viewMode() const { return m_viewMode; }
 
@@ -292,6 +302,8 @@ private:
     // Where the licence texts of everything bundled were installed, or nothing in a build that isn't installed.
     static QString licencesFolder();
     void showLookupSettings();
+    void showSettings();
+    void askToSaveSearch();
     void askAndLookUpLibrary();
     void askAndLookUpSelected();
     bool makeSureLookupModeIsChosen();

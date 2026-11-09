@@ -59,3 +59,32 @@ In the build you've been using, open a publication with a few highlights, and op
 ## When it looks right
 
 Tell me, along with what you found on Linux, and I'll commit M12. Pushing a `v1.0.0` tag then makes a draft release on GitHub with every package, which stays private until you publish it.
+
+## For 1.0.2
+
+What its tests can't vouch for. The packages are on the release's page.
+
+**Reader**
+
+- **Contents:** an issue whose contents number some entries "1", "2", "3" shows only the titled ones. A document whose contents are only numbers still shows them.
+- **Highlighting:** the toolbar has no Highlight button. Right-clicking selected text highlights in each colour, underlines and adds a note.
+- **Dark pages:** real papers' figures and photos keep their colours, charts drawn as lines are still inverted, scanned PDFs still go dark, and an EPUB's pictures keep theirs. Scrolling a long, figure-heavy PDF in dark mode isn't noticeably slower.
+
+**Library**
+
+- **Articles in the details:** long titles wrap, and wrap again when the panel is resized. Double-clicking and the right-click menu still work.
+- **Show its articles:** right-clicking an issue lists its articles in page order, clearing the tab and sidebar filters. Two issues whose titles overlap, such as "Vol 5" and "Vol 5 Issue 2", both show.
+- **Saved searches:** saving from the sidebar and from the search box's **?** menu, showing one, replacing, renaming and deleting it, and one with an author or journal that isn't among the 50 listed.
+- **Retracted:** a retracted paper with a cover has the red bar along the bottom of its preview in the grid, the list and the details, and stacks with "File missing".
+
+**Settings (Ctrl+,)**
+
+- **Theme:** switching Light, Dark and Same as the system with a document and a dialog open leaves nothing in the old colours, and the choice is kept after a restart. With Same as the system, changing Windows' own mode while Papertrail is open follows it.
+- **Reading:** page layout, colours and text size apply to a document opened for the first time, and the text size to an EPUB.
+- **Switches and buttons** each take effect or open their dialog.
+
+**Elsewhere**
+
+- **Upgrading:** opening a library from 1.0.1 adds saved searches to it, after a backup in its `backups` folder. 1.0.1 can't open it afterwards.
+- **Windows 11's style,** which draws selected rows itself, in the Notes and Articles lists.
+- **Theme switching on a Linux desktop,** KDE or GNOME on Wayland.

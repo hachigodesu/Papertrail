@@ -32,6 +32,8 @@ public:
         NeedsReviewRole,
         // For a journal issue, its numbers and date, such as "Vol. 7, No. 11, Nov 2026", to tell issues apart.
         NumberingRole,
+        // "retraction", "partial_retraction" or "withdrawal", for the bar across its cover. Empty if none.
+        CoverNoticeRole,
     };
 
     explicit PublicationListModel(const QString &databasePath, QObject *parent = nullptr);

@@ -14,7 +14,9 @@
 #include "ui/MetadataEditor.h"
 #include "ui/OnlineLookupDialog.h"
 #include "ui/PublicationListModel.h"
+#include "ui/SettingsDialog.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -105,6 +107,23 @@ int main(int argc, char *argv[])
     {
         ui::OnlineLookupDialog dialog(QStringLiteral("Look up details for these files online?"), QStringLiteral("online_review"), QString(), true);
         dialog.grab().save(out.filePath(QStringLiteral("lookup-dialog.png")));
+    }
+
+    {
+        // Stand-ins for the window's switches, which it keeps to itself.
+        QAction rescan, watch, index;
+        for (QAction *action : {&rescan, &watch, &index}) {
+            action->setCheckable(true);
+            action->setChecked(true);
+        }
+        ui::SettingsActions actions;
+        actions.rescanOnStartup = &rescan;
+        actions.watchFolders = &watch;
+        actions.indexContents = &index;
+        actions.showFolders = actions.showOnlineLookups = actions.showApiKey = actions.showBackups = [] {};
+        ui::SettingsDialog dialog(session, actions);
+        dialog.adjustSize();
+        dialog.grab().save(out.filePath(QStringLiteral("settings.png")));
     }
 
     // The reader, for anything whose title is given.

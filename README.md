@@ -162,7 +162,7 @@ sha256sum --check --ignore-missing SHA256SUMS
 
 1. **Open Papertrail.** The first time, it welcomes you and says where your library is kept.
 2. **Add a folder** of papers and books with **Add folder...**. Papertrail finds every document in it and the folders inside it, wherever they are, and never moves or changes them. Add as many folders as you like.
-3. **Choose whether to look up details online.** Papertrail asks the first time. It can fill in titles, authors and journals from Crossref, OpenAlex, arXiv and Open Library, letting you check each change or not, or stay offline entirely. Change this later under **File > Online lookups...**.
+3. **Choose whether to look up details online.** Papertrail asks the first time. It can fill in titles, authors and journals from Crossref, OpenAlex, arXiv and Open Library, letting you check each change or not, or stay offline entirely. Change this later under **File > Settings... > Online lookups...**.
 4. **Wait for the import.** The status bar shows progress, and publications appear as they're found. You can carry on using Papertrail meanwhile, and stopping is safe: it carries on next time.
 5. **Find and read.** Choose a tab, filter with the sidebar, or type in the search box (the **?** beside it lists every way of searching). Double-click a publication to read it.
 
@@ -186,9 +186,10 @@ Moving from another computer? Choose **Import a library from another computer...
 
 - **A cover grid and a detailed list,** sorted by title, first author, year, date added, or how well each matches a search.
 - **Filters with live counts:** tags, collections, year range, author, journal, publisher, conference, language, format and read status. Also **needs attention** filters: needing review, no text layer, no file, missing or offline files, unreadable files, and retracted or of concern.
-- **A search box** for plain words, `"exact phrases"`, and fields: `title:`, `author:`, `abstract:`, `journal:`, `conference:`, `publisher:`, `institution:`, `tag:`, `doi:`, `isbn:`, `issn:`, `arxiv:`, `type:`, `note:`, and `year:` with ranges such as `year:>2010`. The **?** beside it lists them all, with examples.
+- **A search box** for plain words, `"exact phrases"`, and fields: `title:`, `author:`, `abstract:`, `journal:`, `conference:`, `publisher:`, `institution:`, `tag:`, `doi:`, `isbn:`, `issn:`, `arxiv:`, `type:`, `note:`, `in:` (articles in an issue or book), and `year:` with ranges such as `year:>2010`. The **?** beside it lists them all, with examples.
 - **Search inside documents:** tick **Inside documents** to find words in the text of every indexed document, and open the document at that page. Indexing happens in the background.
 - **Search your highlights and notes,** with `note:` or plain words.
+- **Saved searches** in the sidebar keep a search with its tab and filters, ready to show again with a click. Right-click **Saved searches** to save the current one.
 
 ### Organising
 
@@ -198,7 +199,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Changes to many at once:** tag, add to a collection, set read status, look up details, cite, or summarise a whole selection.
 - **Read status, rating and personal notes** for each publication.
 - **Edit any detail,** with the fields that suit each kind of publication and suggestions from the rest of your library.
-- **Journal issues and books split into articles and chapters,** from their table of contents or, for an issue without one, from the DOIs on its pages. Each article opens at its own pages, is searched, tagged and cited on its own, and follows its issue into collections.
+- **Journal issues and books split into articles and chapters,** from their table of contents or, for an issue without one, from the DOIs on its pages. Each article opens at its own pages, is searched, tagged and cited on its own, and follows its issue into collections. Right-click an issue and choose **Show its articles** to list them in the library, in the order they're in it.
 
 ### Reading
 
@@ -207,12 +208,12 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Contents and page thumbnails** in a side panel.
 - **Search within a document,** stepping through every match.
 - **Select and copy text,** across pages.
-- **Light, dark and sepia pages,** and larger or smaller text for EPUB and other reflowable books.
+- **Light, dark and sepia pages,** with pictures left in their own colours on dark pages, and larger or smaller text for EPUB and other reflowable books. **File > Settings...** sets what documents open with.
 - **Links** within a document, and to the web.
 
 ### Highlights and notes
 
-- **Highlight or underline** in four colours, and add notes to what you've selected.
+- **Highlight or underline** in four colours, and add notes to what you've selected, by right-clicking it.
 - **They survive** restarts, moving or renaming the file, and text size changes in EPUBs. They're kept in Papertrail's library, never in your files.
 - **The Notes panel** lists a document's highlights and notes, and goes to each. Choose several at once to change their colour, copy, export or delete them together.
 - **Every highlight and note in your library** in one searchable list, under **View > Highlights and notes...**.
@@ -249,7 +250,7 @@ Moving from another computer? Choose **Import a library from another computer...
 ### Everywhere
 
 - **Windows 10 and 11, and Linux** on X11 and Wayland.
-- **Follows your system's light or dark mode.**
+- **Follows your system's light or dark mode,** or stays light or dark, under **File > Settings...**.
 - **No account, no telemetry,** and nothing sent anywhere you haven't chosen.
 
 ## Where your library is kept

@@ -131,6 +131,10 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
               "UNION SELECT rowid FROM publication_note_fts WHERE publication_note_fts MATCH ?)");
         c.bindings << notes << notes;
     }
+    for (const QString &holder : search.inMatches) {
+        c.add("p.parent_id IN (SELECT rowid FROM publication_fts WHERE publication_fts MATCH ?)");
+        c.bindings << holder;
+    }
     for (const QString &prefix : search.tagPrefixes) {
         c.add("p.id IN (SELECT publication_id FROM publication_tag WHERE tag_id IN ("
               "WITH RECURSIVE down(id) AS (SELECT id FROM tag WHERE name LIKE ? ESCAPE '\\' "
@@ -265,7 +269,10 @@ ListQuery buildListQuery(const PublicationFilter &filter, const PublicationSort 
         query.sql += " ORDER BY bm25(publication_fts, 10.0, 1.0, 5.0, 3.0, 2.0, 1.0, 8.0), p.id";
     } else {
         Conditions c = buildConditions(filter, ftsClause, anyHidden);
-        query.sql = " FROM publication p" + c.whereClause() + orderBy(sort);
+        // The best match for the articles of an issue is the order they're in it.
+        const bool pageOrder = sort.field == SortField::Relevance && !parseSearch(filter.searchText).inMatches.isEmpty();
+        query.sql = " FROM publication p" + c.whereClause()
+            + (pageOrder ? QByteArray(" ORDER BY p.parent_id, coalesce(p.page_start, 2147483647), p.title_sort, p.id") : orderBy(sort));
         query.bindings = c.bindings;
     }
     return query;
@@ -446,7 +453,9 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
     auto select = m_db.prepare(
         "SELECT p.id, p.type, p.title, p.authors_display, p.year, p.container_title, p.read_status, "
         "p.needs_review, coalesce(p.parent_id, p.id), CASE WHEN p.parent_id IS NULL THEN NULL ELSE p.page_start END, "
-        "p.volume, p.issue, p.month"
+        "p.volume, p.issue, p.month, "
+        "(SELECT CASE WHEN max(kind = 'retraction') THEN 'retraction' WHEN max(kind = 'partial_retraction') THEN 'partial_retraction' "
+        "WHEN max(kind IN ('withdrawal', 'removal')) THEN 'withdrawal' END FROM publication_notice WHERE publication_id = p.id)"
         + query.sql + " LIMIT ? OFFSET ?");
     bindAll(*select, query.bindings);
     select->bind(int(query.bindings.size()) + 1, limit);
@@ -473,6 +482,7 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
         row.volume = select->textAt(10);
         row.issue = select->textAt(11);
         row.month = select->optIntAt(12);
+        row.coverNotice = select->textAt(13);
         rows << row;
     }
 
