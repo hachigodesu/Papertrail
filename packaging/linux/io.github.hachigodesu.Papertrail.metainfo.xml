@@ -59,6 +59,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.2" date="2026-11-10">
+      <description>
+        <p>Saved searches, a Settings window with a light or dark theme, pictures left in their colours on dark pages, and retracted publications marked on their covers.</p>
+      </description>
+    </release>
     <release version="1.0.1" date="2026-11-09">
       <description>
         <p>The reader's Notes panel shows each highlight's words and its note apart, so notes are easy to read.</p>
