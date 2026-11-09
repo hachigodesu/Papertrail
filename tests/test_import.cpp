@@ -306,6 +306,21 @@ private slots:
         QVERIFY(!p.needsReview);
     }
 
+    void aJudgmentIsCaseLawToBeChecked()
+    {
+        copySample("judgment.pdf");
+        const Publication p = importOne();
+        QCOMPARE(p.type, PublicationType::CaseLaw);
+        QVERIFY(p.needsReview); // Never certain.
+        QCOMPARE(p.title, QStringLiteral("Made-Up Holdings Ltd v Another Example Plc"));
+        QCOMPARE(p.neutralCitation, QStringLiteral("[2021] EWCA Civ 1234"));
+        QCOMPARE(p.court, QStringLiteral("Court of Appeal (Civil Division)"));
+        QCOMPARE(p.jurisdiction, QStringLiteral("England and Wales"));
+        QCOMPARE(p.caseNumber, QStringLiteral("A2/2020/0567"));
+        QCOMPARE(p.year.value_or(0), 2021);
+        QVERIFY(p.caseCitationForm.isEmpty()); // The Bluebook's way unless someone chooses otherwise.
+    }
+
     void epubMetadataIsRead()
     {
         copySample("book.epub");

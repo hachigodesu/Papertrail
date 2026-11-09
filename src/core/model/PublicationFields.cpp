@@ -52,6 +52,11 @@ const std::array kTextFields = {
     TextField{"standard_body", &Publication::standardBody},
     TextField{"standard_revision", &Publication::standardRevision},
     TextField{"standard_status", &Publication::standardStatus},
+    TextField{"court", &Publication::court},
+    TextField{"jurisdiction", &Publication::jurisdiction},
+    TextField{"neutral_citation", &Publication::neutralCitation},
+    TextField{"case_number", &Publication::caseNumber},
+    TextField{"case_citation_form", &Publication::caseCitationForm},
 };
 
 const std::array kNumberFields = {

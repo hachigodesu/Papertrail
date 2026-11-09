@@ -645,6 +645,12 @@ void DetailsPanel::reload()
     addFact(tr("Issued by"), p.standardBody);
     addFact(tr("Revision"), p.standardRevision);
     addFact(tr("Status"), p.standardStatus);
+    addFact(tr("Court"), p.court);
+    addFact(tr("Jurisdiction"), p.jurisdiction);
+    addFact(tr("Neutral citation"), p.neutralCitation);
+    addFact(tr("Case number"), p.caseNumber);
+    if (p.type == PublicationType::CaseLaw)
+        addFact(tr("Cited as"), p.caseCitationForm == QLatin1StringView("uk") ? tr("OSCOLA (UK)") : tr("Bluebook (US)"));
 
     if (!p.doi.isEmpty())
         addLink(tr("DOI"), p.doi, doiLink(p.doi));

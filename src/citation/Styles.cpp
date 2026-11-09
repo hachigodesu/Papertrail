@@ -128,6 +128,108 @@ QString volumeAndIssue(const CitationItem &item)
     return {};
 }
 
+// ---------------------------------------------------------------------------------------------------- Cases
+
+// A case's name with "v" as its form writes it: "v" for OSCOLA, "v." for the Bluebook.
+QString caseName(const CitationItem &item)
+{
+    QString name = item.title.simplified();
+    static const QRegularExpression versus(QStringLiteral("\\s+(?:v|vs)\\.?\\s+"));
+    name.replace(versus, item.oscola ? QStringLiteral(" v ") : QStringLiteral(" v. "));
+    return name;
+}
+
+// Where a report starts, as a case is cited: "562" from "562-580".
+QString firstPage(const QString &pages)
+{
+    static const QRegularExpression range(QStringLiteral("\\s*[-–—]\\s*"));
+    return pages.trimmed().section(range, 0, 0);
+}
+
+QString oscolaAfterName(const CitationItem &item)
+{
+    QStringList citations;
+    if (!item.neutralCitation.isEmpty())
+        citations << item.neutralCitation;
+    if (!item.containerTitle.isEmpty()) {
+        // Reports organised by year have it in square brackets, then any volume within it.
+        QStringList report;
+        if (item.year)
+            report << u'[' + QString::number(*item.year) + u']';
+        if (!item.volume.isEmpty())
+            report << item.volume;
+        report << item.containerTitle;
+        if (!item.pages.isEmpty())
+            report << firstPage(item.pages);
+        citations << report.join(u' ');
+    } else if (item.neutralCitation.isEmpty()) {
+        if (item.year)
+            citations << u'[' + QString::number(*item.year) + u']';
+        if (!item.caseNumber.isEmpty())
+            citations << item.caseNumber;
+    }
+    QString text = item.containerTitle.isEmpty() && item.neutralCitation.isEmpty() ? citations.join(u' ') : citations.join(QStringLiteral(", "));
+    // A neutral citation already says which court it was.
+    if (item.neutralCitation.isEmpty() && !item.court.isEmpty())
+        text += QStringLiteral(" (") + item.court + u')';
+    return text.trimmed();
+}
+
+QString bluebookDate(const CitationItem &item)
+{
+    if (!item.year)
+        return {};
+    static const QStringList months = {QStringLiteral("Jan."), QStringLiteral("Feb."), QStringLiteral("Mar."), QStringLiteral("Apr."),
+                                       QStringLiteral("May"),  QStringLiteral("June"), QStringLiteral("July"), QStringLiteral("Aug."),
+                                       QStringLiteral("Sept."), QStringLiteral("Oct."), QStringLiteral("Nov."), QStringLiteral("Dec.")};
+    // A decision not yet in a report is dated in full.
+    if (item.containerTitle.isEmpty() && item.month && *item.month >= 1 && *item.month <= 12) {
+        QString date = months.at(*item.month - 1);
+        if (item.day)
+            date += u' ' + QString::number(*item.day) + u',';
+        return date + u' ' + QString::number(*item.year);
+    }
+    return QString::number(*item.year);
+}
+
+QString bluebookAfterName(const CitationItem &item)
+{
+    QString where;
+    if (!item.containerTitle.isEmpty()) {
+        QStringList report;
+        if (!item.volume.isEmpty())
+            report << item.volume;
+        report << item.containerTitle;
+        if (!item.pages.isEmpty())
+            report << firstPage(item.pages);
+        where = report.join(u' ');
+    } else if (!item.caseNumber.isEmpty()) {
+        where = item.caseNumber;
+    } else {
+        where = item.neutralCitation;
+    }
+    // The United States Reports are the Supreme Court's own, so they don't name it.
+    const bool ownReports = item.containerTitle == QLatin1StringView("U.S.");
+    QStringList parenthetical;
+    if (!item.court.isEmpty() && !ownReports)
+        parenthetical << item.court;
+    const QString date = bluebookDate(item);
+    if (!date.isEmpty())
+        parenthetical << date;
+    QString text = where;
+    if (!parenthetical.isEmpty())
+        text += QStringLiteral(" (") + parenthetical.join(u' ') + u')';
+    return text.trimmed();
+}
+
+// The case's name and year, as an author-date style cites it in the text, such as "Brown v. Board of Education 1954".
+RichText caseInText(const CitationItem &item, const QString &separator, const QString &year)
+{
+    RichText text;
+    text.italic(caseName(item)).add(separator + (year.isEmpty() ? QStringLiteral("n.d.") : year));
+    return text;
+}
+
 // A title in quotation marks, with the punctuation that follows it inside, unless the title ends in its own.
 void quotedTitle(RichText &text, const QString &title, const QString &punctuation)
 {
@@ -318,6 +420,7 @@ RichText harvardReference(const CitationItem &item, const QString &year, const S
         break;
     }
     case Kind::Report:
+    case Kind::Case: // Cited by caseCitation instead, so never here.
     case Kind::Document: {
         text.italic(item.title).add(online).endSentence().add(QStringLiteral(" "));
         const QString publication = harvardPublication(item, false);
@@ -334,6 +437,8 @@ RichText harvardReference(const CitationItem &item, const QString &year, const S
 
 RichText harvardInText(const CitationItem &item, const QString &year)
 {
+    if (item.kind == Kind::Case)
+        return caseInText(item, QStringLiteral(" "), year);
     const Lead lead = leadFor(item, true);
     RichText text;
     if (lead.isEmpty() && item.kind == Kind::Issue)
@@ -463,6 +568,7 @@ RichText apaReference(const CitationItem &item, const QString &year)
     case Kind::Book:
     case Kind::EditedBook:
     case Kind::Proceedings:
+    case Kind::Case: // Cited by caseCitation instead, so never here.
     case Kind::Document:
         if (!titleLeads) {
             text.italic(item.title);
@@ -562,6 +668,8 @@ RichText apaReference(const CitationItem &item, const QString &year)
 
 RichText apaInText(const CitationItem &item, const QString &year)
 {
+    if (item.kind == Kind::Case)
+        return caseInText(item, QStringLiteral(", "), year);
     const Lead lead = leadFor(item, false);
     RichText text;
     if (lead.isEmpty()) {
@@ -670,6 +778,7 @@ RichText ieeeReference(const CitationItem &item)
         break;
     case Kind::Book:
     case Kind::EditedBook:
+    case Kind::Case: // Cited by caseCitation instead, so never here.
     case Kind::Document: {
         ieeeAuthor(text, item);
         text.italic(item.title);
@@ -862,6 +971,7 @@ RichText chicagoReference(const CitationItem &item, const QString &year)
     case Kind::Book:
     case Kind::EditedBook:
     case Kind::Proceedings:
+    case Kind::Case: // Cited by caseCitation instead, so never here.
     case Kind::Document:
         if (!edition.isEmpty() && item.kind != Kind::Document)
             text.add(edition + u' ');
@@ -943,6 +1053,8 @@ RichText chicagoReference(const CitationItem &item, const QString &year)
 
 RichText chicagoInText(const CitationItem &item, const QString &year)
 {
+    if (item.kind == Kind::Case)
+        return caseInText(item, QStringLiteral(" "), year);
     const Lead lead = leadFor(item, false);
     RichText text;
     if (lead.isEmpty()) {
@@ -981,6 +1093,8 @@ QString disambiguationKey(const CitationItem &item, CitationStyle style)
 
 QString leadSortText(const CitationItem &item, CitationStyle style)
 {
+    if (item.kind == Kind::Case)
+        return sortKey(caseName(item));
     const Lead lead = leadFor(item, style == CitationStyle::Harvard);
     if (lead.isEmpty()) {
         if (style == CitationStyle::Harvard && item.kind != Kind::Issue)
@@ -997,6 +1111,21 @@ QString leadSortText(const CitationItem &item, CitationStyle style)
 }
 
 } // namespace
+
+RichText caseCitation(const CitationItem &item)
+{
+    RichText text;
+    text.italic(caseName(item));
+    const QString after = caseCitationAfterName(item);
+    if (!after.isEmpty())
+        text.add((item.oscola ? QStringLiteral(" ") : QStringLiteral(", ")) + after);
+    return text;
+}
+
+QString caseCitationAfterName(const CitationItem &item)
+{
+    return item.oscola ? oscolaAfterName(item) : bluebookAfterName(item);
+}
 
 FormattedReferences formatReferences(const QList<CitationItem> &items, CitationStyle style, const StyleOptions &options)
 {
@@ -1047,6 +1176,13 @@ FormattedReferences formatReferences(const QList<CitationItem> &items, CitationS
         const int index = order.at(position);
         const CitationItem &item = items.at(index);
         RichText entry;
+        if (item.kind == Kind::Case) {
+            // The same legal form in every style.
+            entry = style == CitationStyle::Ieee ? RichText().add(QStringLiteral("[%1] ").arg(position + 1)).append(caseCitation(item))
+                                                 : caseCitation(item);
+            result.entries << entry;
+            continue;
+        }
         switch (style) {
         case CitationStyle::Harvard: entry = harvardReference(item, years.value(index), options); break;
         case CitationStyle::Apa: entry = apaReference(item, years.value(index)); break;

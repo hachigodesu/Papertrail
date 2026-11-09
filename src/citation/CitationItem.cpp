@@ -40,12 +40,17 @@ Kind kindFor(const Publication &publication)
     case PublicationType::Standard: return Kind::Standard;
     case PublicationType::Preprint: return Kind::Preprint;
     case PublicationType::Other: return Kind::Document;
+    case PublicationType::CaseLaw: return Kind::Case;
     }
     return Kind::Document;
 }
 
 bool lacksDetails(const CitationItem &item)
 {
+    // A case has no authors: it needs a year and something to find it by.
+    if (item.kind == Kind::Case)
+        return item.title.isEmpty() || !item.year
+               || (item.containerTitle.isEmpty() && item.neutralCitation.isEmpty() && item.caseNumber.isEmpty());
     // A report or document with nobody named is cited under the organisation responsible for it.
     const bool organisation = (item.kind == Kind::Report || item.kind == Kind::Document)
         && (!item.institution.isEmpty() || !item.publisher.isEmpty());
@@ -106,6 +111,11 @@ CitationItem citationItem(const Publication &p, const std::optional<Publication>
     item.reportNumber = p.reportNumber.trimmed();
     item.standardNumber = p.standardNumber.trimmed();
     item.standardBody = p.standardBody.simplified();
+    item.court = p.court.simplified();
+    item.jurisdiction = p.jurisdiction.simplified();
+    item.neutralCitation = p.neutralCitation.simplified();
+    item.caseNumber = p.caseNumber.simplified();
+    item.oscola = p.caseCitationForm == QLatin1StringView("uk");
     item.abstract = p.abstract.trimmed();
     item.language = p.language.trimmed();
     item.keywords = keywords;

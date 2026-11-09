@@ -452,6 +452,71 @@ private slots:
         }
     }
 
+    // Made-up judgments, laid out as the courts' own first pages are.
+    void judgmentsAreRecognisedFromTheirFirstPage()
+    {
+        const QString uk = QStringLiteral(
+            "Neutral Citation Number: [2021] EWCA Civ 1234\n"
+            "Case No: A2/2020/0567\n"
+            "IN THE COURT OF APPEAL (CIVIL DIVISION)\n"
+            "Before:\nLORD JUSTICE EXAMPLE\nLADY JUSTICE SAMPLE\n"
+            "Between:\n"
+            "Made-Up Holdings Ltd v Another Example Plc\n"
+            "JUDGMENT\n");
+        std::optional<CaseDetails> found = caseDetailsOnFirstPage(uk);
+        QVERIFY(found);
+        QCOMPARE(found->name, QStringLiteral("Made-Up Holdings Ltd v Another Example Plc"));
+        QCOMPARE(found->neutralCitation, QStringLiteral("[2021] EWCA Civ 1234"));
+        QCOMPARE(found->court, QStringLiteral("Court of Appeal (Civil Division)"));
+        QCOMPARE(found->jurisdiction, QStringLiteral("England and Wales"));
+        QCOMPARE(found->caseNumber, QStringLiteral("A2/2020/0567"));
+        QCOMPARE(found->year.value_or(0), 2021);
+
+        ClassificationInput input;
+        input.format = QStringLiteral("pdf");
+        input.pageCount = 30;
+        input.firstPage = uk;
+        const Classification classified = classify(input);
+        QCOMPARE(classified.type, PublicationType::CaseLaw);
+        QVERIFY(!classified.confident); // Always looked at by someone.
+
+        const QString us = QStringLiteral(
+            "SUPREME COURT OF THE UNITED STATES\n"
+            "No. 19-9999\n"
+            "SAMPLE ET AL. v. EXAMPLE COUNTY\n"
+            "ON WRIT OF CERTIORARI TO THE UNITED STATES COURT OF APPEALS FOR THE NINTH CIRCUIT\n"
+            "Argued March 3, 2021—Decided June 14, 2021\n"
+            "JUSTICE SAMPLE delivered the opinion of the Court.\n");
+        found = caseDetailsOnFirstPage(us);
+        QVERIFY(found);
+        QCOMPARE(found->name, QStringLiteral("Sample et al. v Example County"));
+        QCOMPARE(found->court, QStringLiteral("U.S."));
+        QCOMPARE(found->jurisdiction, QStringLiteral("United States"));
+        QCOMPARE(found->caseNumber, QStringLiteral("No. 19-9999"));
+        QCOMPARE(found->year.value_or(0), 2021);
+        QCOMPARE(found->month.value_or(0), 6);
+        QCOMPARE(found->day.value_or(0), 14);
+    }
+
+    void writingAboutACaseIsntOne()
+    {
+        // An article about a case cites it, and a court, on its first page, but has an abstract.
+        const QString article = QStringLiteral(
+            "Made-Up Holdings Ltd v Another Example Plc Revisited\n"
+            "Abstract: the judgment in [2021] EWCA Civ 1234 of the Court of Appeal changed made-up contract law.\n");
+        QVERIFY(!caseDetailsOnFirstPage(article));
+        ClassificationInput input;
+        input.format = QStringLiteral("pdf");
+        input.pageCount = 20;
+        input.firstPage = article;
+        QVERIFY(classify(input).type != PublicationType::CaseLaw);
+
+        // A neutral citation on its own, as a paper's text might have it.
+        QVERIFY(!caseDetailsOnFirstPage(QStringLiteral("As held in [2020] UKSC 5, the made-up rule applies.")));
+        // A court's name with nothing else of a judgment's.
+        QVERIFY(!caseDetailsOnFirstPage(QStringLiteral("A history of the Supreme Court of the United States")));
+    }
+
     void thesisWordingCanFollowABlankFirstPage()
     {
         ClassificationInput input;

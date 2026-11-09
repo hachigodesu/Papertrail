@@ -313,6 +313,90 @@ private slots:
         QVERIFY(backups(path()).isEmpty()); // Nothing was backed up for a restore that didn't happen.
     }
 
+    void caseLawIsAddedKeepingEverythingThatWasThere()
+    {
+        Database db(path());
+        const std::vector<Migration> &all = libraryMigrations();
+        QCOMPARE(all.back().version, 20);
+        migrate(db, std::vector<Migration>(all.begin(), all.end() - 1));
+
+        // A library as 1.0.2 left it: a publication in an issue, with a file, a tag, a note, a highlight and a summary.
+        db.exec("INSERT INTO publication (id, uuid, type, title, notes, title_sort, created_at, updated_at) VALUES "
+                "(1, 'u1', 'journal_volume', 'A Made-Up Issue', 'A made-up note', 'a made-up issue', 1, 1), "
+                "(2, 'u2', 'journal_article', 'Bending Made-Up Beams', NULL, 'bending made-up beams', 1, 1)");
+        db.exec("UPDATE publication SET parent_id = 1, page_start = 2, page_end = 5, doi = '10.1000/beams' WHERE id = 2");
+        db.exec("INSERT INTO library_root (id, uuid, name, path, created_at) VALUES (1, 'r1', 'Docs', '/made/up', 1)");
+        db.exec("INSERT INTO file (id, root_id, relative_path, file_name, size, modified_at, format, sha256) "
+                "VALUES (1, 1, 'issue.pdf', 'issue.pdf', 10, 1, 'pdf', 'abc')");
+        db.exec("INSERT INTO publication_file (publication_id, file_id, is_primary) VALUES (1, 1, 1)");
+        db.exec("INSERT INTO tag (id, uuid, name, created_at) VALUES (1, 't1', 'Beams', 1)");
+        db.exec("INSERT INTO publication_tag (publication_id, tag_id) VALUES (2, 1)");
+        db.exec("INSERT INTO annotation (uuid, publication_id, content_hash, location_json, type, selected_text, created_at, "
+                "updated_at) VALUES ('a1', 2, 'abc', '{\"parts\":[]}', 'highlight', 'made-up words', 1, 1)");
+        const auto count = [&](const char *sql) {
+            auto select = db.prepare(sql);
+            select->step();
+            return select->int64At(0);
+        };
+        const auto everything = [&] {
+            return QList<qint64>{count("SELECT count(*) FROM publication"), count("SELECT count(*) FROM publication_file"),
+                                 count("SELECT count(*) FROM publication_tag"), count("SELECT count(*) FROM annotation"),
+                                 count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'beams'"),
+                                 count("SELECT count(*) FROM publication_note_fts WHERE publication_note_fts MATCH 'note'")};
+        };
+        const QList<qint64> before = everything();
+        const qint64 indexes = count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'index'");
+        const qint64 triggers = count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'trigger'");
+
+        migrateLibrary(db);
+        QCOMPARE(db.userVersion(), 20);
+        QCOMPARE(everything(), before);
+        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'index'"), indexes);
+        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'trigger'"), triggers);
+        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE name = 'publication_new'"), qint64(0));
+        // Foreign keys are back on, and everything still points where it did.
+        QCOMPARE(count("PRAGMA foreign_keys"), qint64(1));
+        auto dangling = db.prepare("PRAGMA foreign_key_check");
+        QVERIFY(!dangling->step());
+        const std::optional<Publication> article = PublicationRepository(db).get(2);
+        QVERIFY(article);
+        QCOMPARE(article->parentId.value_or(0), qint64(1));
+        QCOMPARE(article->pageEnd.value_or(0), 5);
+        QCOMPARE(article->doi, QStringLiteral("10.1000/beams"));
+        // Another connection reads it as it is.
+        {
+            Database other(path());
+            QCOMPARE(PublicationRepository(other).get(2)->title, QStringLiteral("Bending Made-Up Beams"));
+        }
+
+        // A case can be kept now, and searching finds it by its court and citations.
+        Publication judgment;
+        judgment.type = PublicationType::CaseLaw;
+        judgment.title = QStringLiteral("Made-Up Party v Another Made-Up Party");
+        judgment.court = QStringLiteral("Supreme Court of the United Kingdom");
+        judgment.neutralCitation = QStringLiteral("[2020] UKSC 99");
+        judgment.caseNumber = QStringLiteral("UKSC 2019/0001");
+        judgment.caseCitationForm = QStringLiteral("uk");
+        const qint64 id = PublicationRepository(db).create(judgment);
+        const std::optional<Publication> kept = PublicationRepository(db).get(id);
+        QCOMPARE(kept->type, PublicationType::CaseLaw);
+        QCOMPARE(kept->neutralCitation, QStringLiteral("[2020] UKSC 99"));
+        QCOMPARE(kept->caseCitationForm, QStringLiteral("uk"));
+        QCOMPARE(count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'UKSC'"), qint64(1));
+        QCOMPARE(count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'publisher:kingdom'"), qint64(1));
+
+        // Running it again changes nothing, and keeps what's in the new columns.
+        db.setUserVersion(19);
+        migrateLibrary(db);
+        QCOMPARE(PublicationRepository(db).get(id)->court, QStringLiteral("Supreme Court of the United Kingdom"));
+        QCOMPARE(count("SELECT count(*) FROM publication"), before.first() + 1);
+
+        // Deleting the issue still takes its article, and the article's highlight, with it.
+        db.exec("DELETE FROM publication WHERE id = 1");
+        QCOMPARE(count("SELECT count(*) FROM publication WHERE id = 2"), qint64(0));
+        QCOMPARE(count("SELECT count(*) FROM annotation"), qint64(0));
+    }
+
     void anUpgradeIsBackedUpFirst()
     {
         Database db(path());

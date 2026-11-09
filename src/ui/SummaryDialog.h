@@ -24,7 +24,7 @@ class ApiKeyStore;
 class LibrarySession;
 
 // What a summary is based on, said plainly, since it's generated and could be wrong.
-QString basisDescription(summary::SummaryBasis basis, bool unsure, bool cutOff);
+QString basisDescription(summary::SummaryBasis basis, bool unsure, bool cutOff, bool isCase = false);
 
 // The Claude Console, where keys are made and the bill is kept. Wherever it's mentioned, it's a link.
 inline constexpr const char *kConsoleKeysUrl = "https://platform.claude.com/settings/keys";

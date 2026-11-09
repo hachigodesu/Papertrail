@@ -2,6 +2,9 @@
 
 #include "core/db/Database.h"
 
+#include <QByteArray>
+#include <QList>
+
 #include <string>
 
 namespace papertrail::core {
@@ -690,6 +693,153 @@ CREATE TABLE IF NOT EXISTS saved_search (
 ) STRICT;
 )sql";
 
+// Case law, as a type of its own, with a court, jurisdiction, neutral citation, case number and whether it's cited
+// in the UK's way or the US's. The type's check can't be changed in place, so the table is made again with everything
+// in it, and its indexes and triggers after it. Searching also finds a case by its court and citations.
+const char *const kCaseLawTable = R"sql(
+CREATE TABLE publication_new (
+    id                  INTEGER PRIMARY KEY,
+    uuid                TEXT NOT NULL UNIQUE,
+    type                TEXT NOT NULL CHECK (type IN (
+                            'journal_volume', 'journal_article', 'conference_proceedings',
+                            'conference_paper', 'textbook', 'book', 'book_chapter', 'thesis',
+                            'dissertation', 'technical_report', 'standard', 'preprint', 'other', 'case_law')),
+    parent_id           INTEGER REFERENCES publication(id) ON DELETE CASCADE,
+    page_start          INTEGER,
+    page_end            INTEGER,
+
+    title               TEXT NOT NULL DEFAULT '',
+    subtitle            TEXT,
+    abstract            TEXT,
+    year                INTEGER,
+    month               INTEGER CHECK (month BETWEEN 1 AND 12),
+    day                 INTEGER CHECK (day BETWEEN 1 AND 31),
+    language            TEXT,
+    url                 TEXT,
+    edition             TEXT,
+    series              TEXT,
+
+    doi                 TEXT,
+    isbn10              TEXT,
+    isbn13              TEXT,
+    issn                TEXT,
+    eissn               TEXT,
+    arxiv_id            TEXT,
+    pmid                TEXT,
+
+    container_title     TEXT,
+    volume              TEXT,
+    issue               TEXT,
+    pages               TEXT,
+    publisher           TEXT,
+    place               TEXT,
+
+    conference_name     TEXT,
+    conference_location TEXT,
+
+    institution         TEXT,
+    department          TEXT,
+    degree              TEXT,
+
+    report_number       TEXT,
+
+    standard_number     TEXT,
+    standard_body       TEXT,
+    standard_revision   TEXT,
+    standard_status     TEXT,
+
+    read_status         TEXT NOT NULL DEFAULT 'unread'
+                        CHECK (read_status IN ('unread', 'reading', 'read')),
+    rating              INTEGER CHECK (rating BETWEEN 1 AND 5),
+    notes               TEXT,
+    extra_json          TEXT,
+
+    needs_review        INTEGER NOT NULL DEFAULT 0 CHECK (needs_review IN (0, 1)),
+
+    title_sort          TEXT NOT NULL DEFAULT '',
+    first_author_sort   TEXT NOT NULL DEFAULT '',
+    authors_display     TEXT NOT NULL DEFAULT '',
+
+    created_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL,
+
+    court               TEXT,
+    jurisdiction        TEXT,
+    neutral_citation    TEXT,
+    case_number         TEXT,
+    case_citation_form  TEXT CHECK (case_citation_form IN ('uk', 'us'))
+) STRICT;
+)sql";
+
+const char *const kCaseLawColumns =
+    "id, uuid, type, parent_id, page_start, page_end, title, subtitle, abstract, year, month, day, language, url, edition, "
+    "series, doi, isbn10, isbn13, issn, eissn, arxiv_id, pmid, container_title, volume, issue, pages, publisher, place, "
+    "conference_name, conference_location, institution, department, degree, report_number, standard_number, standard_body, "
+    "standard_revision, standard_status, read_status, rating, notes, extra_json, needs_review, title_sort, first_author_sort, "
+    "authors_display, created_at, updated_at";
+
+const char *const kCaseLawSearchTriggers = R"sql(
+DROP TRIGGER IF EXISTS publication_fts_insert;
+DROP TRIGGER IF EXISTS publication_fts_update;
+CREATE TRIGGER publication_fts_insert AFTER INSERT ON publication BEGIN
+    INSERT INTO publication_fts (rowid, title, abstract, authors, tags, container, publisher, identifiers)
+    VALUES (new.id,
+            trim(new.title || ' ' || coalesce(new.subtitle, '')),
+            new.abstract, '', '',
+            coalesce(new.container_title, '') || ' ' || coalesce(new.conference_name, ''),
+            concat_ws(' ', new.publisher, new.institution, new.standard_body, new.court),
+            concat_ws(' ', new.doi, new.isbn10, new.isbn13, new.issn, new.eissn, new.arxiv_id, new.pmid,
+                      new.report_number, new.standard_number, new.neutral_citation, new.case_number));
+END;
+CREATE TRIGGER publication_fts_update AFTER UPDATE OF
+    title, subtitle, abstract, container_title, conference_name, publisher, institution, standard_body,
+    doi, isbn10, isbn13, issn, eissn, arxiv_id, pmid, report_number, standard_number, court, neutral_citation, case_number
+ON publication BEGIN
+    UPDATE publication_fts SET
+        title = trim(new.title || ' ' || coalesce(new.subtitle, '')),
+        abstract = new.abstract,
+        container = coalesce(new.container_title, '') || ' ' || coalesce(new.conference_name, ''),
+        publisher = concat_ws(' ', new.publisher, new.institution, new.standard_body, new.court),
+        identifiers = concat_ws(' ', new.doi, new.isbn10, new.isbn13, new.issn, new.eissn, new.arxiv_id, new.pmid,
+                                new.report_number, new.standard_number, new.neutral_citation, new.case_number)
+    WHERE rowid = new.id;
+END;
+)sql";
+
+void addCaseLaw(Database &db)
+{
+    // Each read of the schema is finished with before it's changed, which an unfinished one would stop.
+    {
+        auto table = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'publication'");
+        if (!table->step())
+            throw DbError(0, "the library has no publications table");
+        if (table->textAt(0).contains(QStringLiteral("'case_law'")))
+            return; // Made already.
+    }
+
+    // Its indexes and triggers, as they are now, to make again once the table has been.
+    QList<QByteArray> again;
+    {
+        auto parts = db.prepare("SELECT sql FROM sqlite_schema WHERE tbl_name = 'publication' AND type IN ('index', 'trigger') "
+                                "AND sql IS NOT NULL ORDER BY type, name");
+        while (parts->step())
+            again << parts->textAt(0).toUtf8();
+    }
+
+    // The others' references to the table are by name, so they find the new one, which mustn't change them as it's
+    // renamed.
+    db.exec("PRAGMA legacy_alter_table = ON");
+    db.exec(kCaseLawTable);
+    db.exec((QByteArray("INSERT INTO publication_new (") + kCaseLawColumns + ") SELECT " + kCaseLawColumns + " FROM publication")
+                .constData());
+    db.exec("DROP TABLE publication");
+    db.exec("ALTER TABLE publication_new RENAME TO publication");
+    db.exec("PRAGMA legacy_alter_table = OFF");
+    for (const QByteArray &sql : std::as_const(again))
+        db.exec(sql.constData());
+    db.exec(kCaseLawSearchTriggers);
+}
+
 } // namespace
 
 const std::vector<Migration> &libraryMigrations()
@@ -714,6 +864,7 @@ const std::vector<Migration> &libraryMigrations()
         {17, kMigration17},
         {18, kMigration18},
         {19, kMigration19},
+        {20, nullptr, addCaseLaw, true},
     };
     return migrations;
 }
@@ -731,10 +882,29 @@ void migrate(Database &db, const std::vector<Migration> &migrations)
     for (const Migration &migration : migrations) {
         if (migration.version <= current)
             continue;
-        Transaction transaction(db);
-        db.exec(migration.sql);
-        db.setUserVersion(migration.version);
-        transaction.commit();
+        // This can't change inside a transaction.
+        if (migration.foreignKeysOff)
+            db.exec("PRAGMA foreign_keys = OFF");
+        try {
+            Transaction transaction(db);
+            if (migration.sql)
+                db.exec(migration.sql);
+            if (migration.run)
+                migration.run(db);
+            if (migration.foreignKeysOff) {
+                auto dangling = db.prepare("PRAGMA foreign_key_check");
+                if (dangling->step())
+                    throw DbError(0, "upgrading the library would leave records referring to nothing");
+            }
+            db.setUserVersion(migration.version);
+            transaction.commit();
+        } catch (...) {
+            if (migration.foreignKeysOff)
+                db.exec("PRAGMA foreign_keys = ON");
+            throw;
+        }
+        if (migration.foreignKeysOff)
+            db.exec("PRAGMA foreign_keys = ON");
         current = migration.version;
     }
 }

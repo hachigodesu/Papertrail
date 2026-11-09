@@ -79,6 +79,11 @@ const QList<TextField> &textFields()
         {"standardBody", &Publication::standardBody},
         {"standardRevision", &Publication::standardRevision},
         {"standardStatus", &Publication::standardStatus},
+        {"court", &Publication::court},
+        {"jurisdiction", &Publication::jurisdiction},
+        {"neutralCitation", &Publication::neutralCitation},
+        {"caseNumber", &Publication::caseNumber},
+        {"caseCitationForm", &Publication::caseCitationForm},
         {"notes", &Publication::notes},
         {"extraJson", &Publication::extraJson},
     };

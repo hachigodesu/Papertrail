@@ -62,18 +62,28 @@ QLabel *consoleLabel(QWidget *parent, const QString &text, const char *url)
     return label;
 }
 
-QString basisDescription(SummaryBasis basis, bool unsure, bool cutOff)
+QString basisDescription(SummaryBasis basis, bool unsure, bool cutOff, bool isCase)
 {
     QString text;
     switch (basis) {
     case SummaryBasis::FullText: text = QObject::tr("Claude read the full text."); break;
-    case SummaryBasis::AbstractOnly: text = QObject::tr("Claude could only read the abstract, so parts of this may be missing."); break;
-    case SummaryBasis::OtherSources: text = QObject::tr("Claude couldn't read the paper, and used what other sources say about it. Treat this with care."); break;
-    case SummaryBasis::NotFound: text = QObject::tr("Claude couldn't find this paper. Treat this with care."); break;
+    case SummaryBasis::AbstractOnly:
+        text = isCase ? QObject::tr("Claude could only read a summary of the judgment, so parts of this may be missing.")
+                      : QObject::tr("Claude could only read the abstract, so parts of this may be missing.");
+        break;
+    case SummaryBasis::OtherSources:
+        text = isCase ? QObject::tr("Claude couldn't read the judgment, and used what other sources say about it. Treat this with care.")
+                      : QObject::tr("Claude couldn't read the paper, and used what other sources say about it. Treat this with care.");
+        break;
+    case SummaryBasis::NotFound:
+        text = isCase ? QObject::tr("Claude couldn't find this judgment. Treat this with care.")
+                      : QObject::tr("Claude couldn't find this paper. Treat this with care.");
+        break;
     default: text = QObject::tr("Claude didn't say what this is based on. Treat it with care."); break;
     }
     if (unsure)
-        text += QObject::tr(" It wasn't sure it had found the right paper, so check the sources.");
+        text += isCase ? QObject::tr(" It wasn't sure it had found the right case, so check the sources.")
+                       : QObject::tr(" It wasn't sure it had found the right paper, so check the sources.");
     if (cutOff)
         text += QObject::tr(" It reached the longest answer allowed, so the end may be missing.");
     return text;
@@ -394,7 +404,8 @@ void SummaryDialog::onFinished(const SummaryOutcome &outcome)
 {
     m_outcome = outcome;
     addToSpent(outcome.model, outcome.usage);
-    m_basis->setText(basisDescription(outcome.summary.basis, outcome.summary.identificationUnsure, outcome.cutOff));
+    m_basis->setText(basisDescription(outcome.summary.basis, outcome.summary.identificationUnsure, outcome.cutOff,
+                                      outcome.summary.isCase));
     m_summaryView->setPlainText(summaryAsText(outcome.summary));
 
     m_sources->clear();

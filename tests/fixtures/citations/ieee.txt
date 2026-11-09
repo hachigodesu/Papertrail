@@ -64,3 +64,12 @@ cite: [1]
 [document]
 ref: [1] Example Charity, *Guidance on Pretend Things*. [Online]. Available: https://example.org/guidance
 cite: [1]
+
+# Cases are cited in a legal form in every style: the Bluebook's unless OSCOLA's is chosen.
+[case_us]
+ref: [1] *Sample v. Example County Board*, 12 F.4th 345 (9th Cir. 2021)
+cite: [1]
+
+[case_uk]
+ref: [1] *Made-Up Holdings Ltd v Another Example Plc* [2021] EWCA Civ 1234, [2021] 1 WLR 567
+cite: [1]

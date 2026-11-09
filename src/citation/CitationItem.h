@@ -31,6 +31,7 @@ struct CitationItem {
         Standard,
         Preprint,
         Document,     // Anything else.
+        Case,         // A court's judgment, cited in a legal form whatever the style: see caseCitation.
     };
 
     Kind kind = Kind::Document;
@@ -69,6 +70,13 @@ struct CitationItem {
     QString reportNumber;
     QString standardNumber;
     QString standardBody;
+
+    // A case's. Its name is the title, and its law report the container, with the volume and first page.
+    QString court;
+    QString jurisdiction;
+    QString neutralCitation;
+    QString caseNumber;
+    bool oscola = false; // Cited in OSCOLA's way, as in the UK, rather than the Bluebook's.
 
     QString abstract;
     QString language;

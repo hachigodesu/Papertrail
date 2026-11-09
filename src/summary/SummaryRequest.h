@@ -108,9 +108,15 @@ struct SummaryText {
     QString results;
     QString limitations;
     QString conclusion;
+    // A case's summary is a brief of the judgment instead, in caseSummarySections' order.
+    bool isCase = false;
+    QStringList caseSections;
     QString raw;
     bool structured = false;
 };
+// The headings of a case's summary, in order: "Case", which names it and its court, date, citation and judges, then
+// "Facts", "Procedural history", "Issues", "Decision", "Reasoning", "Separate opinions" and "Significance".
+const QStringList &caseSummarySections();
 SummaryText parseSummaryText(const QString &text);
 QString summaryAsText(const SummaryText &summary);
 

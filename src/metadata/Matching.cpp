@@ -119,12 +119,15 @@ QList<FieldChange> plannedChanges(const Publication &publication, const FoundRec
     }
 
     // A type moves only between groups, because a textbook is more exact than the "book" a source
-    // says. Preprints are left out both ways: they're only ever what the user has said.
-    if (found.type && !setByHand.contains(QStringLiteral("type")) && publication.type != PublicationType::Preprint
-        && *found.type != PublicationType::Preprint) {
+    // says. Preprints are left out both ways: they're only ever what the user has said. So is case law, which a
+    // source of papers and books knows nothing about.
+    const auto keptAsItIs = [](PublicationType type) {
+        return type == PublicationType::Preprint || type == PublicationType::CaseLaw;
+    };
+    if (found.type && !setByHand.contains(QStringLiteral("type")) && !keptAsItIs(publication.type) && !keptAsItIs(*found.type)) {
         const QList<LibraryTab> tabs = {LibraryTab::JournalIssues, LibraryTab::JournalArticles, LibraryTab::ConferencePapers,
                                         LibraryTab::Textbooks, LibraryTab::ThesesAndDissertations, LibraryTab::TechnicalReports,
-                                        LibraryTab::Standards, LibraryTab::Other};
+                                        LibraryTab::Standards, LibraryTab::CaseLaw, LibraryTab::Other};
         const bool sameGroup = std::any_of(tabs.cbegin(), tabs.cend(), [&](LibraryTab tab) {
             const QList<PublicationType> types = typesForTab(tab);
             return types.contains(publication.type) && types.contains(*found.type);

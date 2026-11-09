@@ -252,6 +252,7 @@ private:
         case PublicationType::Preprint:
             p.arxivId = QStringLiteral("26%1.%2").arg(between(10, 12)).arg(index, 5, 10, QChar(u'0'));
             break;
+        case PublicationType::CaseLaw:
         case PublicationType::Other:
             break;
         }

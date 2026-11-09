@@ -64,3 +64,12 @@ cite: (Haddad, 2021)
 [document]
 ref: Example Charity. (n.d.). *Guidance on Pretend Things*. https://example.org/guidance
 cite: (Example Charity, n.d.)
+
+# Cases are cited in a legal form in every style: the Bluebook's unless OSCOLA's is chosen.
+[case_us]
+ref: *Sample v. Example County Board*, 12 F.4th 345 (9th Cir. 2021)
+cite: (*Sample v. Example County Board*, 2021)
+
+[case_uk]
+ref: *Made-Up Holdings Ltd v Another Example Plc* [2021] EWCA Civ 1234, [2021] 1 WLR 567
+cite: (*Made-Up Holdings Ltd v Another Example Plc*, 2021)

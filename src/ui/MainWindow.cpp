@@ -111,7 +111,7 @@ const QList<LibraryTab> kTabs = {
     LibraryTab::All,       LibraryTab::JournalIssues,         LibraryTab::JournalArticles,
     LibraryTab::Preprints, LibraryTab::ConferencePapers,       LibraryTab::Textbooks,
     LibraryTab::ThesesAndDissertations, LibraryTab::TechnicalReports, LibraryTab::Standards,
-    LibraryTab::Other,
+    LibraryTab::CaseLaw,   LibraryTab::Other,
 };
 
 struct RowRange {
@@ -1260,6 +1260,7 @@ const QList<QPair<LibraryTab, QString>> kTabKeys = {
     {LibraryTab::ThesesAndDissertations, QStringLiteral("theses_and_dissertations")},
     {LibraryTab::TechnicalReports, QStringLiteral("technical_reports")},
     {LibraryTab::Standards, QStringLiteral("standards")},
+    {LibraryTab::CaseLaw, QStringLiteral("case_law")},
     {LibraryTab::Other, QStringLiteral("other")},
 };
 
@@ -1641,6 +1642,7 @@ QStringList MainWindow::metadataSuggestions(const QString &field, const QString 
         {QStringLiteral("conference"), "conference_name"},    {QStringLiteral("conference_location"), "conference_location"},
         {QStringLiteral("institution"), "institution"},       {QStringLiteral("department"), "department"},
         {QStringLiteral("degree"), "degree"},                 {QStringLiteral("standard_body"), "standard_body"},
+        {QStringLiteral("court"), "court"},                   {QStringLiteral("jurisdiction"), "jurisdiction"},
         {QStringLiteral("language"), "language"}};
     static const QHash<QString, QByteArray> roles = {{QStringLiteral("authors"), "author"},
                                                      {QStringLiteral("editors"), "editor"},

@@ -1,13 +1,13 @@
 #pragma once
 
+#include "ui/ReaderTab.h"
+
 #include <QPointer>
 #include <QWidget>
 
 class QSplitter;
 
 namespace papertrail::ui {
-
-class ReaderTab;
 
 // Two documents side by side in one tab, each with its own reader and its own process. The one last used is the
 // active one, which keyboard shortcuts such as Ctrl+F and Ctrl+G go to. The same document can be on both sides,

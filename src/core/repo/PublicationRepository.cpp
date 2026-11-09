@@ -59,6 +59,11 @@ const std::array kTextColumns = {
     TextColumn{"standard_body", &Publication::standardBody},
     TextColumn{"standard_revision", &Publication::standardRevision},
     TextColumn{"standard_status", &Publication::standardStatus},
+    TextColumn{"court", &Publication::court},
+    TextColumn{"jurisdiction", &Publication::jurisdiction},
+    TextColumn{"neutral_citation", &Publication::neutralCitation},
+    TextColumn{"case_number", &Publication::caseNumber},
+    TextColumn{"case_citation_form", &Publication::caseCitationForm},
     TextColumn{"notes", &Publication::notes},
     TextColumn{"extra_json", &Publication::extraJson},
 };

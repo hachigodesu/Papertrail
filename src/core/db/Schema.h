@@ -9,6 +9,12 @@ class Database;
 struct Migration {
     int version;
     const char *sql;
+    // In place of or after `sql`, for a change that SQL alone can't make safely more than once, such as rebuilding a
+    // table. It must check whether it's been made already.
+    void (*run)(Database &db) = nullptr;
+    // For rebuilding a table that others refer to, which with foreign keys on would delete everything referring to it.
+    // Nothing may be left referring to what isn't there once it's done, or it's undone.
+    bool foreignKeysOff = false;
 };
 
 // The library database's schema changes, in order.

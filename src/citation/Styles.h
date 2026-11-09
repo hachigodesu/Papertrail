@@ -34,6 +34,13 @@ struct FormattedReferences {
 FormattedReferences formatReferences(const QList<CitationItem> &items, CitationStyle style,
                                      const StyleOptions &options = {});
 
+// A case, in OSCOLA's form, as in "Donoghue v Stevenson [1932] AC 562 (HL)", or the Bluebook's, as in
+// "Brown v. Board of Education, 347 U.S. 483 (1954)", whichever it's set to be cited in, with its name in italics. Every
+// style cites a case this way.
+RichText caseCitation(const CitationItem &item);
+// What follows the case's name in its citation, such as "[1932] AC 562 (HL)" or "347 U.S. 483 (1954)".
+QString caseCitationAfterName(const CitationItem &item);
+
 // One in-text citation for all of these together, such as "(Smith 2020; Jones 2021)" or "[1]–[3]".
 RichText combinedInTextCitation(const QList<CitationItem> &items, CitationStyle style, const StyleOptions &options = {});
 

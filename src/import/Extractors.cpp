@@ -636,6 +636,155 @@ bool containsAny(const QString &text, const QStringList &needles)
 
 // This never answers "preprint". Published papers carry too much of the same wording and the same
 // identifiers, such as an arXiv number or "accepted for publication", so that's for the user to say.
+std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, const QString &title)
+{
+    const QString text = firstPage.left(6000);
+    const QString lower = text.toLower();
+    // An article about a case has an abstract, keywords or a DOI on its first page; a judgment doesn't.
+    if (containsAny(lower, {QStringLiteral("abstract"), QStringLiteral("keywords"), QStringLiteral("doi.org"),
+                            QStringLiteral("doi:")})) {
+        return std::nullopt;
+    }
+
+    CaseDetails details;
+    struct UkCourt {
+        const char *code;
+        const char *court;
+        const char *jurisdiction;
+    };
+    static const UkCourt ukCourts[] = {
+        {"UKSC", "Supreme Court of the United Kingdom", "United Kingdom"},
+        {"UKHL", "House of Lords", "United Kingdom"},
+        {"UKPC", "Privy Council", "United Kingdom"},
+        {"EWCA Civ", "Court of Appeal (Civil Division)", "England and Wales"},
+        {"EWCA Crim", "Court of Appeal (Criminal Division)", "England and Wales"},
+        {"EWHC", "High Court", "England and Wales"},
+        {"EWFC", "Family Court", "England and Wales"},
+        {"EWCOP", "Court of Protection", "England and Wales"},
+        {"UKUT", "Upper Tribunal", "United Kingdom"},
+        {"UKFTT", "First-tier Tribunal", "United Kingdom"},
+        {"CSIH", "Court of Session, Inner House", "Scotland"},
+        {"CSOH", "Court of Session, Outer House", "Scotland"},
+        {"NICA", "Court of Appeal in Northern Ireland", "Northern Ireland"},
+        {"IESC", "Supreme Court of Ireland", "Ireland"},
+        {"HCA", "High Court of Australia", "Australia"},
+        {"NZSC", "Supreme Court of New Zealand", "New Zealand"},
+    };
+    static const QRegularExpression neutral(
+        QStringLiteral("\\[((?:19|20)\\d\\d)\\]\\s+(UKSC|UKHL|UKPC|EWCA\\s+Civ|EWCA\\s+Crim|EWHC|EWFC|EWCOP|UKUT|UKFTT|CSIH|CSOH|NICA|"
+                       "IESC|HCA|NZSC)\\s+(\\d{1,5})(?:\\s*\\((?:[A-Za-z]+)\\))?"));
+    const QRegularExpressionMatch neutralMatch = neutral.match(text);
+    bool courtHeading = false;
+    if (neutralMatch.hasMatch()) {
+        details.neutralCitation = neutralMatch.captured(0).simplified();
+        details.year = neutralMatch.captured(1).toInt();
+        const QString code = neutralMatch.captured(2).simplified();
+        for (const UkCourt &court : ukCourts) {
+            if (code == QLatin1StringView(court.code)) {
+                details.court = QString::fromLatin1(court.court);
+                details.jurisdiction = QString::fromLatin1(court.jurisdiction);
+            }
+        }
+        // A neutral citation alone could be one cited. A judgment also says it's one, or who heard it.
+        courtHeading = containsAny(lower, {QStringLiteral("judgment"), QStringLiteral("neutral citation"),
+                                           QStringLiteral("before:"), QStringLiteral("before :"), QStringLiteral("lord justice"),
+                                           QStringLiteral("lady justice"), QStringLiteral("mr justice"),
+                                           QStringLiteral("mrs justice"), QStringLiteral("judgment given on")});
+    } else {
+        // An American court's heading, which names it at the top.
+        struct UsCourt {
+            const char *heading;
+            const char *court; // As the Bluebook abbreviates it.
+        };
+        static const UsCourt usCourts[] = {
+            {"supreme court of the united states", "U.S."},
+            {"united states court of appeals for the first circuit", "1st Cir."},
+            {"united states court of appeals for the second circuit", "2d Cir."},
+            {"united states court of appeals for the third circuit", "3d Cir."},
+            {"united states court of appeals for the fourth circuit", "4th Cir."},
+            {"united states court of appeals for the fifth circuit", "5th Cir."},
+            {"united states court of appeals for the sixth circuit", "6th Cir."},
+            {"united states court of appeals for the seventh circuit", "7th Cir."},
+            {"united states court of appeals for the eighth circuit", "8th Cir."},
+            {"united states court of appeals for the ninth circuit", "9th Cir."},
+            {"united states court of appeals for the tenth circuit", "10th Cir."},
+            {"united states court of appeals for the eleventh circuit", "11th Cir."},
+            {"united states court of appeals for the district of columbia circuit", "D.C. Cir."},
+            {"united states court of appeals for the federal circuit", "Fed. Cir."},
+            {"united states district court", ""},
+        };
+        for (const UsCourt &court : usCourts) {
+            if (lower.contains(QLatin1StringView(court.heading))) {
+                courtHeading = true;
+                details.court = QString::fromLatin1(court.court);
+                details.jurisdiction = QStringLiteral("United States");
+                break;
+            }
+        }
+        if (courtHeading && !containsAny(lower, {QStringLiteral("opinion of the court"), QStringLiteral("petitioner"),
+                                                  QStringLiteral("respondent"), QStringLiteral("appellant"),
+                                                  QStringLiteral("appellee"), QStringLiteral("plaintiff"),
+                                                  QStringLiteral("defendant"), QStringLiteral("argued"),
+                                                  QStringLiteral("decided")})) {
+            courtHeading = false;
+        }
+        static const QRegularExpression docket(QStringLiteral("\\bNos?\\.\\s*(\\d{1,2}[-–]\\d{1,6})"));
+        if (const QRegularExpressionMatch match = docket.match(text); match.hasMatch())
+            details.caseNumber = QStringLiteral("No. ") + match.captured(1).replace(QStringLiteral("–"), QStringLiteral("-"));
+        static const QRegularExpression decided(
+            QStringLiteral("\\bDecided\\s+(January|February|March|April|May|June|July|August|September|October|November|December)"
+                           "\\s+(\\d{1,2}),\\s+((?:19|20)\\d\\d)"));
+        if (const QRegularExpressionMatch match = decided.match(text); match.hasMatch()) {
+            static const QStringList months = {QStringLiteral("January"), QStringLiteral("February"), QStringLiteral("March"),
+                                               QStringLiteral("April"), QStringLiteral("May"), QStringLiteral("June"),
+                                               QStringLiteral("July"), QStringLiteral("August"), QStringLiteral("September"),
+                                               QStringLiteral("October"), QStringLiteral("November"), QStringLiteral("December")};
+            details.month = int(months.indexOf(match.captured(1))) + 1;
+            details.day = match.captured(2).toInt();
+            details.year = match.captured(3).toInt();
+        }
+    }
+    if (!courtHeading)
+        return std::nullopt;
+
+    if (details.caseNumber.isEmpty()) {
+        static const QRegularExpression ukCaseNumber(QStringLiteral("Case\\s+No(?:s)?[.:]?\\s*:?\\s*([A-Z0-9][A-Z0-9/.\\-]{3,30}[A-Z0-9])"));
+        if (const QRegularExpressionMatch match = ukCaseNumber.match(text); match.hasMatch())
+            details.caseNumber = match.captured(1).simplified();
+    }
+
+    // The parties, as a line naming them on either side of "v": "Donoghue v Stevenson", "R (Miller) v Secretary of
+    // State", "BROWN ET AL. v. BOARD OF EDUCATION".
+    static const QRegularExpression parties(
+        QStringLiteral("^\\s*(\\p{Lu}[\\p{L}\\d.,'’&()\\- ]{0,120}?)\\s+(?:v|vs|V)\\.?\\s+(\\p{Lu}[\\p{L}\\d.,'’&()\\- ]{0,120}?)\\s*$"),
+        QRegularExpression::MultilineOption);
+    QRegularExpressionMatch match = parties.match(title.simplified());
+    if (!match.hasMatch())
+        match = parties.match(text);
+    if (match.hasMatch()) {
+        const QString parties = match.captured(1).simplified() + u' ' + match.captured(2).simplified();
+        details.name = match.captured(1).simplified() + QStringLiteral(" v ") + match.captured(2).simplified();
+        // Headings are often all capitals, which reads better as a title.
+        if (parties == parties.toUpper()) {
+            static const QStringList small = {QStringLiteral("v"), QStringLiteral("of"), QStringLiteral("and"),
+                                              QStringLiteral("the"), QStringLiteral("et"), QStringLiteral("al."),
+                                              QStringLiteral("for"), QStringLiteral("in")};
+            QStringList words = details.name.toLower().split(u' ');
+            for (qsizetype i = 0; i < words.size(); ++i) {
+                QString &word = words[i];
+                if (!word.isEmpty() && (i == 0 || !small.contains(word)))
+                    word[0] = word.at(0).toUpper();
+            }
+            details.name = words.join(u' ');
+        }
+    } else if (!containsAny(lower, {QStringLiteral("petitioner"), QStringLiteral("respondent"), QStringLiteral("appellant"),
+                                    QStringLiteral("appellee"), QStringLiteral("claimant"), QStringLiteral("plaintiff"),
+                                    QStringLiteral("defendant")})) {
+        return std::nullopt; // Neither its name nor its parties: not enough to go on.
+    }
+    return details;
+}
+
 Classification classify(const ClassificationInput &input)
 {
     // Only the first page decides a type firmly. Importing real papers showed why: their reference
@@ -650,6 +799,10 @@ Classification classify(const ClassificationInput &input)
     // A real thesis is long, and its wording can be on a title page after a blank first page.
     const QString front = text + u' ' + later.left(4000);
     const bool longEnoughForThesis = pages == 0 || pages >= 30;
+
+    // A judgment says so on its first page, though never so plainly that it's certain.
+    if (caseDetailsOnFirstPage(input.firstPage, input.title))
+        return {PublicationType::CaseLaw, false};
 
     static const QRegularExpression standardNumber(
         QStringLiteral("\\b(iso|iec|astm|ansi|din|bs en|ieee std|en)\\s*[/-]?\\s*[a-z]?\\s*\\d{2,}"));

@@ -217,6 +217,73 @@ private slots:
         QVERIFY(tools.at(1).toObject().value(QStringLiteral("max_content_tokens")).toInt() > 0);
     }
 
+    void aCaseIsSummarisedAsABrief()
+    {
+        Publication p;
+        p.type = PublicationType::CaseLaw;
+        p.title = QStringLiteral("Made-Up Holdings Ltd v Another Example Plc");
+        p.court = QStringLiteral("Court of Appeal (Civil Division)");
+        p.neutralCitation = QStringLiteral("[2021] EWCA Civ 1234");
+        p.containerTitle = QStringLiteral("WLR");
+        p.volume = QStringLiteral("1");
+        p.pages = QStringLiteral("567");
+        p.caseNumber = QStringLiteral("A2/2020/0567");
+        p.year = 2021;
+        p.month = 3;
+        p.notes = QStringLiteral("My private note");
+
+        // Identified as a case, by its court and citations, with nothing of the user's own.
+        const QList<IdentifyingDetail> details = identifyingDetails(p);
+        QCOMPARE(details.first().label, QStringLiteral("Case name"));
+        QStringList labels;
+        for (const IdentifyingDetail &detail : details)
+            labels << detail.label;
+        QCOMPARE(labels, (QStringList{QStringLiteral("Case name"), QStringLiteral("Court"), QStringLiteral("Neutral citation"),
+                                      QStringLiteral("Law report"), QStringLiteral("Case number"), QStringLiteral("Decided")}));
+        QCOMPARE(details.at(3).value, QStringLiteral("1 WLR 567"));
+        QCOMPARE(details.at(5).value, QStringLiteral("2021-03"));
+
+        // Cited the Bluebook's way, it's asked for in American terms.
+        QJsonObject request = QJsonDocument::fromJson(buildRequest(defaultModel(), defaultEffort(), p, std::nullopt)).object();
+        QString system = request.value(QStringLiteral("system")).toString();
+        QVERIFY(system.contains(QStringLiteral("court judgments")));
+        QVERIFY(system.contains(QStringLiteral("## Procedural history")));
+        QVERIFY(system.contains(QStringLiteral("## Separate opinions")));
+        QVERIFY(system.contains(QStringLiteral("holding")));
+        QVERIFY(!system.contains(QStringLiteral("ratio decidendi")));
+        QVERIFY(system.contains(QStringLiteral("only if a source you actually read says so")));
+        QVERIFY(!system.contains(QStringLiteral("## Methodology")));
+        const QString body = QString::fromUtf8(QJsonDocument(request).toJson());
+        QVERIFY(body.contains(QStringLiteral("Summarise the case with these details")));
+        QVERIFY(!body.contains(QStringLiteral("My private note")));
+
+        // In OSCOLA's way, in British ones.
+        p.caseCitationForm = QStringLiteral("uk");
+        request = QJsonDocument::fromJson(buildRequest(defaultModel(), defaultEffort(), p, PaperContent{})).object();
+        system = request.value(QStringLiteral("system")).toString();
+        QVERIFY(system.contains(QStringLiteral("ratio decidendi")));
+        QVERIFY(system.contains(QStringLiteral("obiter dicta")));
+        QVERIFY(system.contains(QStringLiteral("BASED ON: full text")));
+        QVERIFY(system.contains(QStringLiteral("only if the judgment itself says so")));
+
+        // The reply comes back in the brief's sections, in their order.
+        const SummaryText summary = parseSummaryText(QStringLiteral(
+            "BASED ON: full text\nIDENTIFIED: yes\n\n## Case\nName: Made-Up Holdings Ltd v Another Example Plc\n"
+            "Court: Court of Appeal\n\n## Facts\nA made-up contract.\n\n## Issues\nWhether it bound them.\n\n"
+            "## Decision\nIt did.\n\n## Reasoning\nBecause it was made up.\n\n## Separate opinions\nNone.\n\n"
+            "## Significance\nNone to speak of.\n\n## Procedural history\nAppealed from the High Court."));
+        QVERIFY(summary.structured);
+        QVERIFY(summary.isCase);
+        QCOMPARE(summary.basis, SummaryBasis::FullText);
+        QCOMPARE(summary.caseSections.size(), caseSummarySections().size());
+        QVERIFY(summary.caseSections.at(0).contains(QStringLiteral("Made-Up Holdings")));
+        QCOMPARE(summary.caseSections.at(2), QStringLiteral("Appealed from the High Court."));
+        const QString shown = summaryAsText(summary);
+        QVERIFY(shown.startsWith(QStringLiteral("Case\nName: Made-Up Holdings")));
+        QVERIFY(shown.indexOf(QStringLiteral("Procedural history")) < shown.indexOf(QStringLiteral("Issues")));
+        QVERIFY(!shown.contains(QStringLiteral("Methodology")));
+    }
+
     void identifiersBecomeAddressesThatCanBeFetched()
     {
         Publication p;

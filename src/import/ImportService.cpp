@@ -807,6 +807,25 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
                                                     p.doi, isbn, p.issn, p.arxivId});
     p.type = classification.type;
     p.needsReview = !titleIsReliable || !classification.confident;
+    if (p.type == PublicationType::CaseLaw) {
+        if (const std::optional<CaseDetails> details = caseDetailsOnFirstPage(firstPage, p.title)) {
+            // A judgment's largest text is usually its court or "JUDGMENT", so the parties make a better title.
+            if (!details->name.isEmpty() && titleSource != QLatin1StringView("embedded")) {
+                p.title = details->name;
+                titleSource = QStringLiteral("first_page");
+            }
+            p.court = details->court;
+            p.jurisdiction = details->jurisdiction;
+            p.neutralCitation = details->neutralCitation;
+            p.caseNumber = details->caseNumber;
+            if (details->year) {
+                p.year = details->year;
+                p.month = details->month;
+                p.day = details->day;
+            }
+            p.doi.clear(); // Any found belongs to something it cites.
+        }
+    }
 
     if (const std::optional<OtherFormat> other = findOtherFormat(p, 0, {file.format}, {file})) {
         std::optional<Publication> existing = m_publications.get(other->publicationId);

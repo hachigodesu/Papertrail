@@ -1,6 +1,7 @@
 #include "citation/Exporters.h"
 
 #include "citation/Formatting.h"
+#include "citation/Styles.h"
 
 #include <QHash>
 #include <QJsonArray>
@@ -216,6 +217,7 @@ QByteArray toBibTeX(const QList<CitationItem> &items)
         case Kind::Issue:
         case Kind::Standard:
         case Kind::Preprint:
+        case Kind::Case: // BibTeX has no type for one, so its citation is written out.
         case Kind::Document: type = QStringLiteral("misc"); break;
         }
 
@@ -288,6 +290,11 @@ QByteArray toBibTeX(const QList<CitationItem> &items)
         }
         if (item.kind == Kind::Preprint)
             field(QStringLiteral("howpublished"), item.arxivId.isEmpty() ? QStringLiteral("Preprint") : QStringLiteral("arXiv:") + item.arxivId);
+        if (item.kind == Kind::Case) {
+            field(QStringLiteral("howpublished"), caseCitationAfterName(item));
+            field(QStringLiteral("institution"), item.court);
+            field(QStringLiteral("type"), QStringLiteral("Case"));
+        }
         field(QStringLiteral("doi"), item.doi, true);
         field(QStringLiteral("url"), item.url, true);
         field(QStringLiteral("isbn"), item.isbn, true);
@@ -334,6 +341,7 @@ QByteArray toRis(const QList<CitationItem> &items)
         case Kind::Standard: type = QStringLiteral("STAND"); break;
         case Kind::Preprint: type = QStringLiteral("UNPB"); break;
         case Kind::Document: type = QStringLiteral("GEN"); break;
+        case Kind::Case: type = QStringLiteral("CASE"); break;
         }
         line(QStringLiteral("TY"), type);
         for (const PersonName &person : item.authors)
@@ -375,6 +383,12 @@ QByteArray toRis(const QList<CitationItem> &items)
         } else if (item.kind == Kind::Standard) {
             line(QStringLiteral("PB"), item.publisher.isEmpty() ? item.standardBody : item.publisher);
             line(QStringLiteral("A2"), item.standardBody);
+        } else if (item.kind == Kind::Case) {
+            // The court, the case's number, and the neutral citation, for which there's no tag of its own.
+            line(QStringLiteral("PB"), item.court);
+            line(QStringLiteral("M1"), item.caseNumber);
+            if (!item.neutralCitation.isEmpty())
+                line(QStringLiteral("N1"), QStringLiteral("Neutral citation: ") + item.neutralCitation);
         } else {
             line(QStringLiteral("PB"), item.publisher);
         }
@@ -435,6 +449,7 @@ QByteArray toCslJson(const QList<CitationItem> &items)
         case Kind::Standard: type = QStringLiteral("standard"); break;
         case Kind::Preprint: type = QStringLiteral("article"); break;
         case Kind::Document: type = QStringLiteral("document"); break;
+        case Kind::Case: type = QStringLiteral("legal_case"); break;
         }
         object.insert(QStringLiteral("id"), keys.at(i));
         object.insert(QStringLiteral("type"), type);
@@ -480,6 +495,13 @@ QByteArray toCslJson(const QList<CitationItem> &items)
         }
         if (item.kind == Kind::Preprint)
             set(QStringLiteral("number"), item.arxivId.isEmpty() ? QString() : QStringLiteral("arXiv:") + item.arxivId);
+        if (item.kind == Kind::Case) {
+            set(QStringLiteral("authority"), item.court);
+            set(QStringLiteral("jurisdiction"), item.jurisdiction);
+            set(QStringLiteral("number"), item.caseNumber);
+            if (!item.neutralCitation.isEmpty())
+                set(QStringLiteral("note"), QStringLiteral("Neutral citation: ") + item.neutralCitation);
+        }
         set(QStringLiteral("DOI"), item.doi);
         set(QStringLiteral("URL"), item.url.isEmpty() && !item.arxivId.isEmpty() ? item.link() : item.url);
         set(QStringLiteral("ISBN"), item.isbn);

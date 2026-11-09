@@ -66,7 +66,7 @@ private slots:
             for (const LibraryTab tab : {LibraryTab::JournalIssues, LibraryTab::JournalArticles, LibraryTab::Preprints,
                                          LibraryTab::ConferencePapers, LibraryTab::Textbooks,
                                          LibraryTab::ThesesAndDissertations, LibraryTab::TechnicalReports,
-                                         LibraryTab::Standards, LibraryTab::Other}) {
+                                         LibraryTab::Standards, LibraryTab::CaseLaw, LibraryTab::Other}) {
                 if (typesForTab(tab).contains(type))
                     ++tabs;
             }

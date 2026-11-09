@@ -175,6 +175,26 @@ QList<std::pair<QString, CitationItem>> fixtureItems()
     document.authors = {{QStringLiteral("Example Charity"), QString()}};
     document.url = QStringLiteral("https://example.org/guidance");
     items << std::make_pair(QStringLiteral("document"), citationItem(document));
+
+    // Made-up cases, one in each legal form. The Bluebook's is the one used unless OSCOLA's is chosen.
+    Publication usCase = publication(PublicationType::CaseLaw, QStringLiteral("Sample v Example County Board"));
+    usCase.containerTitle = QStringLiteral("F.4th");
+    usCase.volume = QStringLiteral("12");
+    usCase.pages = QStringLiteral("345-360");
+    usCase.court = QStringLiteral("9th Cir.");
+    usCase.jurisdiction = QStringLiteral("United States");
+    usCase.year = 2021;
+    items << std::make_pair(QStringLiteral("case_us"), citationItem(usCase));
+
+    Publication ukCase = publication(PublicationType::CaseLaw, QStringLiteral("Made-Up Holdings Ltd v. Another Example Plc"));
+    ukCase.neutralCitation = QStringLiteral("[2021] EWCA Civ 1234");
+    ukCase.containerTitle = QStringLiteral("WLR");
+    ukCase.volume = QStringLiteral("1");
+    ukCase.pages = QStringLiteral("567");
+    ukCase.court = QStringLiteral("Court of Appeal (Civil Division)");
+    ukCase.year = 2021;
+    ukCase.caseCitationForm = QStringLiteral("uk");
+    items << std::make_pair(QStringLiteral("case_uk"), citationItem(ukCase));
     return items;
 }
 
@@ -267,7 +287,7 @@ private slots:
                 QVERIFY2(fixtures.contains(name), qPrintable(styleKey(style) + QStringLiteral(" has no ") + name));
                 kinds.insert(item.kind);
             }
-            QCOMPARE(kinds.size(), 12);
+            QCOMPARE(kinds.size(), 13);
         }
     }
 
@@ -582,12 +602,76 @@ private slots:
             types.insert(value.toObject().value(QStringLiteral("type")).toString());
         for (const QString &type : {QStringLiteral("book"), QStringLiteral("chapter"), QStringLiteral("paper-conference"),
                                     QStringLiteral("thesis"), QStringLiteral("report"), QStringLiteral("standard"),
-                                    QStringLiteral("article"), QStringLiteral("periodical"), QStringLiteral("document")})
+                                    QStringLiteral("article"), QStringLiteral("periodical"), QStringLiteral("document"),
+                                    QStringLiteral("legal_case")})
             QVERIFY2(types.contains(type), qPrintable(type));
-        const QJsonObject charity = array.last().toObject();
+        QJsonObject charity;
+        QJsonObject ukCase;
+        for (const QJsonValue &value : array) {
+            const QJsonObject object = value.toObject();
+            if (object.value(QStringLiteral("type")).toString() == QLatin1StringView("document"))
+                charity = object;
+            if (object.value(QStringLiteral("title")).toString().startsWith(QStringLiteral("Made-Up Holdings")))
+                ukCase = object;
+        }
         QCOMPARE(charity.value(QStringLiteral("author")).toArray().at(0).toObject().value(QStringLiteral("literal")).toString(),
                  QStringLiteral("Example Charity"));
         QVERIFY(!charity.contains(QStringLiteral("issued")));
+        QCOMPARE(ukCase.value(QStringLiteral("type")).toString(), QStringLiteral("legal_case"));
+        QCOMPARE(ukCase.value(QStringLiteral("authority")).toString(), QStringLiteral("Court of Appeal (Civil Division)"));
+        QCOMPARE(ukCase.value(QStringLiteral("container-title")).toString(), QStringLiteral("WLR"));
+        QVERIFY(ukCase.value(QStringLiteral("note")).toString().contains(QStringLiteral("[2021] EWCA Civ 1234")));
+    }
+
+    void casesAreCitedInEitherForm()
+    {
+        // In the Supreme Court's own reports, it isn't named.
+        Publication p = publication(PublicationType::CaseLaw, QStringLiteral("Example v. Sample"));
+        p.containerTitle = QStringLiteral("U.S.");
+        p.volume = QStringLiteral("999");
+        p.pages = QStringLiteral("123");
+        p.court = QStringLiteral("U.S.");
+        p.year = 2020;
+        QCOMPARE(marked(caseCitation(citationItem(p))), QStringLiteral("*Example v. Sample*, 999 U.S. 123 (2020)"));
+
+        // Before it's reported, by its number and the day it was decided.
+        p.containerTitle.clear();
+        p.volume.clear();
+        p.pages.clear();
+        p.caseNumber = QStringLiteral("No. 19-9999");
+        p.month = 6;
+        p.day = 14;
+        QCOMPARE(marked(caseCitation(citationItem(p))), QStringLiteral("*Example v. Sample*, No. 19-9999 (U.S. June 14, 2020)"));
+
+        // The same case in OSCOLA's way, as any case can be.
+        p.caseCitationForm = QStringLiteral("uk");
+        p.court = QStringLiteral("HL");
+        p.containerTitle = QStringLiteral("AC");
+        p.pages = QStringLiteral("562");
+        p.caseNumber.clear();
+        QCOMPARE(marked(caseCitation(citationItem(p))), QStringLiteral("*Example v Sample* [2020] AC 562 (HL)"));
+        p.neutralCitation = QStringLiteral("[2020] UKSC 99");
+        QCOMPARE(marked(caseCitation(citationItem(p))), QStringLiteral("*Example v Sample* [2020] UKSC 99, [2020] AC 562"));
+        p.containerTitle.clear();
+        QCOMPARE(marked(caseCitation(citationItem(p))), QStringLiteral("*Example v Sample* [2020] UKSC 99"));
+
+        // Nothing's missing from a case with no authors, but one with nothing to find it by is.
+        QVERIFY(!lacksDetails(citationItem(p)));
+        p.neutralCitation.clear();
+        QVERIFY(lacksDetails(citationItem(p)));
+
+        // Exports name it a case.
+        QList<CitationItem> items;
+        for (const auto &[name, item] : fixtureItems()) {
+            if (name.startsWith(QStringLiteral("case_")))
+                items << item;
+        }
+        const QString ris = QString::fromUtf8(exportCitations(items, ExportFormat::Ris));
+        QCOMPARE(ris.count(QStringLiteral("TY  - CASE")), 2);
+        QVERIFY(ris.contains(QStringLiteral("PB  - 9th Cir.")));
+        QVERIFY(ris.contains(QStringLiteral("N1  - Neutral citation: [2021] EWCA Civ 1234")));
+        const QString bib = QString::fromUtf8(exportCitations(items, ExportFormat::BibTeX));
+        QVERIFY2(bib.contains(QStringLiteral("howpublished = {12 F.4th 345 (9th Cir. 2021)}")), qPrintable(bib));
     }
 
     // ---- The real tools, where they're installed ----

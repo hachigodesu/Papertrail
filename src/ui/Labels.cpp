@@ -32,6 +32,7 @@ QString typeLabel(PublicationType type)
     case PublicationType::Standard: return tr("Standard");
     case PublicationType::Preprint: return tr("Preprint");
     case PublicationType::Other: return tr("Other");
+    case PublicationType::CaseLaw: return tr("Case law");
     }
     return tr("Other");
 }
@@ -130,6 +131,7 @@ QString tabLabel(LibraryTab tab)
     case LibraryTab::ThesesAndDissertations: return tr("Theses && Dissertations");
     case LibraryTab::TechnicalReports: return tr("Technical Reports");
     case LibraryTab::Standards: return tr("Standards");
+    case LibraryTab::CaseLaw: return tr("Case Law");
     case LibraryTab::Other: return tr("Other");
     }
     return {};

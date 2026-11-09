@@ -120,4 +120,22 @@ struct Classification {
 // A best guess at what kind of publication a file is.
 Classification classify(const ClassificationInput &input);
 
+// What a court's judgment says about itself on its first page.
+struct CaseDetails {
+    QString name;            // Such as "Donoghue v Stevenson", if a line reads as one.
+    QString court;           // Such as "Supreme Court of the United Kingdom", or "9th Cir." as the Bluebook has it.
+    QString jurisdiction;    // "United Kingdom", "England and Wales", "United States", and so on.
+    QString neutralCitation; // Such as "[2020] UKSC 5".
+    QString caseNumber;      // Such as "No. 19-123" or "A2/2019/1234".
+    std::optional<int> year;
+    std::optional<int> month;
+    std::optional<int> day;
+};
+
+// A first page that reads as a judgment: a UK-style neutral citation or a court's heading, with a case's name or its
+// parties, and not an article's abstract. Only the first page is looked at, since articles and reference lists cite
+// cases all the time. Never certain, so a publication found this way is marked for review. `title` is what the page's
+// largest text or the file says it's called, which is often the case's name when the text runs its lines together.
+std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, const QString &title = QString());
+
 } // namespace papertrail::import

@@ -22,6 +22,7 @@ enum class PublicationType {
     Standard,
     Preprint, // Only ever chosen by the user. See import::classify.
     Other,
+    CaseLaw, // A court's judgment, cited in the US's way unless chosen otherwise. See caseCitationForm.
 };
 
 const QList<PublicationType> &allPublicationTypes();
@@ -46,6 +47,7 @@ enum class LibraryTab {
     ThesesAndDissertations,
     TechnicalReports,
     Standards,
+    CaseLaw,
     Other,
 };
 
@@ -118,6 +120,14 @@ struct Publication {
     QString standardBody;
     QString standardRevision;
     QString standardStatus;
+
+    // A case's. Its name is the title, its reporter the container, with its volume and first page, and the date is
+    // when it was decided.
+    QString court;
+    QString jurisdiction;
+    QString neutralCitation; // Such as "[2020] UKSC 5".
+    QString caseNumber;      // A docket number, such as "No. 19-123".
+    QString caseCitationForm; // "uk" for OSCOLA's way, "us" or empty for the Bluebook's.
 
     ReadStatus readStatus = ReadStatus::Unread;
     std::optional<int> rating;

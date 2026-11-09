@@ -69,6 +69,8 @@ private:
 
     core::Publication m_original;
     QComboBox *m_type = nullptr;
+    QComboBox *m_caseForm = nullptr; // How a case is cited.
+    QFormLayout *m_caseFormForm = nullptr;
     QLineEdit *m_pageStart = nullptr;
     QLineEdit *m_pageEnd = nullptr;
     QLineEdit *m_year = nullptr;

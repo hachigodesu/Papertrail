@@ -109,7 +109,7 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
     }
 
     const QList<PublicationType> inContainer = {T::JournalIssue, T::JournalArticle, T::ConferencePaper, T::BookChapter,
-                                                T::Preprint};
+                                                T::Preprint, T::CaseLaw};
     const QList<PublicationType> bookLike = {T::Textbook, T::Book, T::BookChapter, T::ConferenceProceedings};
     const QList<PublicationType> published = {T::JournalIssue, T::ConferenceProceedings, T::Textbook, T::Book,
                                               T::BookChapter, T::TechnicalReport, T::Standard};
@@ -135,6 +135,20 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
     addText(main, QStringLiteral("standard_body"), tr("Issuing body"), &Publication::standardBody, {T::Standard});
     addText(main, QStringLiteral("standard_revision"), tr("Revision"), &Publication::standardRevision, {T::Standard});
     addText(main, QStringLiteral("standard_status"), tr("Status"), &Publication::standardStatus, {T::Standard});
+    addText(main, QStringLiteral("court"), tr("Court"), &Publication::court, {T::CaseLaw});
+    addText(main, QStringLiteral("jurisdiction"), tr("Jurisdiction"), &Publication::jurisdiction, {T::CaseLaw});
+    addText(main, QStringLiteral("neutral_citation"), tr("Neutral citation"), &Publication::neutralCitation, {T::CaseLaw});
+    addText(main, QStringLiteral("case_number"), tr("Case number"), &Publication::caseNumber, {T::CaseLaw});
+    // Every case can be cited either way, whichever court decided it.
+    m_caseForm = new QComboBox(mainPage);
+    m_caseForm->addItem(tr("Bluebook (US)"), QString());
+    m_caseForm->addItem(tr("OSCOLA (UK)"), QStringLiteral("uk"));
+    m_caseForm->setCurrentIndex(publication.caseCitationForm == QLatin1StringView("uk") ? 1 : 0);
+    m_caseForm->setToolTip(tr("How a reference to this case is written, in any citation style"));
+    m_caseFormForm = main;
+    main->addRow(tr("Cite as"), m_caseForm);
+    if (QLineEdit *container = field(QStringLiteral("container")))
+        container->setToolTip(tr("For a case, the law report it's in, such as \"AC\" or \"U.S.\""));
     tabs->addTab(scrollable(mainPage), tr("Details"));
 
     auto *idPage = new QWidget;
@@ -203,6 +217,8 @@ void MetadataEditor::updateVisibleFields()
         field.form->setRowVisible(field.edit, field.suits.isEmpty() || field.suits.contains(type)
                                                   || !field.edit->toPlainText().isEmpty());
     }
+    if (m_caseForm)
+        m_caseFormForm->setRowVisible(m_caseForm, type == PublicationType::CaseLaw);
 }
 
 QLineEdit *MetadataEditor::field(const QString &name) const
@@ -359,6 +375,7 @@ Publication MetadataEditor::result() const
         p.month.reset();
         p.day.reset();
     }
+    p.caseCitationForm = m_caseForm ? m_caseForm->currentData().toString() : p.caseCitationForm;
     p.needsReview = false;
     return p;
 }

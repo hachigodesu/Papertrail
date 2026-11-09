@@ -400,6 +400,19 @@ def picture_pdf(path):
     path.write_bytes(bytes(out))
 
 
+def judgment_pdf(path):
+    """A made-up judgment of a court in England, laid out as its first page would be, for recognising case law."""
+    text_pdf(path, [(10, "Neutral Citation Number: [2021] EWCA Civ 1234"),
+                    (10, "Case No: A2/2020/0567"),
+                    (12, "IN THE COURT OF APPEAL (CIVIL DIVISION)"),
+                    (10, "Before:"),
+                    (10, "LORD JUSTICE EXAMPLE"),
+                    (10, "Between:"),
+                    (14, "Made-Up Holdings Ltd v Another Example Plc"),
+                    (16, "JUDGMENT")],
+             extra_pages=[[(10, "1. This made-up appeal concerns a made-up contract.")]])
+
+
 def smart_jump_pdf(path):
     """A made-up paper whose text refers to its figure, table, equation, section and references, with no links, for
     finding what a reference points at. Page 1 has the mentions, page 2 the method, an equation numbered (3) at the
@@ -720,6 +733,7 @@ def main():
     drawing_only_pdf(out / "scanned_no_text.pdf")
     picture_pdf(out / "picture_page.pdf")
     smart_jump_pdf(out / "smart_jump.pdf")
+    judgment_pdf(out / "judgment.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))
     encrypted_pdf(out / "encrypted.pdf", [(20, "Locked Paper"), (10, "You should not be able to read this text.")])
 
