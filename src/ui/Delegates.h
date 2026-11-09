@@ -43,7 +43,8 @@ private:
 
 // One entry in a reader's Notes panel: where it is, small and dimmed; the highlighted words, dimmed
 // beside a bar in the highlight's colour; then the note in full colour in a box of its own, so the
-// two can't be mistaken for each other. Everything is drawn as plain text.
+// two can't be mistaken for each other. Everything is drawn as plain text. An area drawn over a page shows a
+// picture of it in place of the words, or a space for one until it comes.
 class AnnotationDelegate : public QStyledItemDelegate {
     Q_OBJECT
 
@@ -53,6 +54,8 @@ public:
         QuoteRole,
         NoteRole,
         ColourRole,
+        AreaRole,    // Whether it's an area.
+        PictureRole, // A QImage of the area, once there is one.
     };
 
     using QStyledItemDelegate::QStyledItemDelegate;

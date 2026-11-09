@@ -28,6 +28,7 @@ struct AnnotationMark {
     QColor colour;
     bool underline = false;
     bool hasNote = false;
+    bool area = false; // An area drawn over the page, outlined so what's under it can still be seen.
 };
 
 struct SelectionPart {
@@ -116,6 +117,13 @@ public:
     QList<int> pagesWithMarks() const;
     std::optional<qint64> annotationAt(const QPoint &viewportPoint) const;
 
+    // Areas are drawn with Shift and a drag, or with any drag after asking for one. Only where pages are fixed: elsewhere
+    // trying says so with areaRefused.
+    void setAreasAllowed(bool allowed) { m_areasAllowed = allowed; }
+    void startArea(); // The next drag draws an area.
+    bool isWaitingForArea() const { return m_areaMode; }
+    bool isDrawingArea() const { return m_drawingArea; }
+
     // For tests.
     QRectF pageRect(int page) const;
     QPoint viewportPointFor(int page, const QPointF &point) const;
@@ -139,6 +147,10 @@ signals:
 
     // A link out of the document has been clicked. It comes from the file, so it can't be trusted.
     void externalLinkActivated(const QString &uri);
+
+    // An area has been drawn on a page, in points, ending at `viewportPoint`.
+    void areaChosen(int page, const QRectF &rect, const QPoint &viewportPoint);
+    void areaRefused();
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -191,6 +203,9 @@ private:
     std::optional<std::pair<int, QPointF>> pageAt(const QPoint &viewportPoint, bool nearest = false) const;
     const ReaderLink *linkAt(const QPoint &viewportPoint) const;
     void updateSelectionTo(int page, const QPointF &point);
+    QPointF pointOnPage(int page, const QPoint &viewportPoint) const; // Kept within the page.
+    QRectF drawnArea() const;
+    void stopDrawingArea();
     void showRow(int row, bool atEnd = false);
 
     QVector<QSizeF> m_sizes;
@@ -231,6 +246,13 @@ private:
     int m_dragStartPage = 0;
     QPointF m_dragStartPoint;
     QPoint m_pressPosition;
+
+    bool m_areasAllowed = true;
+    bool m_areaMode = false;
+    bool m_drawingArea = false;
+    int m_areaPage = 0;
+    QPointF m_areaStart;
+    QPointF m_areaEnd;
 
     QList<Place> m_history;
     QTimer m_wantedTimer;

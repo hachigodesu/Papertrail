@@ -11,6 +11,7 @@
 #include <QList>
 #include <QPair>
 #include <QPointer>
+#include <QSet>
 #include <QWidget>
 
 #include <optional>
@@ -100,6 +101,13 @@ public:
 
     // Highlights and notes. These are kept in the library's database, and never in the file.
     void annotateSelection(core::AnnotationType type, const QString &note = QString(), const QString &colour = QString());
+    // An area drawn over a page, in points, such as a figure or an equation, kept like a highlight. Only where pages are
+    // fixed. The words inside it are kept with it, so searching finds it.
+    void annotateArea(int page, const QRectF &rect, const QString &note = QString(), const QString &colour = QString());
+    // What's offered once an area's been drawn, for tests too.
+    QMenu *areaMenu(int page, const QRectF &rect, QWidget *parent);
+    // Puts a picture of an area on the clipboard, once it's made.
+    void copyAreaPicture(qint64 id);
     void setAnnotationNote(qint64 id, const QString &note);
     void setAnnotationColour(qint64 id, const QString &colour);
     void deleteAnnotation(qint64 id);
@@ -169,6 +177,10 @@ public:
 
 private:
     void askForNoteAndAnnotate();
+    void onAreaChosen(int page, const QRectF &rect, const QPoint &viewportPoint);
+    void onAreaText(qint64 token, int page, const QString &text);
+    void onAreaPicture(qint64 token, int page, const QImage &image);
+    void requestAreaPictures();
     void askToEditNote(qint64 id);
     void askToExportAnnotations(const QList<qint64> &only = {});
     void askToDeleteAnnotations(const QList<qint64> &ids);
@@ -190,6 +202,9 @@ private:
     };
     QHash<qint64, DraftAnnotation> m_drafts;
     qint64 m_nextDraft = 1;
+    QHash<qint64, core::Annotation> m_areaDrafts; // Areas waiting for the words inside them, by draft.
+    QHash<qint64, QImage> m_areaPictures;         // For the Notes panel, by annotation.
+    QSet<qint64> m_areaPicturesAsked;
 
     QWidget *m_annotationPanel = nullptr;
     QListWidget *m_annotationList = nullptr;

@@ -1,6 +1,7 @@
 #include "core/db/Database.h"
 #include "core/db/Schema.h"
 #include "core/query/LibraryQuery.h"
+#include "core/repo/AnnotationRepository.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/RemovedContent.h"
 #include "core/repo/PublicationRepository.h"
@@ -218,6 +219,8 @@ private slots:
         QCOMPARE(to.text("SELECT name FROM collection"), QStringLiteral("Made-Up Project"));
         QCOMPARE(to.scalar("SELECT count(*) FROM collection_publication"), qint64(2));
         QCOMPARE(to.text("SELECT note FROM annotation"), QStringLiteral("A made-up note"));
+        // An area drawn over a page comes as one, since its place is carried as it is.
+        QVERIFY(AnnotationRepository(*to.db).get(to.scalar("SELECT id FROM annotation"))->isArea());
         QCOMPARE(to.text("SELECT location FROM reading_state"), QStringLiteral("{\"pdf\":{\"page\":3}}"));
         QCOMPARE(to.text("SELECT summary_text FROM publication_summary"), QStringLiteral("A made-up summary."));
         QVERIFY(to.scalar("SELECT count(*) FROM metadata_provenance WHERE source = 'manual'") >= 1);
@@ -666,7 +669,8 @@ private:
         const QString volumeHash = library.text("SELECT sha256 FROM file WHERE relative_path = 'Papers/reader_doc.pdf'");
         auto annotation = db.prepare("INSERT INTO annotation (uuid, publication_id, content_hash, location_json, type, colour, "
                                      "selected_text, note, created_at, updated_at) VALUES ('33333333-0000-0000-0000-000000000001', "
-                                     "?, ?, '{\"parts\":[]}', 'highlight', '#ffff00', 'findme', 'A made-up note', 1, 1)");
+                                     "?, ?, '{\"parts\":[{\"text\":\"findme\",\"page\":1,\"rects\":[[70,90,80,30]],\"area\":true}]}', "
+                                     "'highlight', '#ffff00', 'findme', 'A made-up note', 1, 1)");
         annotation->bind(1, volume);
         annotation->bind(2, volumeHash);
         annotation->step();

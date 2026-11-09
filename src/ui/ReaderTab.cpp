@@ -7,6 +7,7 @@
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
 
+#include <QApplication>
 #include <QClipboard>
 #include <QDir>
 #include <QGuiApplication>
@@ -608,6 +609,13 @@ void ReaderTab::connectClient()
     connect(m_view, &PageView::imageAreasWanted, m_client, &DocumentClient::requestImageAreas);
     connect(m_view, &PageView::selectionWanted, m_client, &DocumentClient::requestSelection);
     connect(m_view, &PageView::contextMenuWanted, this, &ReaderTab::addAnnotationActions);
+    connect(m_view, &PageView::areaChosen, this, &ReaderTab::onAreaChosen);
+    connect(m_view, &PageView::areaRefused, this, [this] {
+        emit statusMessage(tr("Areas can only be marked where pages stay put, as in a PDF. This document's pages move "
+                              "with its text size."));
+    });
+    connect(m_client, &DocumentClient::areaTextReady, this, &ReaderTab::onAreaText);
+    connect(m_client, &DocumentClient::areaPictureReady, this, &ReaderTab::onAreaPicture);
     connect(m_client, &DocumentClient::anchored, this, &ReaderTab::onAnchored);
     connect(m_client, &DocumentClient::located, this, &ReaderTab::onLocated);
     connect(m_view, &PageView::currentPageChanged, this, [this] { updatePageBox(); });
@@ -630,6 +638,7 @@ void ReaderTab::connectClient()
 void ReaderTab::onOpened(int pageCount, bool reflowable)
 {
     m_reflowable = reflowable;
+    m_view->setAreasAllowed(!reflowable);
     m_toolbar->setEnabled(true);
     m_smallerTextAction->setVisible(reflowable);
     m_largerTextAction->setVisible(reflowable);
@@ -1077,6 +1086,7 @@ void ReaderTab::showMark(const Annotation &annotation)
         mark.colour = QColor(annotation.colour);
         mark.underline = annotation.type == AnnotationType::Underline;
         mark.hasNote = !annotation.note.isEmpty();
+        mark.area = part.area;
         marks << mark;
         m_view->setMarks(part.page, marks);
     }
@@ -1092,7 +1102,7 @@ void ReaderTab::refreshAnnotationList()
     };
     // The item's text holds all of it, for screen readers; AnnotationDelegate draws the parts apart.
     const auto add = [&](const QString &heading, const Annotation &annotation) {
-        const QString quote = quoted(annotation);
+        const QString quote = annotation.isArea() ? QString() : quoted(annotation);
         QStringList parts;
         for (const QString &part : {heading, quote, annotation.note}) {
             if (!part.isEmpty())
@@ -1104,6 +1114,11 @@ void ReaderTab::refreshAnnotationList()
         item->setData(AnnotationDelegate::QuoteRole, quote);
         item->setData(AnnotationDelegate::NoteRole, annotation.note);
         item->setData(AnnotationDelegate::ColourRole, annotation.colour);
+        if (annotation.isArea()) {
+            item->setData(AnnotationDelegate::AreaRole, true);
+            if (const auto picture = m_areaPictures.constFind(annotation.id); picture != m_areaPictures.cend())
+                item->setData(AnnotationDelegate::PictureRole, *picture);
+        }
     };
 
     const QSignalBlocker blocker(m_annotationList);
@@ -1123,6 +1138,8 @@ void ReaderTab::refreshAnnotationList()
             found = true; // Still being looked for.
         }
         QString heading = page >= 0 ? tr("Page %1").arg(page + 1) : QString();
+        if (annotation.isArea())
+            heading = page >= 0 ? tr("Area on page %1").arg(page + 1) : tr("Area");
         if (!found)
             heading = tr("Can't be found in this layout");
         add(heading, annotation);
@@ -1138,6 +1155,129 @@ void ReaderTab::refreshAnnotationList()
     if (m_side)
         m_side->setTabText(m_side->indexOf(m_annotationPanel),
                            m_annotationList->count() > 0 ? tr("Notes (%1)").arg(m_annotationList->count()) : tr("Notes"));
+    requestAreaPictures();
+}
+
+// Pictures of this file's areas for the Notes panel, each asked for once, behind whatever's on screen.
+void ReaderTab::requestAreaPictures()
+{
+    if (!m_ready)
+        return;
+    constexpr double kListWidth = 240;
+    const double ratio = devicePixelRatioF();
+    for (const Annotation &annotation : std::as_const(m_annotations)) {
+        if (!annotation.isArea() || m_areaPicturesAsked.contains(annotation.id))
+            continue;
+        const AnnotationPart &part = annotation.parts.first();
+        if (part.page < 0 || part.rects.isEmpty() || part.rects.first().width() <= 0)
+            continue;
+        m_areaPicturesAsked.insert(annotation.id);
+        const double scale = qMin(3.0, kListWidth / part.rects.first().width()) * ratio;
+        m_client->requestAreaPicture(annotation.id, part.page, part.rects.first(), scale, false);
+    }
+}
+
+void ReaderTab::onAreaPicture(qint64 token, int, const QImage &image)
+{
+    // A copy for the clipboard asks with the area's id made negative.
+    if (token < 0) {
+        if (image.isNull()) {
+            emit statusMessage(tr("A picture of that area couldn't be made."));
+        } else {
+            QApplication::clipboard()->setImage(image);
+            emit statusMessage(tr("Copied a picture of the area."));
+        }
+        return;
+    }
+    if (image.isNull())
+        return;
+    QImage picture = image;
+    picture.setDevicePixelRatio(devicePixelRatioF());
+    m_areaPictures.insert(token, picture);
+    for (int row = 0; row < m_annotationList->count(); ++row) {
+        QListWidgetItem *item = m_annotationList->item(row);
+        if (item->data(Qt::UserRole).toLongLong() == token)
+            item->setData(AnnotationDelegate::PictureRole, picture);
+    }
+}
+
+void ReaderTab::copyAreaPicture(qint64 id)
+{
+    for (const Annotation &annotation : std::as_const(m_annotations)) {
+        if (annotation.id != id || !annotation.isArea())
+            continue;
+        const AnnotationPart &part = annotation.parts.first();
+        if (part.page >= 0 && !part.rects.isEmpty())
+            m_client->requestAreaPicture(-id, part.page, part.rects.first(), 3.0, true);
+        return;
+    }
+}
+
+QMenu *ReaderTab::areaMenu(int page, const QRectF &rect, QWidget *parent)
+{
+    auto *menu = new QMenu(parent);
+    QMenu *highlight = menu->addMenu(tr("Mark this area"));
+    const QStringList names = colourNames();
+    for (int i = 0; i < annotationColours().size(); ++i) {
+        const QString colour = annotationColours().at(i);
+        highlight->addAction(colourSwatch(colour), names.at(i), this,
+                             [this, page, rect, colour] { annotateArea(page, rect, QString(), colour); });
+    }
+    menu->addAction(tr("Add a note..."), this, [this, page, rect] {
+        bool ok = false;
+        const QString note = QInputDialog::getMultiLineText(this, tr("Add a note"), tr("Note:"), QString(), &ok);
+        if (ok)
+            annotateArea(page, rect, note.trimmed());
+    });
+    return menu;
+}
+
+void ReaderTab::onAreaChosen(int page, const QRectF &rect, const QPoint &viewportPoint)
+{
+    QMenu *menu = areaMenu(page, rect, this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->popup(m_view->viewport()->mapToGlobal(viewportPoint));
+}
+
+void ReaderTab::annotateArea(int page, const QRectF &rect, const QString &note, const QString &colour)
+{
+    if (m_reflowable || page < 0 || rect.isEmpty())
+        return;
+    Annotation annotation;
+    annotation.publicationId = m_publicationId;
+    annotation.contentHash = m_contentHash;
+    annotation.type = AnnotationType::Highlight;
+    annotation.colour = colour.isEmpty() ? annotationColours().first() : colour;
+    annotation.note = note;
+    AnnotationPart part;
+    part.page = page;
+    part.rects = {rect};
+    part.area = true;
+    annotation.parts << part;
+    // Saved once the words inside it are known, which the answer always brings, even if there are none.
+    const qint64 draft = m_nextDraft++;
+    m_areaDrafts.insert(draft, annotation);
+    m_client->requestAreaText(draft, page, rect);
+}
+
+void ReaderTab::onAreaText(qint64 token, int, const QString &text)
+{
+    auto draft = m_areaDrafts.find(token);
+    if (draft == m_areaDrafts.end())
+        return;
+    Annotation annotation = *draft;
+    m_areaDrafts.erase(draft);
+    annotation.parts.first().text = text.simplified();
+    try {
+        AnnotationRepository(m_session.database()).create(annotation);
+    } catch (const std::exception &error) {
+        emit statusMessage(tr("That couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
+        return;
+    }
+    m_annotations << annotation;
+    showMark(annotation);
+    refreshAnnotationList();
+    emit annotationsChanged();
 }
 
 void ReaderTab::goToAnnotation(qint64 id)
@@ -1331,9 +1471,12 @@ QString ReaderTab::annotationsAsText(const QList<qint64> &ids) const
         if (!annotation)
             continue;
         QStringList lines;
-        const QString words = annotation->selectedText().simplified();
+        // The words inside an area, such as an equation's, rarely read well on their own.
+        const QString words = annotation->isArea() ? QString() : annotation->selectedText().simplified();
         const int page = annotation->firstPage();
-        if (!words.isEmpty())
+        if (annotation->isArea())
+            lines << (page >= 0 ? tr("Area on page %1").arg(page + 1) : tr("Area"));
+        else if (!words.isEmpty())
             lines << (page >= 0 ? tr("\u201C%1\u201D (page %2)").arg(words).arg(page + 1) : tr("\u201C%1\u201D").arg(words));
         else if (page >= 0)
             lines << tr("Page %1").arg(page + 1);
@@ -1454,10 +1597,24 @@ void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
     }
     if (const std::optional<qint64> id = m_view->annotationAt(viewportPoint)) {
         const qint64 annotation = *id;
+        const bool area = std::any_of(m_annotations.cbegin(), m_annotations.cend(),
+                                      [&](const Annotation &a) { return a.id == annotation && a.isArea(); });
         menu->addSeparator();
         menu->addAction(tr("Edit note..."), this, [this, annotation] { askToEditNote(annotation); });
         addColourMenu(menu, annotation);
-        menu->addAction(tr("Delete highlight"), this, [this, annotation] { deleteAnnotation(annotation); });
+        if (area) {
+            menu->addAction(tr("Copy picture"), this, [this, annotation] { copyAreaPicture(annotation); });
+            menu->addAction(tr("Delete area"), this, [this, annotation] { deleteAnnotation(annotation); });
+        } else {
+            menu->addAction(tr("Delete highlight"), this, [this, annotation] { deleteAnnotation(annotation); });
+        }
+    }
+    // A figure or an equation is better marked as an area than by its words. Not where pages move.
+    if (!m_reflowable && m_ready) {
+        menu->addSeparator();
+        QAction *mark = menu->addAction(tr("Mark an area"), m_view, &PageView::startArea);
+        mark->setObjectName(QStringLiteral("markArea"));
+        mark->setToolTip(tr("Then drag over a figure, table or equation. Shift and a drag does it straight away."));
     }
 }
 

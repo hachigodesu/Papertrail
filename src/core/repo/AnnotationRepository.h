@@ -27,6 +27,11 @@ struct AnnotationPart {
     // and which match of the words to take if they're repeated on that page.
     QString place;
     int occurrence = 0;
+
+    // An area drawn over a page, such as a figure or an equation, rather than words chosen in it. It has one
+    // rectangle, and `text` is whatever words are inside it, so that searching finds it. Only on fixed pages. It's
+    // stored as a highlight marked as an area, so a version before areas shows it as a highlighted rectangle.
+    bool area = false;
 };
 
 // Kept in Papertrail's database, and never in the document. It belongs to a file's contents, so it survives
@@ -45,6 +50,7 @@ struct Annotation {
 
     QString selectedText() const;
     int firstPage() const; // -1 if only a place is known.
+    bool isArea() const;
 };
 
 // A highlight or note, with what it's in, for listing across the library.

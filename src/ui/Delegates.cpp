@@ -188,7 +188,35 @@ int layOutAnnotation(QPainter *painter, const QStyleOptionViewItem &option, cons
         }
         y += wrappedText(painter, small, area.left(), y, area.width(), heading);
     }
-    if (!quote.isEmpty()) {
+    if (index.data(AnnotationDelegate::AreaRole).toBool()) {
+        startPart();
+        const QImage picture = index.data(AnnotationDelegate::PictureRole).value<QImage>();
+        const int left = area.left() + kQuoteIndent;
+        const int width = std::max(area.right() - left, 20);
+        constexpr int kTallest = 180;
+        constexpr int kWaiting = 48;
+        QSize size(width, kWaiting);
+        if (!picture.isNull()) {
+            const QSizeF shown = picture.deviceIndependentSize().scaled(QSizeF(width, kTallest), Qt::KeepAspectRatio);
+            // Never larger than it is, so a small area isn't blown up.
+            size = shown.width() > picture.deviceIndependentSize().width() ? picture.deviceIndependentSize().toSize()
+                                                                           : shown.toSize();
+        }
+        if (painter) {
+            QColor colour(index.data(AnnotationDelegate::ColourRole).toString());
+            if (!colour.isValid())
+                colour = faint(option.palette);
+            painter->fillRect(QRect(area.left(), y, kQuoteBar, size.height()), colour);
+            const QRect target(left, y, size.width(), size.height());
+            if (picture.isNull()) {
+                painter->fillRect(target, faint(option.palette));
+            } else {
+                painter->setRenderHint(QPainter::SmoothPixmapTransform);
+                painter->drawImage(target, picture);
+            }
+        }
+        y += size.height();
+    } else if (!quote.isEmpty()) {
         startPart();
         const int textLeft = area.left() + kQuoteIndent;
         if (painter) {

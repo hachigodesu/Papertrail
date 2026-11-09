@@ -29,9 +29,10 @@ QJsonArray marksForContents(Database &db, const QString &contentHash, int *count
             QJsonArray rects;
             for (const QRectF &rect : part.rects)
                 rects.append(QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()});
-            const QString kind = annotation.type == AnnotationType::Underline ? QStringLiteral("underline")
-                : annotation.type == AnnotationType::Note                    ? QStringLiteral("note")
-                                                                              : QStringLiteral("highlight");
+            const QString kind = part.area                                     ? QStringLiteral("area")
+                : annotation.type == AnnotationType::Underline ? QStringLiteral("underline")
+                : annotation.type == AnnotationType::Note      ? QStringLiteral("note")
+                                                                : QStringLiteral("highlight");
             // A note goes with the first part only, so it's written once.
             marks.append(QJsonObject{{QStringLiteral("page"), part.page},
                                      {QStringLiteral("kind"), kind},

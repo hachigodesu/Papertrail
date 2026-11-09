@@ -441,6 +441,113 @@ private slots:
         QVERIFY(!view->annotationAt(view->viewportPointFor(page, QPointF(1, 1))).has_value());
     }
 
+    void anAreaIsDrawnKeptListedAndFound()
+    {
+        const qint64 id = importSample(QStringLiteral("reader_doc.pdf"));
+        ReaderTab *reader = openReader(id);
+        const auto [page, word] = findWord(reader, QStringLiteral("findme"));
+        QVERIFY(page >= 0);
+        PageView *view = reader->pageView();
+        view->goToPage(page);
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(page), kLongWaitMs);
+        const QRectF wanted = word.adjusted(-12, -8, 12, 8);
+
+        // Shift and a drag draws one, and too small a drag doesn't count.
+        QSignalSpy chosen(view, &PageView::areaChosen);
+        const QPoint start = view->viewportPointFor(page, wanted.topLeft());
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::ShiftModifier, start);
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::ShiftModifier, start + QPoint(3, 3));
+        QVERIFY(chosen.isEmpty());
+        QVERIFY(!view->isDrawingArea());
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::ShiftModifier, start);
+        QVERIFY(view->isDrawingArea());
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::ShiftModifier, view->viewportPointFor(page, wanted.bottomRight()));
+        QCOMPARE(chosen.size(), 1);
+        QCOMPARE(chosen.first().at(0).toInt(), page);
+        const QRectF drawn = chosen.first().at(1).toRectF();
+        QVERIFY2(qAbs(drawn.left() - wanted.left()) < 2 && qAbs(drawn.bottom() - wanted.bottom()) < 2,
+                 qPrintable(QStringLiteral("%1,%2 %3x%4").arg(drawn.x()).arg(drawn.y()).arg(drawn.width()).arg(drawn.height())));
+
+        // Then the same choices as a highlight.
+        QSignalSpy changed(reader, &ReaderTab::annotationsChanged);
+        std::unique_ptr<QMenu> menu(reader->areaMenu(page, drawn, nullptr));
+        QMenu *colours = menu->actions().first()->menu();
+        QVERIFY(colours);
+        QCOMPARE(colours->actions().size(), annotationColours().size());
+        colours->actions().at(1)->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), kLongWaitMs);
+
+        // Kept as an area, with the words inside it.
+        AnnotationRepository annotations(m_session->database());
+        const QList<Annotation> stored = annotations.forPublication(id);
+        QCOMPARE(stored.size(), 1);
+        const Annotation area = stored.first();
+        QVERIFY(area.isArea());
+        QCOMPARE(area.parts.size(), 1);
+        QCOMPARE(area.parts.first().rects.size(), 1);
+        QVERIFY2(area.parts.first().text.contains(QStringLiteral("findme")), qPrintable(area.parts.first().text));
+        QCOMPARE(area.colour.toLower(), annotationColours().at(1).toLower());
+
+        // Outlined in its colour, which leaves what's inside it to be seen.
+        QCOMPARE(view->marksOn(page).size(), 1);
+        QVERIFY(view->marksOn(page).first().area);
+        QTest::qWait(100);
+        const QImage shot = view->viewport()->grab().toImage();
+        const QColor colour(annotationColours().at(1));
+        const QColor edge = shot.pixelColor(view->viewportPointFor(page, QPointF(drawn.left(), drawn.center().y())) + QPoint(1, 0));
+        QVERIFY2(qAbs(edge.red() - colour.red()) < 40 && qAbs(edge.green() - colour.green()) < 40
+                     && qAbs(edge.blue() - colour.blue()) < 40,
+                 qPrintable(edge.name()));
+
+        // Listed with a picture of it, said to be an area, and found by its words.
+        QListWidgetItem *item = reader->annotationList()->item(0);
+        QVERIFY(item->data(AnnotationDelegate::AreaRole).toBool());
+        QCOMPARE(item->data(AnnotationDelegate::HeadingRole).toString(), QStringLiteral("Area on page %1").arg(page + 1));
+        QVERIFY(item->data(AnnotationDelegate::QuoteRole).toString().isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(!item->data(AnnotationDelegate::PictureRole).value<QImage>().isNull(), kLongWaitMs);
+        QCOMPARE(reader->annotationsAsText({area.id}), QStringLiteral("Area on page %1").arg(page + 1));
+        qint64 total = 0;
+        QCOMPARE(annotations.everywhere(QStringLiteral("findme"), 10, &total).size(), 1);
+
+        // Its picture can be copied.
+        QApplication::clipboard()->clear();
+        reader->copyAreaPicture(area.id);
+        QTRY_VERIFY_WITH_TIMEOUT(!QApplication::clipboard()->image().isNull(), kLongWaitMs);
+
+        // A copy of the PDF has it as a rectangle.
+        closeReaders();
+        const std::optional<qint64> fileId = markedPdfFor(*m_session, id);
+        QVERIFY(fileId);
+        const QJsonArray marks = marksForContents(m_session->database(), m_session->files().get(*fileId)->sha256, nullptr);
+        QCOMPARE(marks.size(), 1);
+        QCOMPARE(marks.first().toObject().value(QStringLiteral("kind")).toString(), QStringLiteral("area"));
+        const QString out = m_dir->filePath(QStringLiteral("elsewhere/with an area.pdf"));
+        QDir().mkpath(QFileInfo(out).absolutePath());
+        QSignalSpy finished(m_window->markedCopy(), &MarkedCopyActions::finished);
+        QVERIFY(m_window->markedCopy()->save(*fileId, out));
+        QVERIFY(finished.wait(kLongWaitMs));
+        QVERIFY2(finished.first().at(0).toBool(), qPrintable(finished.first().at(1).toString()));
+        QFile copy(out);
+        QVERIFY(copy.open(QIODevice::ReadOnly));
+        QVERIFY(copy.readAll().contains("/Square"));
+    }
+
+    void anAreaNeedsPagesThatStayPut()
+    {
+        const qint64 id = importSample(QStringLiteral("reader_nav.epub"));
+        ReaderTab *reader = openReader(id);
+        QVERIFY(reader && reader->isReflowable());
+        QSignalSpy refused(reader->pageView(), &PageView::areaRefused);
+        QSignalSpy said(reader, &ReaderTab::statusMessage);
+        reader->pageView()->startArea();
+        QCOMPARE(refused.size(), 1);
+        QVERIFY(!reader->pageView()->isWaitingForArea());
+        QVERIFY(said.last().first().toString().contains(QStringLiteral("Areas can only be marked")));
+        reader->annotateArea(0, QRectF(10, 10, 50, 50));
+        QTest::qWait(200);
+        QVERIFY(AnnotationRepository(m_session->database()).forPublication(id).isEmpty());
+    }
+
     void changingAndDeletingFromThePanel()
     {
         const qint64 id = importSample(QStringLiteral("reader_doc.pdf"));

@@ -112,8 +112,13 @@ void NotesDialog::reload()
     for (const core::AnnotationListing &listing : found) {
         const core::Annotation &annotation = listing.annotation;
         const int page = annotation.firstPage();
+        // An area says so, with any words inside it after.
+        const QString words = annotation.selectedText().simplified();
+        const QString highlighted = !annotation.isArea() ? oneLine(annotation.selectedText())
+                                    : words.isEmpty()   ? tr("Area")
+                                                        : tr("Area: %1").arg(oneLine(words));
         // All shown as plain text, since it comes from documents.
-        auto *item = new QTreeWidgetItem(m_list, {oneLine(annotation.selectedText()), oneLine(annotation.note), oneLine(listing.publicationTitle, 120),
+        auto *item = new QTreeWidgetItem(m_list, {highlighted, oneLine(annotation.note), oneLine(listing.publicationTitle, 120),
                                                   page >= 0 ? QString::number(page + 1) : QString(),
                                                   locale.toString(QDateTime::fromMSecsSinceEpoch(annotation.updatedAt).date(), QLocale::ShortFormat)});
         item->setIcon(0, swatch(annotation.colour));

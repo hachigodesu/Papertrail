@@ -68,10 +68,10 @@ struct TextLine {
     QList<QRectF> chars;
 };
 
-// A highlight, underline or note to write into a copy of a document. Rectangles are in points in the page's own
-// space, as a selection gives them.
+// A highlight, underline, note or area to write into a copy of a document. Rectangles are in points in the page's
+// own space, as a selection gives them. An area is drawn as a rectangle's outline, so what's under it still shows.
 struct MarkToWrite {
-    enum class Kind { Highlight, Underline, Note };
+    enum class Kind { Highlight, Underline, Note, Area };
     int page = 0; // Counting from 0.
     QList<QRectF> rects;
     Kind kind = Kind::Highlight;

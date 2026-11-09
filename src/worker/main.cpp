@@ -325,6 +325,7 @@ QJsonObject markedCopy(engine::Engine &engine, const QJsonObject &request)
         const QString kind = object.value(QStringLiteral("kind")).toString();
         mark.kind = kind == QLatin1StringView("underline") ? engine::MarkToWrite::Kind::Underline
             : kind == QLatin1StringView("note")            ? engine::MarkToWrite::Kind::Note
+            : kind == QLatin1StringView("area")            ? engine::MarkToWrite::Kind::Area
                                                            : engine::MarkToWrite::Kind::Highlight;
         mark.colour = object.value(QStringLiteral("colour")).toString();
         mark.note = object.value(QStringLiteral("note")).toString().left(100000);

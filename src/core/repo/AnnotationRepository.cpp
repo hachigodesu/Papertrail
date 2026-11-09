@@ -56,6 +56,8 @@ QString locationToJson(const QList<AnnotationPart> &parts)
             object.insert(QStringLiteral("place"), part.place);
             object.insert(QStringLiteral("occurrence"), part.occurrence);
         }
+        if (part.area)
+            object.insert(QStringLiteral("area"), true);
         array.append(object);
     }
     return QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("parts"), array}}).toJson(QJsonDocument::Compact));
@@ -72,6 +74,7 @@ QList<AnnotationPart> locationFromJson(const QString &json)
         part.page = object.value(QStringLiteral("page")).toInt(-1);
         part.place = object.value(QStringLiteral("place")).toString();
         part.occurrence = object.value(QStringLiteral("occurrence")).toInt();
+        part.area = object.value(QStringLiteral("area")).toBool();
         const QJsonArray rects = object.value(QStringLiteral("rects")).toArray();
         for (const QJsonValue &rect : rects) {
             const QJsonArray r = rect.toArray();
@@ -143,6 +146,11 @@ QString Annotation::selectedText() const
 int Annotation::firstPage() const
 {
     return parts.isEmpty() ? -1 : parts.first().page;
+}
+
+bool Annotation::isArea() const
+{
+    return !parts.isEmpty() && parts.first().area;
 }
 
 qint64 AnnotationRepository::create(Annotation &annotation)
@@ -300,8 +308,12 @@ QString annotationsToMarkdown(const Publication &publication, const QList<Annota
 
     for (const Annotation &annotation : annotations) {
         const int page = annotation.firstPage();
-        out += page >= 0 ? QStringLiteral("## Page %1\n\n").arg(page + 1) : QStringLiteral("## Highlight\n\n");
-        const QString text = annotation.selectedText().trimmed();
+        // The words inside an area, such as an equation's, are rarely worth reading on their own.
+        if (annotation.isArea())
+            out += page >= 0 ? QStringLiteral("## Area on page %1\n\n").arg(page + 1) : QStringLiteral("## Area\n\n");
+        else
+            out += page >= 0 ? QStringLiteral("## Page %1\n\n").arg(page + 1) : QStringLiteral("## Highlight\n\n");
+        const QString text = annotation.isArea() ? QString() : annotation.selectedText().trimmed();
         if (!text.isEmpty()) {
             quoteLines(out, text);
             out += u'\n';

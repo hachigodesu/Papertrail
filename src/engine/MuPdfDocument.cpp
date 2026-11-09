@@ -453,9 +453,11 @@ public:
             const QByteArray note = mark.note.toUtf8();
             const enum pdf_annot_type type = mark.kind == MarkToWrite::Kind::Underline ? PDF_ANNOT_UNDERLINE
                 : mark.kind == MarkToWrite::Kind::Note                                  ? PDF_ANNOT_TEXT
+                : mark.kind == MarkToWrite::Kind::Area                                  ? PDF_ANNOT_SQUARE
                                                                                         : PDF_ANNOT_HIGHLIGHT;
             const QRectF first = mark.rects.first();
             const fz_rect icon = fz_make_rect(float(first.left()), float(first.top()), float(first.left() + 20), float(first.top() + 20));
+            const fz_rect box = fz_make_rect(float(first.left()), float(first.top()), float(first.right()), float(first.bottom()));
             const fz_quad *quadData = quads.data();
             const int quadCount = int(quads.size());
 
@@ -472,6 +474,9 @@ public:
                 annot = pdf_create_annot(m_ctx, pdfPage, type);
                 if (type == PDF_ANNOT_TEXT) {
                     pdf_set_annot_rect(m_ctx, annot, icon);
+                } else if (type == PDF_ANNOT_SQUARE) {
+                    pdf_set_annot_rect(m_ctx, annot, box);
+                    pdf_set_annot_border_width(m_ctx, annot, 2);
                 } else {
                     for (int i = 0; i < quadCount; ++i)
                         pdf_add_annot_quad_point(m_ctx, annot, quadData[i]);

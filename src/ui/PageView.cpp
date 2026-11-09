@@ -30,6 +30,7 @@ constexpr qint64 kMaxImageBytes = 400 * 1024 * 1024;
 constexpr int kPagesBefore = 1;
 constexpr int kPagesAfter = 2;
 constexpr int kMaxSelectionPages = 30;
+constexpr double kSmallestArea = 6; // In points each way, so a slip of the mouse isn't taken for one.
 
 const QColor kSearchColour(255, 200, 0, 110);
 const QColor kCurrentHitColour(255, 120, 0, 150);
@@ -816,6 +817,27 @@ void PageView::drawPage(QPainter &painter, int page, const QRectF &target)
     if (marks != m_marks.constEnd()) {
         for (const AnnotationMark &mark : *marks) {
             QColor colour = mark.colour;
+            if (mark.area) {
+                // Outlined with a light wash, since what it's drawn over is the point of it.
+                for (const QRectF &rect : mark.rects) {
+                    const QRectF area = toTarget(rect);
+                    QColor wash = colour;
+                    wash.setAlpha(35);
+                    painter.fillRect(area, wash);
+                    QColor edge = colour;
+                    edge.setAlpha(255);
+                    painter.setPen(QPen(edge, 2));
+                    painter.setBrush(Qt::NoBrush);
+                    painter.drawRect(area.adjusted(1, 1, -1, -1));
+                }
+                if (mark.hasNote && !mark.rects.isEmpty()) {
+                    QColor corner = colour;
+                    corner.setAlpha(255);
+                    const QRectF area = toTarget(mark.rects.first());
+                    painter.fillRect(QRectF(area.left(), area.top(), 8, 8), corner);
+                }
+                continue;
+            }
             for (const QRectF &rect : mark.rects) {
                 const QRectF area = toTarget(rect);
                 if (mark.underline) {
@@ -850,6 +872,50 @@ void PageView::drawPage(QPainter &painter, int page, const QRectF &target)
         for (const QRectF &rect : selected->rects)
             painter.fillRect(toTarget(rect), colour);
     }
+
+    if (m_drawingArea && page == m_areaPage) {
+        const QRectF area = toTarget(drawnArea());
+        QColor wash = palette().color(QPalette::Highlight);
+        wash.setAlpha(40);
+        painter.fillRect(area, wash);
+        QPen pen(palette().color(QPalette::Highlight), 1.5, Qt::DashLine);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(area);
+    }
+}
+
+void PageView::startArea()
+{
+    if (!m_areasAllowed) {
+        emit areaRefused();
+        return;
+    }
+    m_areaMode = true;
+    clearSelection();
+    viewport()->setCursor(Qt::CrossCursor);
+}
+
+QPointF PageView::pointOnPage(int page, const QPoint &viewportPoint) const
+{
+    const QRectF area = m_pageRects.value(page);
+    const QSizeF size = m_sizes.value(page);
+    const QPointF content(viewportPoint.x() + contentX(), viewportPoint.y() + contentY());
+    return QPointF(qBound(0.0, (content.x() - area.x()) / m_scale, size.width()),
+                   qBound(0.0, (content.y() - area.y()) / m_scale, size.height()));
+}
+
+QRectF PageView::drawnArea() const
+{
+    return QRectF(m_areaStart, m_areaEnd).normalized();
+}
+
+void PageView::stopDrawingArea()
+{
+    m_drawingArea = false;
+    m_areaMode = false;
+    viewport()->unsetCursor();
+    viewport()->update();
 }
 
 void PageView::paintEvent(QPaintEvent *event)
@@ -968,6 +1034,8 @@ void PageView::keyPressEvent(QKeyEvent *event)
         }
         break;
     case Qt::Key_Escape:
+        if (m_drawingArea || m_areaMode)
+            stopDrawingArea();
         clearSelection();
         break;
     default:
@@ -984,6 +1052,23 @@ void PageView::mousePressEvent(QMouseEvent *event)
     m_pressedOnLink = linkAt(m_pressPosition) != nullptr;
     clearSelection();
     const auto place = pageAt(m_pressPosition);
+
+    // Shift and a drag draws an area, as does any drag once one's been asked for.
+    if (place && (m_areaMode || (event->modifiers() & Qt::ShiftModifier))) {
+        if (!m_areasAllowed) {
+            m_areaMode = false;
+            m_dragging = false;
+            emit areaRefused();
+            return;
+        }
+        m_drawingArea = true;
+        m_dragging = false;
+        m_pressedOnLink = false;
+        m_areaPage = place->first;
+        m_areaStart = m_areaEnd = place->second;
+        viewport()->setCursor(Qt::CrossCursor);
+        return;
+    }
     m_dragging = place.has_value();
     if (place) {
         m_dragStartPage = place->first;
@@ -1026,6 +1111,11 @@ void PageView::updateSelectionTo(int page, const QPointF &point)
 void PageView::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint position = event->position().toPoint();
+    if (m_drawingArea && (event->buttons() & Qt::LeftButton)) {
+        m_areaEnd = pointOnPage(m_areaPage, position);
+        viewport()->update();
+        return;
+    }
     if (m_dragging && (event->buttons() & Qt::LeftButton)) {
         if ((position - m_pressPosition).manhattanLength() >= QApplication::startDragDistance()) {
             if (const auto place = pageAt(position, true))
@@ -1035,7 +1125,11 @@ void PageView::mouseMoveEvent(QMouseEvent *event)
     }
 
     const ReaderLink *link = linkAt(position);
-    viewport()->setCursor(link ? Qt::PointingHandCursor : (pageAt(position) ? Qt::IBeamCursor : Qt::ArrowCursor));
+    const bool overPage = pageAt(position).has_value();
+    if (overPage && m_areasAllowed && (m_areaMode || (event->modifiers() & Qt::ShiftModifier)))
+        viewport()->setCursor(Qt::CrossCursor);
+    else
+        viewport()->setCursor(link ? Qt::PointingHandCursor : (overPage ? Qt::IBeamCursor : Qt::ArrowCursor));
     if (link && !link->uri.isEmpty()) {
         // Says where a link goes before it's followed, with anything unsafe marked as such.
         const QString tip = safeWebLink(link->uri).isEmpty() ? tr("This link can't be opened from here") : link->uri;
@@ -1050,6 +1144,15 @@ void PageView::mouseReleaseEvent(QMouseEvent *event)
     if (event->button() != Qt::LeftButton)
         return;
     const QPoint position = event->position().toPoint();
+    if (m_drawingArea) {
+        m_areaEnd = pointOnPage(m_areaPage, position);
+        const QRectF area = drawnArea();
+        const int page = m_areaPage;
+        stopDrawingArea();
+        if (area.width() >= kSmallestArea && area.height() >= kSmallestArea)
+            emit areaChosen(page, area, position);
+        return;
+    }
     const bool wasClick = (position - m_pressPosition).manhattanLength() < QApplication::startDragDistance();
     m_dragging = false;
     if (!wasClick || !m_pressedOnLink)
