@@ -2,6 +2,7 @@
 
 #include "core/repo/ReadingStateRepository.h"
 #include "core/repo/VolumeArticles.h"
+#include "ui/Delegates.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
 
@@ -498,6 +499,9 @@ void ReaderTab::buildSidePanel()
     m_annotationList = new QListWidget(m_annotationPanel); // Items show text as it is, so a file's can't become formatting.
     m_annotationList->setAccessibleName(tr("Highlights and notes"));
     m_annotationList->setWordWrap(true);
+    m_annotationList->setItemDelegate(new AnnotationDelegate(m_annotationList));
+    m_annotationList->setResizeMode(QListView::Adjust); // Entries wrap to the panel's width.
+    m_annotationList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_annotationList->setContextMenuPolicy(Qt::CustomContextMenu);
     // Several can be chosen with Ctrl and Shift, or all with Ctrl+A, and changed, copied, exported or deleted together.
     m_annotationList->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -1020,18 +1024,26 @@ void ReaderTab::showMark(const Annotation &annotation)
 
 void ReaderTab::refreshAnnotationList()
 {
-    const auto describe = [](const Annotation &annotation) {
+    const auto quoted = [](const Annotation &annotation) {
         QString text = annotation.selectedText().simplified();
         if (text.size() > 200)
             text = text.left(200) + QStringLiteral("...");
-        if (!annotation.note.isEmpty())
-            text += QStringLiteral("\n") + annotation.note;
         return text;
     };
-    const auto swatch = [](const QString &colour) {
-        QPixmap pixmap(12, 12);
-        pixmap.fill(QColor(colour));
-        return QIcon(pixmap);
+    // The item's text holds all of it, for screen readers; AnnotationDelegate draws the parts apart.
+    const auto add = [&](const QString &heading, const Annotation &annotation) {
+        const QString quote = quoted(annotation);
+        QStringList parts;
+        for (const QString &part : {heading, quote, annotation.note}) {
+            if (!part.isEmpty())
+                parts << part;
+        }
+        auto *item = new QListWidgetItem(parts.join(u'\n'), m_annotationList);
+        item->setData(Qt::UserRole, annotation.id);
+        item->setData(AnnotationDelegate::HeadingRole, heading);
+        item->setData(AnnotationDelegate::QuoteRole, quote);
+        item->setData(AnnotationDelegate::NoteRole, annotation.note);
+        item->setData(AnnotationDelegate::ColourRole, annotation.colour);
     };
 
     const QSignalBlocker blocker(m_annotationList);
@@ -1053,15 +1065,11 @@ void ReaderTab::refreshAnnotationList()
         QString heading = page >= 0 ? tr("Page %1").arg(page + 1) : QString();
         if (!found)
             heading = tr("Can't be found in this layout");
-        auto *item = new QListWidgetItem(swatch(annotation.colour), (heading.isEmpty() ? QString() : heading + QStringLiteral("\n")) + describe(annotation),
-                                         m_annotationList);
-        item->setData(Qt::UserRole, annotation.id);
+        add(heading, annotation);
     }
     // Kept, and said to be from elsewhere: the text it was made on may not line up with this one.
-    for (const Annotation &annotation : std::as_const(m_annotationsElsewhere)) {
-        auto *item = new QListWidgetItem(swatch(annotation.colour), tr("From another copy or format\n") + describe(annotation), m_annotationList);
-        item->setData(Qt::UserRole, annotation.id);
-    }
+    for (const Annotation &annotation : std::as_const(m_annotationsElsewhere))
+        add(tr("From another copy or format"), annotation);
     for (int row = 0; row < m_annotationList->count(); ++row) {
         QListWidgetItem *item = m_annotationList->item(row);
         if (chosenBefore.contains(item->data(Qt::UserRole).toLongLong()))

@@ -4,10 +4,14 @@
 #include "ui/Labels.h"
 #include "ui/PublicationListModel.h"
 
+#include <QAbstractScrollArea>
 #include <QApplication>
+#include <QIcon>
 #include <QPainter>
 #include <QPainterPath>
 #include <QTextLayout>
+
+#include <algorithm>
 
 namespace papertrail::ui {
 
@@ -104,6 +108,120 @@ void drawNotices(QPainter *painter, const QRect &cover, const QModelIndex &index
         painter->setBrush(Qt::NoBrush);
         painter->setRenderHint(QPainter::Antialiasing, false);
     }
+}
+
+// Wraps text at `width`, keeping its own line breaks, and returns the height it takes. Draws it
+// with its top at `top` too, when given a painter. Never interprets the text.
+int wrappedText(QPainter *painter, const QFont &font, int left, int top, int width, const QString &text)
+{
+    const QFontMetrics metrics(font);
+    QTextOption textOption;
+    textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    int y = 0;
+    const QStringList paragraphs = QString(text).replace(QStringLiteral("\r\n"), QStringLiteral("\n")).split(u'\n');
+    for (const QString &paragraph : paragraphs) {
+        QTextLayout layout(paragraph, font);
+        layout.setTextOption(textOption);
+        layout.beginLayout();
+        bool any = false;
+        for (QTextLine line = layout.createLine(); line.isValid(); line = layout.createLine()) {
+            line.setLineWidth(std::max(width, 1));
+            if (painter)
+                painter->drawText(QPoint(left, top + y + metrics.ascent()), paragraph.mid(line.textStart(), line.textLength()).trimmed());
+            y += metrics.lineSpacing();
+            any = true;
+        }
+        layout.endLayout();
+        if (!any)
+            y += metrics.lineSpacing(); // A blank line in a note.
+    }
+    return y;
+}
+
+constexpr int kNotePadding = 6;  // Around each entry.
+constexpr int kNoteGap = 4;      // Between its parts.
+constexpr int kQuoteBar = 3;     // The bar in the highlight's colour.
+constexpr int kQuoteIndent = 8;  // From the bar's left to the highlighted words.
+constexpr int kNoteBoxPadding = 4;
+
+// The colour a style itself would give an item's text. The Windows 10 and 11 styles draw a pale
+// selection and keep the ordinary text colour on it, where others fill it with the highlight colour.
+QColor itemTextColour(const QStyleOptionViewItem &option)
+{
+    const QPalette::ColorGroup group = !(option.state & QStyle::State_Enabled) ? QPalette::Disabled
+                                       : (option.state & QStyle::State_Active) ? QPalette::Active
+                                                                                : QPalette::Inactive;
+    const QString style = (option.widget ? option.widget->style() : QApplication::style())->name();
+    const bool paleSelection = style.compare(QStringLiteral("windowsvista"), Qt::CaseInsensitive) == 0
+                               || style.compare(QStringLiteral("windows11"), Qt::CaseInsensitive) == 0;
+    const bool selected = option.state & QStyle::State_Selected;
+    return option.palette.color(group, selected && !paleSelection ? QPalette::HighlightedText : QPalette::Text);
+}
+
+// Lays out one entry of the Notes panel, drawing it when given a painter, and returns its height.
+int layOutAnnotation(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index, const QRect &area)
+{
+    const QString heading = index.data(AnnotationDelegate::HeadingRole).toString();
+    const QString quote = index.data(AnnotationDelegate::QuoteRole).toString();
+    const QString note = index.data(AnnotationDelegate::NoteRole).toString();
+    const QColor textColour = itemTextColour(option);
+    QColor dimmed = textColour;
+    dimmed.setAlphaF(0.65f);
+
+    QFont small = option.font;
+    small.setPointSizeF(small.pointSizeF() * 0.85);
+    int y = area.top();
+    bool first = true;
+    const auto startPart = [&] {
+        if (!first)
+            y += kNoteGap;
+        first = false;
+    };
+
+    if (!heading.isEmpty()) {
+        startPart();
+        if (painter) {
+            painter->setFont(small);
+            painter->setPen(dimmed);
+        }
+        y += wrappedText(painter, small, area.left(), y, area.width(), heading);
+    }
+    if (!quote.isEmpty()) {
+        startPart();
+        const int textLeft = area.left() + kQuoteIndent;
+        if (painter) {
+            painter->setFont(option.font);
+            painter->setPen(dimmed);
+        }
+        const int height = wrappedText(painter, option.font, textLeft, y, area.right() - textLeft, quote);
+        if (painter) {
+            QColor colour(index.data(AnnotationDelegate::ColourRole).toString());
+            if (!colour.isValid())
+                colour = faint(option.palette);
+            painter->fillRect(QRect(area.left(), y, kQuoteBar, height), colour);
+        }
+        y += height;
+    }
+    if (!note.isEmpty()) {
+        startPart();
+        const int innerWidth = area.width() - 2 * kNoteBoxPadding;
+        if (painter) {
+            painter->setFont(option.font);
+            const int height = wrappedText(nullptr, option.font, 0, 0, innerWidth, note);
+            QColor box = textColour;
+            box.setAlphaF(0.08f);
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(box);
+            painter->drawRoundedRect(QRect(area.left(), y, area.width(), height + 2 * kNoteBoxPadding), 3, 3);
+            painter->setBrush(Qt::NoBrush);
+            painter->setRenderHint(QPainter::Antialiasing, false);
+            painter->setPen(textColour);
+        }
+        y += 2 * kNoteBoxPadding
+             + wrappedText(painter, option.font, area.left() + kNoteBoxPadding, y + kNoteBoxPadding, innerWidth, note);
+    }
+    return y - area.top();
 }
 
 } // namespace
@@ -243,6 +361,37 @@ void ListTitleDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         }
     }
     painter->restore();
+}
+
+void AnnotationDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
+{
+    painter->save();
+    QStyleOptionViewItem opt = option;
+    initStyleOption(&opt, index);
+    opt.text.clear();
+    opt.icon = QIcon();
+    opt.features &= ~(QStyleOptionViewItem::HasDisplay | QStyleOptionViewItem::HasDecoration);
+    const QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
+    style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+
+    layOutAnnotation(painter, opt, index, option.rect.adjusted(kNotePadding, kNotePadding, -kNotePadding, -kNotePadding));
+
+    // A rule between entries, so where one ends is plain.
+    painter->setPen(faint(option.palette));
+    painter->drawLine(option.rect.left(), option.rect.bottom(), option.rect.right(), option.rect.bottom());
+    painter->restore();
+}
+
+QSize AnnotationDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
+{
+    // The list wraps to its own width, which the option's rect doesn't reliably give here.
+    int width = option.rect.width();
+    if (const auto *view = qobject_cast<const QAbstractScrollArea *>(option.widget))
+        width = view->viewport()->width();
+    QStyleOptionViewItem opt = option;
+    initStyleOption(&opt, index);
+    const QRect area(0, 0, std::max(width - 2 * kNotePadding, 40), 0);
+    return {width, layOutAnnotation(nullptr, opt, index, area) + 2 * kNotePadding + 1};
 }
 
 } // namespace papertrail::ui

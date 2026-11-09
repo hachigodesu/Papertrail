@@ -7,6 +7,7 @@
 #include "core/repo/PublicationMerge.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/VolumeArticles.h"
+#include "ui/Delegates.h"
 #include "ui/DetailsPanel.h"
 #include "ui/ImportThread.h"
 #include "ui/LibrarySession.h"
@@ -260,6 +261,21 @@ private slots:
         QVERIFY(!reader->pageView()->hasSelection());
         QCOMPARE(reader->annotationList()->count(), 1);
         QVERIFY(reader->annotationList()->item(0)->text().contains(QStringLiteral("Look at this")));
+        // The panel draws the words and the note apart, so it's given them apart.
+        {
+            const QListWidgetItem *listed = reader->annotationList()->item(0);
+            QCOMPARE(listed->data(AnnotationDelegate::HeadingRole).toString(), QStringLiteral("Page 2"));
+            QVERIFY(listed->data(AnnotationDelegate::QuoteRole).toString().contains(QStringLiteral("findme")));
+            QVERIFY(!listed->data(AnnotationDelegate::QuoteRole).toString().contains(QStringLiteral("Look at this")));
+            QCOMPARE(listed->data(AnnotationDelegate::NoteRole).toString(), QStringLiteral("Look at this"));
+            QCOMPARE(listed->data(AnnotationDelegate::ColourRole).toString(), saved.colour);
+            QStyleOptionViewItem option;
+            option.initFrom(reader->annotationList());
+            option.widget = reader->annotationList();
+            const QModelIndex index = reader->annotationList()->model()->index(0, 0);
+            QVERIFY(reader->annotationList()->itemDelegate()->sizeHint(option, index).height()
+                    > 3 * reader->annotationList()->fontMetrics().lineSpacing());
+        }
 
         // Reopening it, as after a restart.
         reader = reopenReader(id);
@@ -494,6 +510,16 @@ private slots:
         QListWidget *list = reader->annotationList();
         QTRY_COMPARE_WITH_TIMEOUT(list->count(), 3, kLongWaitMs);
         QCOMPARE(list->selectionMode(), QAbstractItemView::ExtendedSelection);
+        // The Notes panel with several in it, one chosen, for looking at by eye if asked for.
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {
+            m_window->resize(1200, 800);
+            reader->setSidePanelVisible(true);
+            reader->findChild<QTabWidget *>()->setCurrentIndex(2);
+            list->item(1)->setSelected(true);
+            QTest::qWait(1500);
+            m_window->grab().save(QDir(pictures).filePath(QStringLiteral("notes-panel.png")));
+            list->clearSelection();
+        }
 
         // Choose the first and third, by their notes, as Ctrl-clicking would.
         const auto rowWith = [list](const QString &note) {
