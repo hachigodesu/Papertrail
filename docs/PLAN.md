@@ -1,5 +1,7 @@
 # Papertrail: V1 build plan
 
+**Status:** complete. Every milestone below is done, and Papertrail 1.0.0 was released on 9 November 2026. This plan is kept as the record of what was agreed, and `docs/M*-results.md` say what each milestone delivered. Later work comes from [Roadmap after V1](#roadmap-after-v1) at the end.
+
 ## Context
 
 University students and researchers keep large folders of papers, textbooks, theses, reports and standards, and these are hard to search or organise. Papertrail is a Windows and Linux desktop app, written in C++, that indexes those files **where they already are**. It stores rich metadata and user tags in a local database, shows everything in a tabbed, filterable library, and opens documents in a built-in reader.

@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Papertrail is a C++20 / Qt 6 Widgets desktop library manager and reader for academic publications, for Windows and Linux. It indexes files where they already are and stores metadata in SQLite. `docs/PLAN.md` is the approved plan (milestones M0 to M12, with M6.5 for collections before M7, M9.5 for article summaries before M10, and M11.5 for features added before release). `docs/M*-results.md` record what each finished milestone delivered, how it differed from the plan, and what was carried forward, so read the latest one before starting a milestone.
 
+**Status:** every milestone is done, and Papertrail 1.0.0 was released on 9 November 2026 from the public repository at https://github.com/hachigodesu/Papertrail. `docs/M12-results.md` describes the release and what's still untested by hand. Work from here comes from "Roadmap after V1" and "Ideas to explore later" at the end of `docs/PLAN.md`, chosen with the user, and goes into later releases (see "Making a release").
+
 ## Rules
 
-- **Never write paths to the user's own document folders into any file or commit,** and don't copy real paper titles or author names from their files into tests or test data. The repository goes public at V1. Ask for the path each time. On Windows, map it to a temporary drive with `subst`, not a junction (recursive deletes can follow a junction into the real files). Report only aggregate results, then remove the mapping and test library and search the repo to confirm the path isn't there.
+- **Never write paths to the user's own document folders into any file or commit,** and don't copy real paper titles or author names from their files into tests or test data. The repository is public. Ask for the path each time. On Windows, map it to a temporary drive with `subst`, not a junction (recursive deletes can follow a junction into the real files). Report only aggregate results, then remove the mapping and test library and search the repo to confirm the path isn't there.
 - **Never modify the user's documents.** Annotations and metadata live only in Papertrail's database. Tests hash folders before and after to enforce this.
 - **Ask before starting a milestone, and before each commit or push.**
 - **Keep Windows on Qt 6.12,** the last release that supports Windows 10. CMake fails on Windows with 6.13 or newer, and MSYS2 holds the packages with `IgnorePkg`. Linux may use newer versions, and Arch does.
@@ -71,6 +73,12 @@ On Ubuntu, also pass `-DCMAKE_PREFIX_PATH=/opt/Qt/6.12.0/gcc_64` when configurin
 
 Build on one distro at a time, with the job limit above. Building on both at once, with no limit, hung the shared WSL VM until `wsl --shutdown`. Test on all three platforms before calling work finished. They behave differently: see the Arch crash under "Worker process".
 
+### Testing everywhere
+
+`tools/dev/test-all.sh [WINDOWS_BUILD_DIR]` runs every test on Windows, then builds and tests on Arch and on Ubuntu through `tools/dev/test-linux.sh`, one after another, and prints what failed and the slowest tests. The Windows build folder (`build/windows-debug` by default) must be built first. Logs go in `build/test-logs/`. It takes 10 to 20 minutes, so run it in the background.
+
+Windows sometimes can't start WSL's VM, with `ERROR_NO_SYSTEM_RESOURCES`, even with memory free. It clears up by itself after a few minutes, and the script tries again. Don't change WSL's settings to work around it: that's the user's machine.
+
 ### Performance tests
 
 These are labelled `perf` and excluded from the normal test presets. They take minutes on a 100,000-publication library, with a 100 ms target for results (250 ms for ranked search). They need a release build:
@@ -108,7 +116,18 @@ Use `linux-release` and `linux-perf` on Linux. `test_reader_perf` times a genera
 - **App id:** `io.github.hachigodesu.Papertrail` names the desktop file, icon and AppStream file in every Linux package, and `setDesktopFileName` uses it.
 - **Icon:** `packaging/make_icons.py` draws the `.ico` and window PNGs from the same shapes as the SVG, with plain Python.
 - **Licences:** every package installs `LICENSE` and `packaging/THIRD-PARTY.md` beside the bundled libraries' own licence texts, and **About** finds them with `MainWindow::licencesFolder`.
-- **CI:** `windows-package.yml` (with a silent install, self-test and uninstall), `flatpak.yml`, `appimage.yml` and `sanitizers.yml` run on every branch push. Pushing a `v*` tag runs `release.yml`, which checks the tag matches `CMakeLists.txt`, the PKGBUILD and the AppStream file, builds everything, and makes a **draft** release with `docs/release-notes.md`. Publishing it is the user's to do.
+- **CI:** `windows.yml`, `arch.yml` and `ubuntu.yml` run the tests, and `windows-package.yml` (with a silent install, self-test and uninstall), `flatpak.yml`, `appimage.yml` (self-tested on six distros) and `sanitizers.yml` (AddressSanitizer and UndefinedBehaviorSanitizer on Arch) run on every branch push. The user chose to keep them as separate files. `flatpak.yml` can also be started by hand. A commit with `[skip ci]` in its message starts none of them.
+- **CI quirks already solved:** the Flatpak workflow needs `elfutils` (for `eu-strip`) and `librsvg2-common` (AppStream reads the SVG icon through GDK-Pixbuf), and Ubuntu 24.04 runners need unprivileged user namespaces turned back on for Flatpak's sandbox. The AppImage smoke test installs OpenSSL on Debian's image, since the AppImage uses the system's.
+
+### Making a release
+
+1. Ask the user first: a release is public.
+2. Set the new version in `CMakeLists.txt` (`project(... VERSION ...)`) and `pkgver` in `packaging/arch/PKGBUILD` (with `pkgrel=1`).
+3. Add a `<release version="..." date="...">` to `packaging/linux/io.github.hachigodesu.Papertrail.metainfo.xml`, newest first, and rewrite `docs/release-notes.md` for it.
+4. Test everywhere, commit and push, and wait for CI to pass.
+5. Make a signed tag (`git tag -s vX.Y.Z -m "Papertrail X.Y.Z"`) and push it. `release.yml` checks the versions match, builds every package, and makes a **draft** release with them, a `SHA256SUMS` and the release notes. A draft's address starts `untagged-` until it's published.
+6. The user tests the draft's packages and publishes it on GitHub.
+7. Then run `updpkgsums` on the PKGBUILD (or fill in the first checksum by hand from `https://github.com/hachigodesu/Papertrail/archive/refs/tags/vX.Y.Z.tar.gz`), and commit that.
 
 ## Architecture
 
@@ -253,6 +272,9 @@ Removing a publication (`core/repo/RemovedContent`) deletes it and remembers its
 - All settings go through the registry in `SettingsStore`, so exports include new ones automatically. Machine-specific paths are only suggested on import, never applied.
 
 ## Pitfalls
+
+- **Signing:** commits and tags are signed with GPG, and the passphrase prompt can time out unseen when its cache has expired, which fails the commit. Try again and tell the user to watch for the prompt. Never skip signing.
+- **Scripts with backslashes or quotes:** write them to a file with the Write tool rather than through a shell heredoc, and run that. Heredocs inside the Bash tool, and `wsl.exe` command lines, have mangled them.
 
 - **MuPDF:** don't use objects with destructors, or throw, inside `fz_try`. Its error handling jumps with `longjmp`.
 - **moc:** it can't parse raw string literals containing XML in test files.
