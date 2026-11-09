@@ -2,6 +2,7 @@ name: Arch
 
 on:
   push:
+    branches: ['**'] # Not tags: a release is tagged on a commit whose tests have already passed.
   pull_request:
 
 jobs:
