@@ -1,5 +1,6 @@
 #include "ReaderHost.h"
 
+#include "core/text/References.h"
 #include "engine/Document.h"
 #include "import/Extractors.h"
 
@@ -15,11 +16,13 @@
 #include <QRegularExpression>
 #include <QThread>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -159,6 +162,8 @@ public:
                 lines(request, reply);
             else if (op == QStringLiteral("areatext"))
                 areaText(request, reply);
+            else if (op == QStringLiteral("reference"))
+                reference(request, reply);
             else if (op == QStringLiteral("outline"))
                 outline(reply);
             else if (op == QStringLiteral("links"))
@@ -494,6 +499,239 @@ private:
         reply.insert(QStringLiteral("page"), page(request));
         reply.insert(QStringLiteral("rects"), rectsToJson(selection.rects));
         reply.insert(QStringLiteral("text"), selection.text);
+    }
+
+    // Where a reference in the text points, such as "Figure 3" to its caption or "[12]" to its entry in the
+    // references, for a document whose links don't say. `first` and `last` limit it to the pages shown, so an article
+    // in an issue finds its own references.
+    void reference(const QJsonObject &request, QJsonObject &reply)
+    {
+        using Kind = core::TextReference::Kind;
+        const int number = page(request);
+        const int count = m_document->pageCount();
+        const int first = qBound(0, request.value(QStringLiteral("first")).toInt(0), count - 1);
+        const int last = qBound(first, request.value(QStringLiteral("last")).toInt(count - 1), count - 1);
+        const QPointF point(request.value(QStringLiteral("x")).toDouble(), request.value(QStringLiteral("y")).toDouble());
+        reply.insert(QStringLiteral("found"), false);
+
+        // The line clicked, with the lines either side, so a reference split over two lines is read whole.
+        const QList<engine::TextLine> &here = linesOn(number);
+        int clicked = -1;
+        double nearest = 4; // In points: a click just beside a line still counts.
+        for (int i = 0; i < here.size(); ++i) {
+            const QRectF rect = here.at(i).rect;
+            const double dx = qMax(qMax(rect.left() - point.x(), point.x() - rect.right()), 0.0);
+            const double dy = qMax(qMax(rect.top() - point.y(), point.y() - rect.bottom()), 0.0);
+            if (dx + dy < nearest) {
+                nearest = dx + dy;
+                clicked = i;
+            }
+        }
+        if (clicked < 0)
+            return;
+        const engine::TextLine &line = here.at(clicked);
+        int offset = 0;
+        double closest = std::numeric_limits<double>::max();
+        for (int i = 0; i < line.chars.size(); ++i) {
+            const QRectF box = line.chars.at(i);
+            const double distance = box.contains(point) ? -1 : qAbs(box.center().x() - point.x());
+            if (distance < closest) {
+                closest = distance;
+                offset = i;
+            }
+        }
+        QString text = line.text;
+        if (clicked > 0) {
+            const QString before = here.at(clicked - 1).text + u' ';
+            text.prepend(before);
+            offset += int(before.size());
+        }
+        if (clicked + 1 < here.size())
+            text += u' ' + here.at(clicked + 1).text;
+        const std::optional<core::TextReference> found = core::referenceAt(text, offset);
+        if (!found)
+            return;
+        reply.insert(QStringLiteral("label"), found->label());
+        reply.insert(QStringLiteral("kind"), int(found->kind));
+
+        const auto isClicked = [&](int at, int index) { return at == number && index == clicked; };
+        // Pages to look through, nearest the click first, which is where captions usually are. A long book only has
+        // the pages near it read, so the answer doesn't take minutes: a caption that far away would be unusual. The
+        // references can be further, at the end of a long book's chapter, but they're looked for from one end only.
+        constexpr int kNearby = 150;
+        constexpr int kFarthest = 300;
+        QList<int> outward;
+        for (int distance = 0; distance <= kNearby && (number - distance >= first || number + distance <= last); ++distance) {
+            if (number + distance <= last)
+                outward << number + distance;
+            if (distance > 0 && number - distance >= first)
+                outward << number - distance;
+        }
+
+        int targetPage = -1;
+        int targetLine = -1;
+        const auto lookFor = [&](const QList<int> &pages, const std::function<bool(const QString &)> &matches) {
+            for (const int at : pages) {
+                const QList<engine::TextLine> &lines = linesOn(at);
+                for (int i = 0; i < lines.size(); ++i) {
+                    if (!isClicked(at, i) && matches(lines.at(i).text)) {
+                        targetPage = at;
+                        targetLine = i;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        switch (found->kind) {
+        case Kind::Equation: {
+            // The nearest before it, where an equation's usually set out, or else after.
+            QList<int> before;
+            QList<int> after;
+            for (const int at : std::as_const(outward))
+                (at <= number ? before : after) << at;
+            std::sort(before.begin(), before.end(), std::greater<int>());
+            const auto numbered = [&](const QString &text) { return core::endsWithEquationNumber(text, found->number); };
+            if (!lookFor(before, numbered))
+                lookFor(after, numbered);
+            break;
+        }
+        case Kind::Citation:
+        case Kind::AuthorYear: {
+            // Within the list of references: the last heading for one, or anywhere from the click on if there's none.
+            int headingPage = -1;
+            int headingLine = -1;
+            for (int at = last; at >= first && headingPage < 0 && last - at <= kFarthest; --at) {
+                const QList<engine::TextLine> &lines = linesOn(at);
+                for (int i = int(lines.size()) - 1; i >= 0; --i) {
+                    if (core::isReferencesHeading(lines.at(i).text)) {
+                        headingPage = at;
+                        headingLine = i;
+                        break;
+                    }
+                }
+            }
+            const int from = headingPage >= 0 ? headingPage : number;
+            const auto entry = [&](const QString &text, int at, int index) {
+                if (at == headingPage && index <= headingLine)
+                    return false;
+                if (found->kind == Kind::Citation)
+                    return core::startsNumberedEntry(text, found->number);
+                if (!core::startsAuthorEntry(text, found->surname))
+                    return false;
+                // The year's in the entry's first few lines.
+                const QList<engine::TextLine> &lines = linesOn(at);
+                QString start;
+                for (int i = index; i < qMin<int>(index + 4, int(lines.size())); ++i)
+                    start += lines.at(i).text + u' ';
+                return core::entryHasYear(start, found->year)
+                       || (found->year.size() > 4 && core::entryHasYear(start, found->year.left(4)));
+            };
+            for (int at = from; at <= last && targetPage < 0 && at - from <= kFarthest; ++at) {
+                const QList<engine::TextLine> &lines = linesOn(at);
+                for (int i = 0; i < lines.size(); ++i) {
+                    if (!isClicked(at, i) && entry(lines.at(i).text, at, i)) {
+                        targetPage = at;
+                        targetLine = i;
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+        default: {
+            const auto caption = [&](const QString &text) { return core::isTargetLine(*found, text); };
+            if (!lookFor(outward, caption)) {
+                // "Figure 3b" is often captioned as part of "Figure 3".
+                static const QRegularExpression lettered(QStringLiteral("^(\\d+(?:\\.\\d+)*)[a-z]$"));
+                const QRegularExpressionMatch base = lettered.match(found->number);
+                if (base.hasMatch()) {
+                    core::TextReference whole = *found;
+                    whole.number = base.captured(1);
+                    lookFor(outward, [&](const QString &text) { return core::isTargetLine(whole, text); });
+                }
+            }
+            break;
+        }
+        }
+        if (targetPage < 0)
+            return;
+
+        const QList<engine::TextLine> &lines = linesOn(targetPage);
+        const QRectF target = lines.at(targetLine).rect;
+        const QSizeF size = m_document->pageSize(targetPage);
+        const QRectF pageArea(QPointF(0, 0), size);
+        const double lineHeight = qMax(target.height(), 8.0);
+        // The lines that follow on, close beneath, such as the rest of a caption or a reference.
+        const auto following = [&](int most, const std::function<bool(const engine::TextLine &)> &stop) {
+            QRectF area = target;
+            double bottom = target.bottom();
+            for (int i = targetLine + 1; i < lines.size() && i <= targetLine + most; ++i) {
+                const engine::TextLine &next = lines.at(i);
+                if (next.rect.top() < bottom - 1 || next.rect.top() > bottom + lineHeight * 1.2 || stop(next))
+                    break;
+                area = area.united(next.rect);
+                bottom = next.rect.bottom();
+            }
+            return area;
+        };
+        const auto acrossPage = [&](const QRectF &area) {
+            return QRectF(size.width() * 0.04, area.top(), size.width() * 0.92, area.height());
+        };
+
+        QRectF region;
+        switch (found->kind) {
+        case Kind::Figure: {
+            const QRectF caption = following(4, [](const engine::TextLine &) { return false; });
+            // With the picture it captions: the nearest above it, or else below.
+            QRectF picture;
+            double gap = std::numeric_limits<double>::max();
+            for (const QRectF &image : m_document->imageAreas(targetPage)) {
+                const double above = caption.top() - image.bottom();
+                const double below = image.top() - caption.bottom();
+                const double distance = above >= -4 ? above + 0 : (below >= -4 ? below + 1000 : -1);
+                if (distance >= -4 && distance < gap) {
+                    gap = distance;
+                    picture = image;
+                }
+            }
+            // A drawing that isn't a picture is somewhere above, as figures usually are.
+            region = picture.isNull() ? acrossPage(QRectF(caption.left(), caption.top() - size.height() * 0.4, caption.width(),
+                                                          caption.height() + size.height() * 0.4))
+                                      : caption.united(picture).adjusted(-6, -6, 6, 6);
+            break;
+        }
+        case Kind::Table: {
+            const QRectF caption = following(3, [](const engine::TextLine &) { return false; });
+            region = acrossPage(QRectF(caption.left(), caption.top(), caption.width(), caption.height() + size.height() * 0.35));
+            break;
+        }
+        case Kind::Equation:
+            region = acrossPage(target.adjusted(0, -lineHeight * 2.5, 0, lineHeight * 1.5));
+            break;
+        case Kind::Citation:
+        case Kind::AuthorYear: {
+            const double left = target.left();
+            region = following(8, [&](const engine::TextLine &next) {
+                // The next entry starts at the same edge, or with its own number.
+                if (found->kind == Kind::Citation)
+                    return core::startsNumberedEntry(next.text);
+                return qAbs(next.rect.left() - left) < 1.5 && !next.text.isEmpty() && next.text.at(0).isUpper();
+            });
+            region = region.adjusted(-6, -4, 6, 4);
+            break;
+        }
+        default:
+            // A heading or a theorem, and what follows it.
+            region = acrossPage(QRectF(target.left(), target.top() - 4, target.width(), size.height() * 0.22));
+            break;
+        }
+        region = region.intersected(pageArea);
+        reply.insert(QStringLiteral("found"), true);
+        reply.insert(QStringLiteral("page"), targetPage);
+        reply.insert(QStringLiteral("rect"), rectToJson(target));
+        reply.insert(QStringLiteral("region"), rectToJson(region));
     }
 
     engine::Engine &m_engine;

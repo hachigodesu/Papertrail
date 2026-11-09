@@ -24,6 +24,7 @@ papertrail_core_test(test_database)
 papertrail_core_test(test_repositories)
 papertrail_core_test(test_settings)
 papertrail_core_test(test_search_parser)
+papertrail_core_test(test_references)
 papertrail_core_test(test_library_query)
 
 papertrail_core_test(test_extractors papertrail_import)

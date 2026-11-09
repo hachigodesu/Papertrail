@@ -53,6 +53,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <limits>
 #include <exception>
 
 namespace papertrail::ui {
@@ -615,6 +616,8 @@ void ReaderTab::connectClient()
                               "with its text size."));
     });
     connect(m_client, &DocumentClient::areaTextReady, this, &ReaderTab::onAreaText);
+    connect(m_client, &DocumentClient::referenceReady, this, &ReaderTab::onReference);
+    connect(m_view, &PageView::referenceWanted, this, &ReaderTab::showReferenceAt);
     connect(m_client, &DocumentClient::areaPictureReady, this, &ReaderTab::onAreaPicture);
     connect(m_client, &DocumentClient::anchored, this, &ReaderTab::onAnchored);
     connect(m_client, &DocumentClient::located, this, &ReaderTab::onLocated);
@@ -1177,8 +1180,84 @@ void ReaderTab::requestAreaPictures()
     }
 }
 
+namespace {
+
+// What a preview's picture comes back as, apart from areas' pictures, which use their ids.
+constexpr qint64 kPreviewToken = std::numeric_limits<qint64>::min() / 2;
+
+} // namespace
+
+void ReaderTab::showReferenceAt(int page, const QPointF &point, const QPoint &viewportPoint)
+{
+    if (!m_ready)
+        return;
+    m_referencePoint = viewportPoint;
+    m_wantedReference.reset();
+    // A link the file has says where it goes itself.
+    if (const std::optional<ReaderLink> link = m_view->linkAtPoint(viewportPoint); link && link->uri.isEmpty() && link->page >= 0) {
+        ReaderReference reference;
+        reference.found = true;
+        reference.label = tr("Link");
+        reference.page = link->page;
+        const QRectF pageArea = m_view->pageRect(link->page);
+        const double width = pageArea.width() / m_view->scale();
+        const double height = pageArea.height() / m_view->scale();
+        reference.rect = QRectF(0, link->y, width, 12);
+        reference.region = QRectF(width * 0.04, qMax(0.0, link->y - 10), width * 0.92, height * 0.3);
+        onReference(reference);
+        return;
+    }
+    emit statusMessage(tr("Looking for what that refers to..."));
+    m_client->requestReference(page, point, m_view->firstShownPage(), m_view->lastShownPage());
+}
+
+void ReaderTab::onReference(const ReaderReference &reference)
+{
+    if (!reference.found) {
+        emit statusMessage(reference.label.isEmpty() ? tr("There's nothing there to go to.")
+                                                     : tr("Couldn't find %1 in this document.").arg(reference.label));
+        return;
+    }
+    emit statusMessage(QString());
+    m_wantedReference = reference;
+    // About as wide as a column of text, sharp on the screen it's shown on.
+    const double scale = qBound(0.5, 520.0 / qMax(1.0, reference.region.width()), 4.0) * devicePixelRatioF();
+    m_client->requestAreaPicture(kPreviewToken, reference.page, reference.region, scale, true);
+}
+
+void ReaderTab::showReferencePreview(const QImage &picture)
+{
+    if (!m_wantedReference)
+        return;
+    const ReaderReference reference = *m_wantedReference;
+    m_wantedReference.reset();
+    if (picture.isNull()) {
+        emit statusMessage(tr("That part of the document couldn't be shown."));
+        return;
+    }
+    if (m_referencePreview)
+        m_referencePreview->close();
+    QImage shown = withPageColours(picture, int(m_view->colours()), reference.kind == 0);
+    shown.setDevicePixelRatio(devicePixelRatioF());
+    QString label = reference.label;
+    if (!label.isEmpty())
+        label[0] = label.at(0).toUpper();
+    const QString heading = tr("%1, page %2").arg(label).arg(reference.page - m_view->firstShownPage() + 1);
+    m_referencePreview = new ReferencePreview(heading, shown, this);
+    connect(m_referencePreview, &ReferencePreview::goRequested, this, [this, reference] {
+        ensurePageShown(reference.page);
+        m_view->goToPoint(reference.page, qMax(0.0, reference.region.top() - 12));
+        m_view->setFocus();
+    });
+    m_referencePreview->popUpNear(m_view->viewport(), m_referencePoint);
+}
+
 void ReaderTab::onAreaPicture(qint64 token, int, const QImage &image)
 {
+    if (token == kPreviewToken) {
+        showReferencePreview(image);
+        return;
+    }
     // A copy for the clipboard asks with the area's id made negative.
     if (token < 0) {
         if (image.isNull()) {

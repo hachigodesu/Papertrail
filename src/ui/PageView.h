@@ -122,6 +122,9 @@ public:
     void setAreasAllowed(bool allowed) { m_areasAllowed = allowed; }
     void startArea(); // The next drag draws an area.
     bool isWaitingForArea() const { return m_areaMode; }
+
+    // The link at a place in the view, if there's one.
+    std::optional<ReaderLink> linkAtPoint(const QPoint &viewportPoint) const;
     bool isDrawingArea() const { return m_drawingArea; }
 
     // For tests.
@@ -147,6 +150,9 @@ signals:
 
     // A link out of the document has been clicked. It comes from the file, so it can't be trusted.
     void externalLinkActivated(const QString &uri);
+
+    // Ctrl and a click on a page, to see what the words there refer to, at `point` in points.
+    void referenceWanted(int page, const QPointF &point, const QPoint &viewportPoint);
 
     // An area has been drawn on a page, in points, ending at `viewportPoint`.
     void areaChosen(int page, const QRectF &rect, const QPoint &viewportPoint);

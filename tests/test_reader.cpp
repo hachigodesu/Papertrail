@@ -298,6 +298,84 @@ private slots:
         QVERIFY(picture.first().at(2).value<QImage>().isNull());
     }
 
+    void findsWhatReferencesPointAtWithoutLinks()
+    {
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy hits(&client, &DocumentClient::searchHits);
+        QSignalSpy finished(&client, &DocumentClient::searchFinished);
+        QSignalSpy found(&client, &DocumentClient::referenceReady);
+        client.open(sample(QStringLiteral("smart_jump.pdf")), {});
+        QVERIFY(opened.wait(kWaitMs));
+        QCOMPARE(opened.first().at(0).toInt(), 4);
+
+        // Where a word is on the first page, as the reader's own search finds it.
+        const auto where = [&](const QString &word) {
+            hits.clear();
+            finished.clear();
+            client.startSearch(word, 0);
+            if (!finished.wait(kWaitMs) || hits.isEmpty() || hits.first().at(0).toInt() != 0)
+                return QRectF();
+            return hits.first().at(1).value<QList<QRectF>>().first();
+        };
+        const auto lookUp = [&](const QString &word, int first = 0, int last = 3) {
+            const QRectF rect = where(word);
+            found.clear();
+            client.requestReference(0, rect.center(), first, last);
+            return found.wait(kWaitMs) ? found.first().first().value<ReaderReference>() : ReaderReference{};
+        };
+
+        ReaderReference figure = lookUp(QStringLiteral("Figure 2"));
+        QVERIFY(figure.found);
+        QCOMPARE(figure.label, QStringLiteral("Figure 2"));
+        QCOMPARE(figure.page, 2);
+        // The caption, not the mention of it beneath, and the picture above it with it.
+        QVERIFY2(figure.rect.top() > 400 && figure.rect.top() < 430, qPrintable(QString::number(figure.rect.top())));
+        QVERIFY(figure.region.top() < 150);
+        QVERIFY(figure.region.bottom() > figure.rect.bottom() - 1);
+
+        ReaderReference table = lookUp(QStringLiteral("Table 1"));
+        QVERIFY(table.found);
+        QCOMPARE(table.page, 1);
+        QVERIFY(table.region.contains(table.rect.center()));
+
+        ReaderReference equation = lookUp(QStringLiteral("(3)"));
+        QVERIFY(equation.found);
+        QCOMPARE(equation.label, QStringLiteral("Equation 3"));
+        QCOMPARE(equation.page, 1);
+
+        ReaderReference section = lookUp(QStringLiteral("Section 2"));
+        QVERIFY(section.found);
+        QCOMPARE(section.page, 1);
+
+        // In the references, the whole entry, which runs onto a second line.
+        ReaderReference numbered = lookUp(QStringLiteral("[4]"));
+        QVERIFY(numbered.found);
+        QCOMPARE(numbered.label, QStringLiteral("reference 4"));
+        QCOMPARE(numbered.page, 3);
+        QVERIFY(numbered.region.height() > numbered.rect.height() * 1.8);
+
+        ReaderReference named = lookUp(QStringLiteral("Garner"));
+        QVERIFY(named.found);
+        QCOMPARE(named.label, QStringLiteral("Garner 2019"));
+        QCOMPARE(named.page, 3);
+        QVERIFY(named.rect.top() > numbered.rect.top());
+
+        // Only within the pages it's asked to look in, as for an article that's part of a file.
+        ReaderReference outside = lookUp(QStringLiteral("[4]"), 0, 2);
+        QVERIFY(!outside.found);
+        QCOMPARE(outside.label, QStringLiteral("reference 4"));
+
+        // Words that aren't a reference, and a click on nothing.
+        ReaderReference plain = lookUp(QStringLiteral("beams bend"));
+        QVERIFY(!plain.found);
+        QVERIFY(plain.label.isEmpty());
+        found.clear();
+        client.requestReference(0, QPointF(500, 820), 0, 3);
+        QVERIFY(found.wait(kWaitMs));
+        QVERIFY(!found.first().first().value<ReaderReference>().found);
+    }
+
     void selectsTextBetweenTwoPoints()
     {
         DocumentClient client(worker());
@@ -678,6 +756,30 @@ private slots:
         client.setWantedPages({{2, 1.0}, {4, 1.0}});
         QTRY_COMPARE_WITH_TIMEOUT(rendered.size(), 2, kWaitMs);
         QCOMPARE(client.restartCount(), 1);
+    }
+
+    void aPageThatCrashesWhileLookingForAReferenceIsSurvived()
+    {
+        // The references are on the last page, which crashes the parser.
+        const QString path = copied(QStringLiteral("smart_jump.pdf"), QStringLiteral("__crashpage3__.pdf"));
+        qputenv("PAPERTRAIL_WORKER_TEST_FAULTS", "1");
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy found(&client, &DocumentClient::referenceReady);
+        QSignalSpy recovered(&client, &DocumentClient::recovered);
+        QSignalSpy rendered(&client, &DocumentClient::pageRendered);
+        client.open(path, {});
+        QVERIFY(opened.wait(kWaitMs));
+
+        // "Earlier work [4]" is set at the PDF's y of 668.
+        client.requestReference(0, QPointF(117, 842 - 668 - 3), 0, 3);
+        QTRY_COMPARE_WITH_TIMEOUT(found.size(), 1, kWaitMs);
+        QVERIFY(!found.first().first().value<ReaderReference>().found);
+        QTRY_COMPARE_WITH_TIMEOUT(recovered.size(), 1, kWaitMs);
+
+        // The rest of the document carries on.
+        client.setWantedPages({{0, 1.0}});
+        QTRY_COMPARE_WITH_TIMEOUT(rendered.size(), 1, kWaitMs);
     }
 
     void aPageThatHangsOnlyCostsThatPage()
@@ -1136,6 +1238,62 @@ private slots:
         QCOMPARE(view->topPage(), 4);
         view->goBack();
         QCOMPARE(view->topPage(), 0);
+    }
+
+    void ctrlClickingAReferencePreviewsWhereItPoints()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("smart_jump.pdf"));
+        PageView *view = reader->pageView();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        QSignalSpy said(reader, &ReaderTab::statusMessage);
+
+        // "As Figure 2 shows" is set at the PDF's y of 740, 11 points high, from 50 across: "Figure" is just after "As".
+        const QPoint onFigure = view->viewportPointFor(0, QPointF(80, 842 - 740 - 3));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier, onFigure);
+        QVERIFY(!view->hasSelection());
+        QTRY_VERIFY_WITH_TIMEOUT(reader->referencePreview() != nullptr, kWaitMs);
+        ReferencePreview *preview = reader->referencePreview();
+        QCOMPARE(preview->headingLabel()->text(), QStringLiteral("Figure 2, page 3"));
+        QCOMPARE(preview->headingLabel()->textFormat(), Qt::PlainText);
+        QVERIFY(!preview->pictureLabel()->pixmap().isNull());
+        QVERIFY(preview->pictureLabel()->pixmap().deviceIndependentSize().width() > 200);
+        QCOMPARE(view->topPage(), 0); // Only a look, so far.
+
+        // Going there can be come back from.
+        QTest::keyClick(preview, Qt::Key_Return);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->referencePreview() == nullptr, kWaitMs);
+        QCOMPARE(view->currentPage(), 2);
+        QVERIFY(view->canGoBack());
+        view->goBack();
+        QCOMPARE(view->topPage(), 0);
+
+        // Escape closes it where it is.
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier, onFigure);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->referencePreview() != nullptr, kWaitMs);
+        QTest::keyClick(reader->referencePreview(), Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->referencePreview() == nullptr, kWaitMs);
+        QCOMPARE(view->topPage(), 0);
+
+        // Words that don't refer to anything say so.
+        said.clear();
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier, view->viewportPointFor(0, QPointF(230, 842 - 740 - 3)));
+        QTRY_VERIFY_WITH_TIMEOUT(!said.isEmpty() && said.last().first().toString() == QStringLiteral("There's nothing there to go to."),
+                                 kWaitMs);
+        QVERIFY(reader->referencePreview() == nullptr);
+    }
+
+    void ctrlClickingALinkPreviewsItsPage()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reader_doc.pdf"));
+        PageView *view = reader->pageView();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        QTest::qWait(200); // For the page's links to arrive.
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier, view->viewportPointFor(0, QPointF(100, 842 - 727)));
+        QTRY_VERIFY_WITH_TIMEOUT(reader->referencePreview() != nullptr, kWaitMs);
+        QCOMPARE(reader->referencePreview()->headingLabel()->text(), QStringLiteral("Link, page 5"));
+        QCOMPARE(view->topPage(), 0);
+        reader->referencePreview()->goButton()->click();
+        QCOMPARE(view->topPage(), 4);
     }
 
     void searchingFindsAndMovesThroughMatches()

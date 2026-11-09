@@ -718,6 +718,13 @@ std::optional<std::pair<int, QPointF>> PageView::pageAt(const QPoint &viewportPo
     return std::make_pair(best, QPointF((clamped.x() - area.x()) / m_scale, (clamped.y() - area.y()) / m_scale));
 }
 
+std::optional<ReaderLink> PageView::linkAtPoint(const QPoint &viewportPoint) const
+{
+    if (const ReaderLink *link = linkAt(viewportPoint))
+        return *link;
+    return std::nullopt;
+}
+
 const ReaderLink *PageView::linkAt(const QPoint &viewportPoint) const
 {
     const auto place = pageAt(viewportPoint);
@@ -1053,6 +1060,14 @@ void PageView::mousePressEvent(QMouseEvent *event)
     clearSelection();
     const auto place = pageAt(m_pressPosition);
 
+    // Ctrl and a click asks what the words there refer to, rather than starting a selection.
+    if (place && (event->modifiers() & Qt::ControlModifier) && !m_areaMode) {
+        m_dragging = false;
+        m_pressedOnLink = false;
+        emit referenceWanted(place->first, place->second, m_pressPosition);
+        return;
+    }
+
     // Shift and a drag draws an area, as does any drag once one's been asked for.
     if (place && (m_areaMode || (event->modifiers() & Qt::ShiftModifier))) {
         if (!m_areasAllowed) {
@@ -1128,6 +1143,8 @@ void PageView::mouseMoveEvent(QMouseEvent *event)
     const bool overPage = pageAt(position).has_value();
     if (overPage && m_areasAllowed && (m_areaMode || (event->modifiers() & Qt::ShiftModifier)))
         viewport()->setCursor(Qt::CrossCursor);
+    else if (overPage && (event->modifiers() & Qt::ControlModifier))
+        viewport()->setCursor(Qt::PointingHandCursor);
     else
         viewport()->setCursor(link ? Qt::PointingHandCursor : (overPage ? Qt::IBeamCursor : Qt::ArrowCursor));
     if (link && !link->uri.isEmpty()) {

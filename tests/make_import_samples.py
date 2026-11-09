@@ -400,6 +400,82 @@ def picture_pdf(path):
     path.write_bytes(bytes(out))
 
 
+def smart_jump_pdf(path):
+    """A made-up paper whose text refers to its figure, table, equation, section and references, with no links, for
+    finding what a reference points at. Page 1 has the mentions, page 2 the method, an equation numbered (3) at the
+    right and Table 1, page 3 a picture captioned Figure 2 with a mention of it below, and page 4 the references,
+    numbered and then by author and year."""
+
+    def placed(items):
+        """`items` is a list of (font size, x, y, text), in points from the bottom left."""
+        return "\n".join(f"BT /F1 {size} Tf {x} {y} Td ({escape_pdf(text)}) Tj ET"
+                         for size, x, y, text in items).encode("latin-1")
+
+    pages = [
+        placed([(20, 50, 780, "Smart Jump Sample"),
+                (11, 50, 740, "As Figure 2 shows, the made-up beams bend."),
+                (11, 50, 722, "The values are listed in Table 1 on the next page."),
+                (11, 50, 704, "The load follows from Eq. (3) in the method."),
+                (11, 50, 686, "This was first measured by Garner and Holt (2019)."),
+                (11, 50, 668, "Earlier work [4] found the same."),
+                (11, 50, 650, "Section 2 gives the method.")]),
+        placed([(16, 50, 780, "2 Method"),
+                (11, 50, 750, "The made-up load is found from the stiffness."),
+                (11, 250, 720, "F = k x"),
+                (11, 500, 720, "(3)"),
+                (11, 50, 680, "Table 1: Made-up values for each beam."),
+                (11, 50, 662, "Beam A 12"),
+                (11, 50, 644, "Beam B 15")]),
+        placed([(11, 50, 780, "The picture below is made up."),
+                (11, 50, 420, "Figure 2: A made-up beam bending under load."),
+                (11, 50, 380, "Figure 2 is drawn above.")])
+        + b"\nq 300 0 0 250 100 450 cm /Im1 Do Q",
+        placed([(16, 50, 780, "References"),
+                (9, 50, 755, "[1] A. Sample, Made-up beams, 2001."),
+                (9, 50, 741, "[2] B. Sample, Made-up beams again, 2003."),
+                (9, 50, 727, "[3] C. Sample, Yet more made-up beams, 2005."),
+                (9, 50, 713, "[4] D. Example, More made-up beams, 2010,"),
+                (9, 62, 699, "pages 1 to 10."),
+                (9, 50, 675, "Garner, P. and Holt, R. (2019) Bending of example beams."),
+                (9, 50, 661, "Lane, T. (2020) Another made-up study.")]),
+    ]
+
+    width = height = 64
+    pixels = bytes((40 if 24 <= y < 40 else 160) for y in range(height) for _ in range(width))
+    image = zlib.compress(pixels)
+    objects = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        30: b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 8 "
+            b"/Filter /FlateDecode /Length %d >>\nstream\n%s\nendstream" % (width, height, len(image), image),
+    }
+    kids = []
+    for index, stream in enumerate(pages):
+        number = 4 + index * 2
+        kids.append(number)
+        objects[number] = (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents %d 0 R "
+                           b"/Resources << /Font << /F1 3 0 R >> /XObject << /Im1 30 0 R >> >> >>" % (number + 1))
+        objects[number + 1] = b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream)
+    objects[2] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
+        b" ".join(b"%d 0 R" % kid for kid in kids), len(kids))
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for number in sorted(objects):
+        offsets[number] = len(out)
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, objects[number])
+    xref = len(out)
+    size = max(objects) + 1
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % size
+    for number in range(1, size):
+        if number in offsets:
+            out += b"%010d 00000 n \n" % offsets[number]
+        else:
+            out += b"0000000000 00000 f \n"
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (size, xref)
+    path.write_bytes(bytes(out))
+
+
 def make_epub(path):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", zipfile.ZIP_STORED)
@@ -643,6 +719,7 @@ def main():
 
     drawing_only_pdf(out / "scanned_no_text.pdf")
     picture_pdf(out / "picture_page.pdf")
+    smart_jump_pdf(out / "smart_jump.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))
     encrypted_pdf(out / "encrypted.pdf", [(20, "Locked Paper"), (10, "You should not be able to read this text.")])
 

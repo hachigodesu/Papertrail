@@ -27,6 +27,9 @@ constexpr int kOpenLimitMs = 2000;
 constexpr int kFirstPageLimitMs = 500;
 constexpr int kPageLimitMs = 200; // At a size for a large window.
 constexpr double kFrameLimitMs = 16.7;
+// Finding what a reference points at when it's nowhere, which reads the most pages it ever does.
+constexpr int kReferenceLimitMs = 2000;
+constexpr int kReferencePage = 1500;
 
 // A book with a page of ordinary text on each page, and some simple drawing, as a textbook has.
 void writeBook(const QString &path)
@@ -58,6 +61,9 @@ void writeBook(const QString &path)
             content += "BT /F1 11 Tf 60 " + QByteArray::number(750 - line * 15) + " Td (Line "
                 + QByteArray::number(line) + " of a long textbook, with enough words on it to fill the width of the page.) Tj ET\n";
         }
+        // References to a figure and an entry that the book doesn't have, so looking for them reads as far as it can.
+        if (i == kReferencePage)
+            content += "BT /F1 11 Tf 60 70 Td (As Figure 77 shows, and as [12] found.) Tj ET\n";
         for (int shape = 0; shape < 40; ++shape) {
             content += QByteArray::number(60 + shape * 11) + " 60 m " + QByteArray::number(70 + shape * 11) + " 40 l S\n";
         }
@@ -152,6 +158,24 @@ private slots:
         QVERIFY(finished.wait(300000));
         report("Searching every page", timer.elapsed());
         QCOMPARE(hits.size(), 1);
+    }
+
+    void lookingForAReferenceThatIsntThere()
+    {
+        // "Figure" starts the line set at 70 up from the bottom, and "[12]" is near its end.
+        for (const auto &[what, x] : {std::pair{"Looking for a figure that isn't there", 75.0},
+                                      std::pair{"Looking for a reference that isn't there", 188.0}}) {
+            QSignalSpy found(m_client.get(), &DocumentClient::referenceReady);
+            QElapsedTimer timer;
+            timer.start();
+            m_client->requestReference(kReferencePage, QPointF(x, 842 - 70 - 3), 0, kPages - 1);
+            QVERIFY(found.wait(120000));
+            report(what, timer.elapsed());
+            const ReaderReference reference = found.first().first().value<ReaderReference>();
+            QVERIFY2(!reference.label.isEmpty(), what);
+            QVERIFY(!reference.found);
+            check(QString::fromLatin1(what), double(timer.elapsed()), kReferenceLimitMs);
+        }
     }
 
     void scrollingStaysSmooth()

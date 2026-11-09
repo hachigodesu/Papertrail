@@ -54,6 +54,16 @@ struct ReaderTextLine {
     QList<QRectF> chars;
 };
 
+// Where a reference in a document's text points: see DocumentClient::requestReference.
+struct ReaderReference {
+    bool found = false;
+    QString label; // Such as "Figure 3", or empty if nothing there was read as a reference.
+    int kind = -1; // A core::TextReference::Kind, or -1.
+    int page = -1;
+    QRectF rect;   // The caption's or entry's first line, in points.
+    QRectF region; // What's worth showing of it, such as the figure with its caption.
+};
+
 struct RenderRequest {
     int page = 0;
     double scale = 1; // Pixels per point.
@@ -108,6 +118,9 @@ public:
     void requestAreaText(qint64 token, int page, const QRectF &rect);
     // A page's lines of text, with where each character is.
     void requestLines(int page);
+    // What a reference at a point on a page points at, such as "Figure 3" to its caption, looking only from `first` to
+    // `last`. The answer always comes, as not found if there was nothing to find or the process died.
+    void requestReference(int page, const QPointF &point, int first, int last);
 
     // Only the newest selection on each page matters.
     void requestSelection(int page, const QPointF &a, const QPointF &b);
@@ -143,6 +156,7 @@ signals:
     void areaPictureReady(qint64 token, int page, const QImage &image);
     void areaTextReady(qint64 token, int page, const QString &text);
     void linesReady(int page, const QList<papertrail::ui::ReaderTextLine> &lines);
+    void referenceReady(const papertrail::ui::ReaderReference &reference);
     void outlineReady(const QList<papertrail::ui::ReaderOutlineItem> &items);
     void linksReady(int page, const QList<papertrail::ui::ReaderLink> &links);
     void imageAreasReady(int page, const QList<QRectF> &areas);
@@ -160,7 +174,7 @@ signals:
 private:
     enum class Kind {
         Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Images, Heading, Select, Bookmark, Anchor, Locate, Find,
-        Search, AreaPicture, AreaText, Lines
+        Search, AreaPicture, AreaText, Lines, Reference
     };
 
     struct Request {
@@ -225,3 +239,4 @@ private:
 Q_DECLARE_METATYPE(papertrail::ui::ReaderOutlineItem)
 Q_DECLARE_METATYPE(papertrail::ui::ReaderLink)
 Q_DECLARE_METATYPE(papertrail::ui::ReaderTextLine)
+Q_DECLARE_METATYPE(papertrail::ui::ReaderReference)

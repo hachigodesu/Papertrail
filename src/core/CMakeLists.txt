@@ -45,7 +45,9 @@ add_library(papertrail_core STATIC
     repo/SavedSearchRepository.cpp
     repo/SavedSearchRepository.h
     settings/SettingsStore.cpp
-    settings/SettingsStore.h)
+    settings/SettingsStore.h
+    text/References.cpp
+    text/References.h)
 
 target_include_directories(papertrail_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(papertrail_core PUBLIC Qt6::Core PRIVATE SQLite::SQLite)

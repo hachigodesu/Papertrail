@@ -118,7 +118,8 @@ void DocumentClient::send(const Request &request)
     int timeout = kOtherTimeoutMs;
     if (request.kind == Kind::Open || request.kind == Kind::Layout)
         timeout = m_openTimeoutMs;
-    else if (request.kind == Kind::Render || request.kind == Kind::Thumbnail || request.kind == Kind::AreaPicture)
+    else if (request.kind == Kind::Render || request.kind == Kind::Thumbnail || request.kind == Kind::AreaPicture
+             || request.kind == Kind::Reference)
         timeout = m_renderTimeoutMs;
     m_timeout.start(timeout);
 }
@@ -290,6 +291,20 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
         emit linesReady(request.page, lines);
         break;
     }
+    case Kind::Reference: {
+        ReaderReference reference;
+        if (ok) {
+            reference.found = reply.value(QStringLiteral("found")).toBool();
+            reference.label = reply.value(QStringLiteral("label")).toString().left(200);
+            reference.kind = reply.value(QStringLiteral("kind")).toInt(-1);
+            reference.page = reply.value(QStringLiteral("page")).toInt(-1);
+            reference.rect = rectFromJson(reply.value(QStringLiteral("rect")));
+            reference.region = rectFromJson(reply.value(QStringLiteral("region")));
+            reference.found = reference.found && reference.page >= 0 && reference.page < m_pageCount && !reference.region.isEmpty();
+        }
+        emit referenceReady(reference);
+        break;
+    }
     case Kind::Outline: {
         QList<ReaderOutlineItem> items;
         const QJsonArray array = reply.value(QStringLiteral("items")).toArray();
@@ -408,6 +423,9 @@ void DocumentClient::handleLostRequest()
         break;
     case Kind::Lines:
         emit linesReady(request.page, {});
+        break;
+    case Kind::Reference:
+        emit referenceReady(ReaderReference{});
         break;
     default:
         break;
@@ -585,6 +603,18 @@ void DocumentClient::requestLines(int page)
     request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("lines")}, {QStringLiteral("page"), page},
                                {QStringLiteral("chars"), true}};
     m_background << request;
+    pump();
+}
+
+void DocumentClient::requestReference(int page, const QPointF &point, int first, int last)
+{
+    Request request;
+    request.kind = Kind::Reference;
+    request.page = page;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("reference")}, {QStringLiteral("page"), page},
+                               {QStringLiteral("x"), point.x()}, {QStringLiteral("y"), point.y()},
+                               {QStringLiteral("first"), first}, {QStringLiteral("last"), last}};
+    m_urgent << request;
     pump();
 }
 

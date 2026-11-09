@@ -4,6 +4,7 @@
 #include "ui/ContentsPopup.h"
 #include "ui/DocumentClient.h"
 #include "ui/PageView.h"
+#include "ui/ReferencePreview.h"
 
 #include <QList>
 #include <QRectF>
@@ -108,6 +109,11 @@ public:
     QMenu *areaMenu(int page, const QRectF &rect, QWidget *parent);
     // Puts a picture of an area on the clipboard, once it's made.
     void copyAreaPicture(qint64 id);
+
+    // What the words at a point on a page refer to, such as "Figure 3", shown in a preview to go to from. As Ctrl and a
+    // click does it.
+    void showReferenceAt(int page, const QPointF &point, const QPoint &viewportPoint);
+    ReferencePreview *referencePreview() const { return m_referencePreview; }
     void setAnnotationNote(qint64 id, const QString &note);
     void setAnnotationColour(qint64 id, const QString &colour);
     void deleteAnnotation(qint64 id);
@@ -178,6 +184,8 @@ public:
 private:
     void askForNoteAndAnnotate();
     void onAreaChosen(int page, const QRectF &rect, const QPoint &viewportPoint);
+    void onReference(const papertrail::ui::ReaderReference &reference);
+    void showReferencePreview(const QImage &picture);
     void onAreaText(qint64 token, int page, const QString &text);
     void onAreaPicture(qint64 token, int page, const QImage &image);
     void requestAreaPictures();
@@ -205,6 +213,9 @@ private:
     QHash<qint64, core::Annotation> m_areaDrafts; // Areas waiting for the words inside them, by draft.
     QHash<qint64, QImage> m_areaPictures;         // For the Notes panel, by annotation.
     QSet<qint64> m_areaPicturesAsked;
+    std::optional<ReaderReference> m_wantedReference; // Found, and waiting for its picture.
+    QPoint m_referencePoint;
+    QPointer<ReferencePreview> m_referencePreview;
 
     QWidget *m_annotationPanel = nullptr;
     QListWidget *m_annotationList = nullptr;

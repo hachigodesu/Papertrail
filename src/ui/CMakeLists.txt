@@ -37,6 +37,8 @@ add_library(papertrail_ui STATIC
     OnlineLookupDialog.h
     PageView.cpp
     PageView.h
+    ReferencePreview.cpp
+    ReferencePreview.h
     PublicationListModel.cpp
     PublicationListModel.h
     QueryThreads.cpp
