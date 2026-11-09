@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Papertrail is a C++20 / Qt 6 Widgets desktop library manager and reader for academic publications, for Windows and Linux. It indexes files where they already are and stores metadata in SQLite. `docs/PLAN.md` is the approved plan (milestones M0 to M12, with M6.5 for collections before M7, M9.5 for article summaries before M10, and M11.5 for features added before release). `docs/M*-results.md` record what each finished milestone delivered, how it differed from the plan, and what was carried forward, so read the latest one before starting a milestone.
 
-**Status:** every milestone is done, and Papertrail 1.0.0 was released on 9 November 2026 from the public repository at https://github.com/hachigodesu/Papertrail. `docs/M12-results.md` describes the release and what's still untested by hand. Work from here comes from "Roadmap after V1" and "Ideas to explore later" at the end of `docs/PLAN.md`, chosen with the user, and goes into later releases (see "Making a release").
+**Status:** every milestone is done. Papertrail 1.0.0 was released on 9 November 2026 from the public repository at https://github.com/hachigodesu/Papertrail, then 1.0.1 (a clearer Notes panel) and 1.0.2 (saved searches, a Settings window and theme, `in:` searches, pictures kept on dark pages, retraction bars) on 10 November. `docs/release-notes.md` describes the latest release, and `docs/HAND-TESTING.md` what's still to try by hand, including for 1.0.2. Work from here comes from "Ideas to explore later" at the end of `docs/PLAN.md`, chosen with the user, and goes into later releases (see "Making a release"). The next is planned as 1.1.0.
 
 ## Rules
 

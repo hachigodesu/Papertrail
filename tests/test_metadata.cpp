@@ -26,6 +26,7 @@
 #include <QPainter>
 #include <QApplication>
 #include <QCheckBox>
+#include <QDateTime>
 #include <QFile>
 #include <QJsonDocument>
 #include <QLabel>
@@ -304,6 +305,12 @@ private slots:
         m_fake->answer(QStringLiteral("updates"), R"({"message":{"items":[]}})");
         checker.setRecheckAfterDays(0);
         checker.setContactEmail(QStringLiteral("someone@example.org"));
+        // A run only checks again what was checked before it started, and Windows' clock moves in steps of about
+        // 15 ms, so on a fast machine the last check can share the new run's start. Let the clock move on first.
+        auto lastCheck = m_db->prepare("SELECT max(checked_at) FROM notice_check");
+        QVERIFY(lastCheck->step());
+        const qint64 checkedAt = lastCheck->int64At(0);
+        QTRY_VERIFY_WITH_TIMEOUT(QDateTime::currentMSecsSinceEpoch() > checkedAt, kWaitMs);
         finished.clear();
         checker.start();
         QVERIFY(finished.wait(kWaitMs));
