@@ -141,4 +141,14 @@ std::optional<qint64> SavedSearchRepository::personFromKey(const QString &nameKe
     return idFor(m_db, "SELECT id FROM person WHERE name_key = ?", nameKey);
 }
 
+QString SavedSearchRepository::publicationKey(qint64 publicationId)
+{
+    return textFor(m_db, "SELECT uuid FROM publication WHERE id = ?", publicationId);
+}
+
+std::optional<qint64> SavedSearchRepository::publicationFromKey(const QString &uuid)
+{
+    return idFor(m_db, "SELECT id FROM publication WHERE uuid = ?", uuid);
+}
+
 } // namespace papertrail::core

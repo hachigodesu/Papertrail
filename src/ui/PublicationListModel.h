@@ -17,7 +17,20 @@ class PublicationListModel : public QAbstractTableModel {
     Q_OBJECT
 
 public:
-    enum Column { TitleColumn, AuthorsColumn, YearColumn, ContainerColumn, TypeColumn, FormatColumn, ReadColumn, ColumnCount };
+    // Columns after ReadColumn came later, so they're hidden until chosen, and a layout saved before them is still used.
+    enum Column {
+        TitleColumn,
+        AuthorsColumn,
+        YearColumn,
+        ContainerColumn,
+        TypeColumn,
+        FormatColumn,
+        ReadColumn,
+        RatingColumn,
+        LastOpenedColumn,
+        ProgressColumn,
+        ColumnCount
+    };
 
     enum Role {
         IsLoadedRole = Qt::UserRole + 1,

@@ -41,6 +41,9 @@ public:
     std::optional<qint64> collectionFromKey(const QString &uuid);
     QString personKey(qint64 personId);
     std::optional<qint64> personFromKey(const QString &nameKey);
+    // A publication, such as the issue whose articles are shown, by its uuid.
+    QString publicationKey(qint64 publicationId);
+    std::optional<qint64> publicationFromKey(const QString &uuid);
 
 private:
     void checkName(const QString &name, qint64 exceptId);

@@ -1126,14 +1126,32 @@ private slots:
         QVERIFY(m_window->openPublication(volume) != nullptr);
         m_window->showArticlesOf(volume);
         QCOMPARE(m_window->documentTabs()->currentIndex(), 0);
-        QVERIFY(m_window->searchBox()->text().startsWith(QStringLiteral("in:\"")));
+        QVERIFY(m_window->searchBox()->text().isEmpty());
+        QCOMPARE(m_window->holderFilter().value_or(0), volume);
+        QVERIFY(m_window->holderChip()->isVisible());
         QTRY_COMPARE_WITH_TIMEOUT(m_window->model()->rowCount(), 2, kLongWaitMs);
-        QSet<qint64> shown;
-        for (int row = 0; row < 2; ++row)
-            QTRY_VERIFY_WITH_TIMEOUT(m_window->model()->idAt(row).has_value(), kLongWaitMs);
-        for (int row = 0; row < 2; ++row)
-            shown.insert(*m_window->model()->idAt(row));
-        QCOMPARE(shown, (QSet<qint64>{ids.at(0), ids.at(1)}));
+        // Rows the model hasn't fetched yet have no id, and are left out until they have.
+        const auto shownIds = [&] {
+            QList<qint64> shown;
+            for (int row = 0; row < m_window->model()->rowCount(); ++row) {
+                if (const std::optional<qint64> id = m_window->model()->idAt(row))
+                    shown << *id;
+            }
+            return shown;
+        };
+        // In page order.
+        QTRY_COMPARE_WITH_TIMEOUT(shownIds(), (QList<qint64>{ids.at(0), ids.at(1)}), kLongWaitMs);
+
+        // Saved, it shows the same issue's articles again.
+        const std::optional<qint64> saved = m_window->saveCurrentSearch(QStringLiteral("Made-up issue's articles"));
+        QVERIFY(saved);
+        m_window->holderChip()->click();
+        QVERIFY(!m_window->holderFilter());
+        QVERIFY(!m_window->holderChip()->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->model()->rowCount() > 2, kLongWaitMs);
+        m_window->showSavedSearch(*saved);
+        QCOMPARE(m_window->holderFilter().value_or(0), volume);
+        QTRY_COMPARE_WITH_TIMEOUT(shownIds(), (QList<qint64>{ids.at(0), ids.at(1)}), kLongWaitMs);
 
         // The issue's list of articles, for looking at by eye if asked for.
         if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {

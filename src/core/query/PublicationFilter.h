@@ -18,6 +18,7 @@ struct PublicationFilter {
     QList<PublicationType> tabTypes; // From the selected tab.
     QList<PublicationType> types;
 
+    std::optional<qint64> parentId; // Only the articles in this issue, proceedings or book.
     QList<qint64> tagIds; // A tag also matches everything beneath it.
     QList<qint64> collectionIds;
     QList<qint64> authorIds;
@@ -30,6 +31,10 @@ struct PublicationFilter {
     QStringList languages;
     QStringList formats;
     QList<ReadStatus> readStatuses;
+    // Opened at or after this, in milliseconds since the epoch. With read statuses, either will do, as they're
+    // offered together.
+    std::optional<qint64> openedSince;
+    QList<int> ratings; // 1 to 5, or 0 for none.
     std::optional<int> yearMin;
     std::optional<int> yearMax;
 
@@ -41,7 +46,10 @@ struct PublicationFilter {
     bool retracted = false; // Retracted, withdrawn, or with an expression of concern.
 };
 
-enum class SortField { Relevance, Title, FirstAuthor, Year, Added };
+// How long ago something can have been opened and still count as recently read.
+constexpr qint64 kRecentlyOpenedMs = 30LL * 24 * 60 * 60 * 1000;
+
+enum class SortField { Relevance, Title, FirstAuthor, Year, Added, Rating, LastOpened };
 
 struct PublicationSort {
     SortField field = SortField::Title;

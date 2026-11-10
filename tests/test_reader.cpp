@@ -28,7 +28,10 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QMenuBar>
 #include <QSignalSpy>
+#include <QStatusBar>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -1162,6 +1165,22 @@ private slots:
 
         reader->pageView()->goBack();
         QCOMPARE(reader->pageView()->topPage(), 0);
+
+        // Forward goes to where Back came from, by key and by button, until something new is followed.
+        PageView *view = reader->pageView();
+        QVERIFY(view->canGoForward());
+        QTest::keyClick(view, Qt::Key_Right, Qt::AltModifier);
+        QCOMPARE(view->topPage(), 3);
+        QVERIFY(!view->canGoForward());
+        QTest::keyClick(view, Qt::Key_Left, Qt::AltModifier);
+        QCOMPARE(view->topPage(), 0);
+        QVERIFY(reader->forwardButton()->isEnabled());
+        reader->forwardButton()->click();
+        QCOMPARE(view->topPage(), 3);
+        view->goBack();
+        emit reader->contents()->itemClicked(reader->contents()->topLevelItem(1), 0);
+        QVERIFY(!view->canGoForward());
+        QVERIFY(!reader->forwardButton()->isEnabled());
     }
 
     void contentsAreFoundByTypingWithCtrlG()
@@ -1474,6 +1493,120 @@ private slots:
         ReaderTab *reader = waitForReader(id);
         QVERIFY(reader->pageView()->pageCount() > pagesAtFirst);
         QTRY_VERIFY_WITH_TIMEOUT(reader->pageView()->topPage() > pagesAtFirst - 1, kWaitMs);
+    }
+
+    void pagesTurnKeepingEverythingInThePagesOwnPoints()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reader_doc.pdf"));
+        QVERIFY(reader && reader->isReady());
+        PageView *view = reader->pageView();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        const QSizeF size = view->pageSize(0);
+        QVERIFY(size.width() > 0 && size.height() > 0);
+        const QPointF inside(size.width() * 0.25, size.height() * 0.1); // Near the top left.
+
+        for (const int turn : {90, 180, 270, 0}) {
+            reader->rotateBy(90);
+            QCOMPARE(view->rotation(), turn);
+            const QRectF shown = view->pageRect(0);
+            // A sideways page is as wide as it was tall.
+            const double ratio = shown.width() / shown.height();
+            const double expected = turn % 180 == 0 ? size.width() / size.height() : size.height() / size.width();
+            QVERIFY2(qAbs(ratio - expected) < 0.02, qPrintable(QStringLiteral("%1: %2 vs %3").arg(turn).arg(ratio).arg(expected)));
+
+            // A point on the page goes to the screen and back, landing where turning it would put it.
+            view->goToPage(0);
+            const QPoint onScreen = view->viewportPointFor(0, inside);
+            const QPointF relative((onScreen.x() + view->horizontalScrollBar()->value() - shown.x()) / shown.width(),
+                                   (onScreen.y() + view->verticalScrollBar()->value() - shown.y()) / shown.height());
+            const QPointF wanted = turn == 90 ? QPointF(0.9, 0.25) : turn == 180 ? QPointF(0.75, 0.9) : turn == 270 ? QPointF(0.1, 0.75)
+                                                                                                                       : QPointF(0.25, 0.1);
+            QVERIFY2(qAbs(relative.x() - wanted.x()) < 0.02 && qAbs(relative.y() - wanted.y()) < 0.02,
+                     qPrintable(QStringLiteral("%1: %2,%3").arg(turn).arg(relative.x()).arg(relative.y())));
+            // Each way round, for looking at by eye if asked for.
+            if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {
+                QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+                view->viewport()->grab().save(QDir(pictures).filePath(QStringLiteral("turned-%1.png").arg(turn)));
+            }
+
+            // Drawing an area there gives the page's own points.
+            QSignalSpy chosen(view, &PageView::areaChosen);
+            const QRectF area(inside, QSizeF(40, 30));
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::ShiftModifier, view->viewportPointFor(0, area.topLeft()));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::ShiftModifier, view->viewportPointFor(0, area.bottomRight()));
+            QCOMPARE(chosen.size(), 1);
+            const QRectF drawn = chosen.first().at(1).toRectF();
+            QVERIFY2(qAbs(drawn.left() - area.left()) < 2 && qAbs(drawn.top() - area.top()) < 2 && qAbs(drawn.width() - area.width()) < 3,
+                     qPrintable(QStringLiteral("%1: %2,%3 %4x%5").arg(turn).arg(drawn.x()).arg(drawn.y()).arg(drawn.width()).arg(drawn.height())));
+        }
+
+        // Kept with the place for this format, and put back next time.
+        reader->rotateBy(-90);
+        QCOMPARE(view->rotation(), 270);
+        reader->saveState();
+        const qint64 id = reader->publicationId();
+        QCOMPARE(ReadingStateRepository(m_session->database()).placeFor(id, QStringLiteral("pdf")).value(QStringLiteral("rotation")).toInt(),
+                 270);
+        m_window->closeDocumentTab(1);
+        reader = waitForReader(id);
+        QVERIFY(reader && reader->isReady());
+        QCOMPARE(reader->pageView()->rotation(), 270);
+    }
+
+    void reflowedPagesArentTurned()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reader_nav.epub"));
+        QVERIFY(reader && reader->isReady());
+        QSignalSpy messages(reader, &ReaderTab::statusMessage);
+        reader->rotateBy(90);
+        QCOMPARE(reader->pageView()->rotation(), 0);
+        QCOMPARE(messages.size(), 1);
+    }
+
+    void fullScreenShowsOnlyThePagesUntilEscape()
+    {
+        openLibraryWindow();
+        QAction *full = m_window->fullScreenAction();
+        QCOMPARE(full->shortcut(), QKeySequence(Qt::Key_F11));
+        QVERIFY(!full->isEnabled()); // Nothing to read yet.
+        const qint64 first = addLinkedPublication(QStringLiteral("reader_doc.pdf"));
+        const qint64 second = addLinkedPublication(QStringLiteral("smart_jump.pdf"));
+        ReaderTab *left = waitForReader(first);
+        QVERIFY(left && left->isReady());
+        ReaderTab *right = m_window->openBeside(second, m_window->formatChoices(second).first().id);
+        QTRY_VERIFY_WITH_TIMEOUT(right->isReady(), kWaitMs);
+        QVERIFY(full->isEnabled());
+
+        // Both sides lose their toolbars, and the window its bars.
+        full->trigger();
+        QVERIFY(m_window->isFullScreenReading());
+        QVERIFY(full->isChecked());
+        QVERIFY(left->isChromeHidden() && right->isChromeHidden());
+        QVERIFY(!m_window->statusBar()->isVisible());
+        QVERIFY(!m_window->documentTabs()->tabBar()->isVisible());
+        QCOMPARE(m_window->menuBar()->height(), 0);
+
+        // Escape first stops what it would anyway, such as a selection.
+        PageView *view = left->pageView();
+        view->setSelection(0, {QRectF(10, 10, 50, 10)}, QStringLiteral("made-up words"));
+        QVERIFY(view->hasSelection());
+        QTest::keyClick(view, Qt::Key_Escape);
+        QVERIFY(!view->hasSelection());
+        QVERIFY(m_window->isFullScreenReading());
+        QTest::keyClick(view, Qt::Key_Escape);
+        QVERIFY(!m_window->isFullScreenReading());
+        QVERIFY(!full->isChecked());
+        QVERIFY(!left->isChromeHidden() && !right->isChromeHidden());
+        QVERIFY(m_window->statusBar()->isVisible());
+        QVERIFY(m_window->menuBar()->height() > 0);
+
+        // Going to the library ends it.
+        full->trigger();
+        QVERIFY(m_window->isFullScreenReading());
+        m_window->documentTabs()->setCurrentIndex(0);
+        QVERIFY(!m_window->isFullScreenReading());
+        QVERIFY(!full->isEnabled());
+        QVERIFY(!left->isChromeHidden());
     }
 
     void twoDocumentsCanBeReadSideBySide()

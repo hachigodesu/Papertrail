@@ -158,6 +158,9 @@ struct PublicationSummary {
     std::optional<int> month;
     ReadStatus readStatus = ReadStatus::Unread;
     bool needsReview = false;
+    std::optional<int> rating;
+    qint64 lastOpened = 0; // In milliseconds since the epoch, or 0 if it's never been opened.
+    std::optional<double> progress; // How far through it's been read, from 0 to 1. See readingProgress.
     // The gravest notice about it that its cover shows: "retraction", "partial_retraction" or "withdrawal". Empty if none.
     QString coverNotice;
 

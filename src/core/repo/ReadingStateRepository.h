@@ -9,6 +9,12 @@ namespace papertrail::core {
 
 class Database;
 
+// How far through a publication has been read, from 0 to 1, from its reading state's location. Each format's place
+// says how far it reached, and the one saved last counts. A place saved before that was kept only says which page it
+// was on, which is measured against an article's pages of its file, from `pageStart` to `pageEnd`, or else the file's
+// page count. Null if there's nothing to tell from.
+std::optional<double> readingProgress(const QString &location, int pageStart, int pageEnd, std::optional<int> pageCount);
+
 struct ReadingState {
     QString location; // A place per format. See placeFor.
     std::optional<double> zoom; // Only in places saved before formats were kept apart.

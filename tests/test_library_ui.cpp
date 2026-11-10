@@ -2,6 +2,7 @@
 
 #include "core/db/Backups.h"
 #include "core/model/Publication.h"
+#include "core/repo/ReadingStateRepository.h"
 #include "core/repo/RemovedContent.h"
 #include "ui/BackupsDialog.h"
 #include "ui/BulkChanges.h"
@@ -35,6 +36,8 @@
 #include <QMimeData>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QHeaderView>
+#include <QJsonObject>
 #include <QCryptographicHash>
 #include <QDirIterator>
 #include <QFile>
@@ -2334,6 +2337,86 @@ private slots:
             refused = true;
         }
         QVERIFY(refused);
+    }
+
+    void ratingsAndRecentReadingAreFiltersSortsAndColumns()
+    {
+        const qint64 one = addPublication(QStringLiteral("One"), PublicationType::JournalArticle);
+        const qint64 two = addPublication(QStringLiteral("Two"), PublicationType::JournalArticle);
+        addPublication(QStringLiteral("Three"), PublicationType::JournalArticle);
+        Publication rated = *m_session->publications().get(two);
+        rated.rating = 4;
+        m_session->publications().update(rated);
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        ReadingStateRepository(m_session->database())
+            .setPlaceFor(one, QStringLiteral("pdf"),
+                         QJsonObject{{QStringLiteral("page"), 1}, {QStringLiteral("reached"), 0.25}, {QStringLiteral("savedAt"), double(now)}},
+                         now);
+        // A layout saved before the later columns: they stay hidden with it.
+        {
+            PublicationListModel model(m_session->paths().database);
+            QTableView earlier;
+            earlier.setModel(&model);
+            for (int column = PublicationListModel::RatingColumn; column < PublicationListModel::ColumnCount; ++column)
+                earlier.horizontalHeader()->setSectionHidden(column, false);
+            earlier.horizontalHeader()->resizeSection(PublicationListModel::AuthorsColumn, 222);
+            m_session->settings().setValue(QStringLiteral("window.list_columns"),
+                                           QString::fromLatin1(earlier.horizontalHeader()->saveState().toBase64()));
+        }
+        openWindow();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+        QHeaderView *header = m_window->listView()->horizontalHeader();
+        QCOMPARE(header->sectionSize(PublicationListModel::AuthorsColumn), 222);
+        for (const int column : {PublicationListModel::RatingColumn, PublicationListModel::LastOpenedColumn, PublicationListModel::ProgressColumn})
+            QVERIFY(header->isSectionHidden(column));
+
+        // Shown, they say what's known.
+        const auto cell = [this](int row, int column) {
+            return m_window->model()->data(m_window->model()->index(row, column)).toString();
+        };
+        m_window->sortBox()->setCurrentIndex(m_window->sortBox()->findData(int(SortField::Rating)));
+        emit m_window->sortBox()->activated(m_window->sortBox()->currentIndex());
+        QTRY_COMPARE_WITH_TIMEOUT(title_(0), QStringLiteral("Two"), kLongWaitMs);
+        QCOMPARE(cell(0, PublicationListModel::RatingColumn), ratingStars(4));
+        QCOMPARE(m_window->model()->data(m_window->model()->index(0, PublicationListModel::RatingColumn), Qt::AccessibleTextRole).toString(),
+                 ratingLabel(4));
+        m_window->sortBox()->setCurrentIndex(m_window->sortBox()->findData(int(SortField::LastOpened)));
+        emit m_window->sortBox()->activated(m_window->sortBox()->currentIndex());
+        QTRY_COMPARE_WITH_TIMEOUT(title_(0), QStringLiteral("One"), kLongWaitMs);
+        QCOMPARE(cell(0, PublicationListModel::ProgressColumn), QStringLiteral("25%"));
+        QVERIFY(!cell(0, PublicationListModel::LastOpenedColumn).isEmpty());
+        QVERIFY(cell(1, PublicationListModel::ProgressColumn).isEmpty());
+        // Back to a sort that starts with the lowest.
+        m_window->sortBox()->setCurrentIndex(m_window->sortBox()->findData(int(SortField::Title)));
+        emit m_window->sortBox()->activated(m_window->sortBox()->currentIndex());
+        QTRY_COMPARE_WITH_TIMEOUT(title_(0), QStringLiteral("One"), kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(title_(2), QStringLiteral("Two"), kLongWaitMs);
+
+        // The rating filter, with the unrated counted too.
+        FilterSidebar *sidebar = m_window->sidebar();
+        QTRY_VERIFY_WITH_TIMEOUT(sidebar->findValue(FilterSidebar::Ratings, QStringLiteral("4")) != nullptr, kLongWaitMs);
+        QCOMPARE(sidebar->findValue(FilterSidebar::Ratings, QStringLiteral("0"))->text(1), QStringLiteral("2"));
+        QCOMPARE(sidebar->findValue(FilterSidebar::Ratings, QStringLiteral("4"))->text(0), ratingLabel(4));
+        sidebar->setValueChosen(FilterSidebar::Ratings, QStringLiteral("4"), true);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        sidebar->clearSelection();
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 3, kLongWaitMs);
+
+        // Recently opened is offered with the read statuses, and shows the newest first.
+        QTRY_VERIFY_WITH_TIMEOUT(sidebar->findValue(FilterSidebar::ReadStatuses, QStringLiteral("opened_recently")) != nullptr,
+                                 kLongWaitMs);
+        QCOMPARE(sidebar->findValue(FilterSidebar::ReadStatuses, QStringLiteral("opened_recently"))->text(0), recentlyOpenedLabel());
+        sidebar->setValueChosen(FilterSidebar::ReadStatuses, QStringLiteral("opened_recently"), true);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QCOMPARE(m_window->sortBox()->currentData().toInt(), int(SortField::LastOpened));
+
+        // The header's menu chooses columns, and the layout's kept for next time.
+        header->setSectionHidden(PublicationListModel::ProgressColumn, false);
+        m_window->close();
+        m_window.reset();
+        openWindow();
+        QVERIFY(!m_window->listView()->horizontalHeader()->isSectionHidden(PublicationListModel::ProgressColumn));
+        QVERIFY(m_window->listView()->horizontalHeader()->isSectionHidden(PublicationListModel::RatingColumn));
     }
 
     void windowLayoutIsRememberedButNotExported()

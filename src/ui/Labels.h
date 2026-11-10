@@ -14,6 +14,12 @@ QString typeLabel(core::PublicationType type);
 QString typeLabelFromDb(const QString &value);
 QString readStatusLabel(core::ReadStatus status);
 QString readStatusLabelFromDb(const QString &value);
+// "4 stars", or "Not rated" for 0.
+QString ratingLabel(int rating);
+// "★★★★☆", or empty for 0.
+QString ratingStars(int rating);
+// What's offered with the read statuses, for publications opened in the last kRecentlyOpenedMs.
+QString recentlyOpenedLabel();
 QString fileStatusLabel(const QString &status); // Empty for a file with nothing wrong.
 // What the bar across a retracted or withdrawn publication's cover says. Empty for anything else.
 QString coverNoticeLabel(const QString &notice);

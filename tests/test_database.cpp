@@ -317,8 +317,9 @@ private slots:
     {
         Database db(path());
         const std::vector<Migration> &all = libraryMigrations();
-        QCOMPARE(all.back().version, 20);
-        migrate(db, std::vector<Migration>(all.begin(), all.end() - 1));
+        // Up to 19, the last before case law.
+        QCOMPARE(all.at(18).version, 19);
+        migrate(db, std::vector<Migration>(all.begin(), all.begin() + 19));
 
         // A library as 1.0.2 left it: a publication in an issue, with a file, a tag, a note, a highlight and a summary.
         db.exec("INSERT INTO publication (id, uuid, type, title, notes, title_sort, created_at, updated_at) VALUES "
@@ -349,9 +350,12 @@ private slots:
         const qint64 triggers = count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'trigger'");
 
         migrateLibrary(db);
-        QCOMPARE(db.userVersion(), 20);
+        QCOMPARE(db.userVersion(), all.back().version);
         QCOMPARE(everything(), before);
-        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'index'"), indexes);
+        // Later migrations add sorting indexes of their own.
+        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'index' "
+                       "AND name NOT LIKE '%rating%'"),
+                 indexes);
         QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'trigger'"), triggers);
         QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE name = 'publication_new'"), qint64(0));
         // Foreign keys are back on, and everything still points where it did.
@@ -395,6 +399,47 @@ private slots:
         db.exec("DELETE FROM publication WHERE id = 1");
         QCOMPARE(count("SELECT count(*) FROM publication WHERE id = 2"), qint64(0));
         QCOMPARE(count("SELECT count(*) FROM annotation"), qint64(0));
+    }
+
+    void bookmarksRelatedPapersAndRatingSortsAreAddedAndCanBeAddedAgain()
+    {
+        Database db(path());
+        const std::vector<Migration> &all = libraryMigrations();
+        QCOMPARE(all.back().version, 21);
+        migrate(db, std::vector<Migration>(all.begin(), all.end() - 1));
+        db.exec("INSERT INTO publication (id, uuid, type, title, rating, title_sort, created_at, updated_at) VALUES "
+                "(1, 'u1', 'book', 'A Made-Up Book', 4, 'a made-up book', 1, 1)");
+        migrateLibrary(db);
+        QCOMPARE(db.userVersion(), 21);
+        const auto count = [&](const char *sql) {
+            auto select = db.prepare(sql);
+            select->step();
+            return select->int64At(0);
+        };
+        db.exec("INSERT INTO bookmark (uuid, publication_id, content_hash, page, y, label, created_at, updated_at) "
+                "VALUES ('b1', 1, 'abc', 3, 0.5, 'Made-up place', 1, 1)");
+        db.exec("INSERT INTO related_fetch (publication_id, doi, fetched_at) VALUES (1, '10.1000/made-up', 1)");
+        db.exec("INSERT INTO related_work (publication_id, relation, position, openalex_id, record) "
+                "VALUES (1, 'reference', 0, 'W1', '{}')");
+        for (const char *index : {"publication_rating_desc", "publication_rating_asc", "publication_type_rating_desc",
+                                  "publication_type_rating_asc", "publication_rating", "reading_state_last_opened"}) {
+            auto found = db.prepare("SELECT count(*) FROM sqlite_schema WHERE type = 'index' AND name = ?");
+            found->bind(1, QString::fromLatin1(index));
+            found->step();
+            QVERIFY2(found->int64At(0) == 1, index);
+        }
+
+        // Running it again keeps what's there.
+        db.setUserVersion(20);
+        migrateLibrary(db);
+        QCOMPARE(count("SELECT count(*) FROM bookmark"), qint64(1));
+        QCOMPARE(count("SELECT count(*) FROM related_work"), qint64(1));
+
+        // They go with their publication.
+        db.exec("DELETE FROM publication WHERE id = 1");
+        QCOMPARE(count("SELECT count(*) FROM bookmark"), qint64(0));
+        QCOMPARE(count("SELECT count(*) FROM related_fetch"), qint64(0));
+        QCOMPARE(count("SELECT count(*) FROM related_work"), qint64(0));
     }
 
     void anUpgradeIsBackedUpFirst()

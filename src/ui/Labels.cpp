@@ -59,6 +59,25 @@ QString readStatusLabelFromDb(const QString &value)
     return status ? readStatusLabel(*status) : value;
 }
 
+QString ratingLabel(int rating)
+{
+    if (rating < 1 || rating > 5)
+        return tr("Not rated");
+    return QCoreApplication::translate("Labels", "%n star(s)", nullptr, rating);
+}
+
+QString ratingStars(int rating)
+{
+    if (rating < 1 || rating > 5)
+        return {};
+    return QString(rating, QChar(0x2605)) + QString(5 - rating, QChar(0x2606));
+}
+
+QString recentlyOpenedLabel()
+{
+    return tr("Opened in the last 30 days");
+}
+
 QString fileStatusLabel(const QString &status)
 {
     if (status == QLatin1StringView("missing"))

@@ -6,6 +6,7 @@
 #include "ui/Labels.h"
 
 #include <QColorDialog>
+#include <QDateTime>
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QMimeData>
@@ -45,6 +46,8 @@ const QLatin1StringView kFlagNoFile("no_file");
 const QLatin1StringView kFlagMissing("missing");
 const QLatin1StringView kFlagUnreadable("unreadable");
 const QLatin1StringView kFlagRetracted("retracted");
+// Offered among the read statuses, though it isn't one.
+const QLatin1StringView kOpenedRecently("opened_recently");
 
 Facet facetFor(FilterSidebar::Section section)
 {
@@ -57,6 +60,7 @@ Facet facetFor(FilterSidebar::Section section)
     case FilterSidebar::Formats: return Facet::Format;
     case FilterSidebar::Courts: return Facet::Court;
     case FilterSidebar::Jurisdictions: return Facet::Jurisdiction;
+    case FilterSidebar::Ratings: return Facet::Rating;
     default: return Facet::ReadStatus;
     }
 }
@@ -64,7 +68,9 @@ Facet facetFor(FilterSidebar::Section section)
 QString facetLabel(FilterSidebar::Section section, const FacetValue &value)
 {
     if (section == FilterSidebar::ReadStatuses)
-        return readStatusLabelFromDb(value.key);
+        return value.key == kOpenedRecently ? recentlyOpenedLabel() : readStatusLabelFromDb(value.key);
+    if (section == FilterSidebar::Ratings)
+        return ratingLabel(value.key.toInt());
     if (section == FilterSidebar::Formats)
         return value.label.toUpper();
     return value.label;
@@ -305,6 +311,7 @@ void FilterSidebar::buildSections()
     add(Languages, tr("Language"));
     add(Formats, tr("Format"));
     add(ReadStatuses, tr("Read status"));
+    add(Ratings, tr("Rating"));
     add(Courts, tr("Court"));
     add(Jurisdictions, tr("Jurisdiction"));
     m_sections[Courts]->setHidden(true);
@@ -342,6 +349,12 @@ void FilterSidebar::applyTo(PublicationFilter &filter) const
         if (const auto status = readStatusFromDb(key))
             filter.readStatuses << *status;
     }
+    filter.openedSince.reset();
+    if (m_chosen[ReadStatuses].contains(kOpenedRecently))
+        filter.openedSince = QDateTime::currentMSecsSinceEpoch() - kRecentlyOpenedMs;
+    filter.ratings.clear();
+    for (const QString &key : m_chosen[Ratings])
+        filter.ratings << key.toInt();
 
     const QSet<QString> &flags = m_chosen[Status];
     filter.needsReview = flags.contains(kFlagReview);
@@ -466,7 +479,10 @@ void FilterSidebar::setData(const SidebarData &data)
         const QSignalBlocker blocker(m_tree);
         for (int section = Authors; section < SectionCount; ++section) {
             const auto s = Section(section);
-            updateFacet(s, data.facets.value(int(facetFor(s))));
+            QList<FacetValue> values = data.facets.value(int(facetFor(s)));
+            if (s == ReadStatuses && data.flags.openedRecently > 0)
+                values << FacetValue{QString(kOpenedRecently), QString(), data.flags.openedRecently};
+            updateFacet(s, values);
         }
 
         // A chosen tag that's been deleted can't be unticked any other way.

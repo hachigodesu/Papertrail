@@ -2,6 +2,7 @@
 
 #include "core/db/Database.h"
 #include "core/repo/FullTextIndex.h"
+#include "core/repo/ReadingStateRepository.h"
 #include "core/query/SearchParser.h"
 
 #include <QHash>
@@ -131,6 +132,10 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
               "UNION SELECT rowid FROM publication_note_fts WHERE publication_note_fts MATCH ?)");
         c.bindings << notes << notes;
     }
+    if (filter.parentId) {
+        c.add("p.parent_id = ?");
+        c.bindings << *filter.parentId;
+    }
     for (const QString &holder : search.inMatches) {
         c.add("p.parent_id IN (SELECT rowid FROM publication_fts WHERE publication_fts MATCH ?)");
         c.bindings << holder;
@@ -164,11 +169,33 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
             c.bindings << format;
     }
 
-    if (!filter.readStatuses.isEmpty()) {
-        QStringList statuses;
-        for (const ReadStatus status : filter.readStatuses)
-            statuses << toDbString(status);
-        c.addIn("p.read_status", statuses);
+    // Read statuses and being opened recently are offered together, so either will do.
+    if (!filter.readStatuses.isEmpty() || filter.openedSince) {
+        QByteArrayList either;
+        if (!filter.readStatuses.isEmpty()) {
+            either << "p.read_status IN (" + c.placeholders(filter.readStatuses.size()) + ")";
+            for (const ReadStatus status : filter.readStatuses)
+                c.bindings << toDbString(status);
+        }
+        if (filter.openedSince) {
+            either << "p.id IN (SELECT publication_id FROM reading_state WHERE last_opened >= ?)";
+            c.bindings << *filter.openedSince;
+        }
+        c.add("(" + either.join(" OR ") + ")");
+    }
+
+    if (!filter.ratings.isEmpty()) {
+        QList<qint64> given;
+        for (const int rating : filter.ratings) {
+            if (rating >= 1 && rating <= 5)
+                given << rating;
+        }
+        QByteArray clause = given.isEmpty() ? QByteArray("0") : "p.rating IN (" + c.placeholders(given.size()) + ")";
+        if (filter.ratings.contains(0))
+            clause = "(" + clause + " OR p.rating IS NULL)";
+        c.add(clause);
+        for (const qint64 rating : given)
+            c.bindings << rating;
     }
 
     if (filter.yearMin) {
@@ -241,6 +268,17 @@ QByteArray orderBy(const PublicationSort &sort)
                               : " ORDER BY coalesce(p.year, -1) DESC, p.title_sort ASC, p.id ASC";
     case SortField::Added:
         return " ORDER BY p.created_at" + direction + ", p.id" + direction;
+    case SortField::Rating:
+        // As for years, these have to match the rating indexes, and keep anything unrated last.
+        return sort.ascending ? " ORDER BY coalesce(p.rating, 6) ASC, p.title_sort ASC, p.id ASC"
+                              : " ORDER BY coalesce(p.rating, 0) DESC, p.title_sort ASC, p.id ASC";
+    case SortField::LastOpened:
+        // Anything never opened comes last either way.
+        return sort.ascending
+            ? " ORDER BY coalesce((SELECT last_opened FROM reading_state WHERE publication_id = p.id), 9223372036854775807) ASC, "
+              "p.title_sort ASC, p.id ASC"
+            : " ORDER BY coalesce((SELECT last_opened FROM reading_state WHERE publication_id = p.id), 0) DESC, "
+              "p.title_sort ASC, p.id ASC";
     }
     return " ORDER BY p.title_sort ASC, p.id ASC";
 }
@@ -272,7 +310,8 @@ ListQuery buildListQuery(const PublicationFilter &filter, const PublicationSort 
     } else {
         Conditions c = buildConditions(filter, ftsClause, anyHidden);
         // The best match for the articles of an issue is the order they're in it.
-        const bool pageOrder = sort.field == SortField::Relevance && !parseSearch(filter.searchText).inMatches.isEmpty();
+        const bool pageOrder = sort.field == SortField::Relevance
+            && (filter.parentId || !parseSearch(filter.searchText).inMatches.isEmpty());
         query.sql = " FROM publication p" + c.whereClause()
             + (pageOrder ? QByteArray(" ORDER BY p.parent_id, coalesce(p.page_start, 2147483647), p.title_sort, p.id") : orderBy(sort));
         query.bindings = c.bindings;
@@ -294,7 +333,11 @@ PublicationFilter withoutOwnSelection(PublicationFilter filter, Facet facet)
     case Facet::Jurisdiction: filter.jurisdictions.clear(); break;
     case Facet::Language: filter.languages.clear(); break;
     case Facet::Format: filter.formats.clear(); break;
-    case Facet::ReadStatus: filter.readStatuses.clear(); break;
+    case Facet::ReadStatus:
+        filter.readStatuses.clear();
+        filter.openedSince.reset();
+        break;
+    case Facet::Rating: filter.ratings.clear(); break;
     }
     return filter;
 }
@@ -457,7 +500,7 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
     auto select = m_db.prepare(
         "SELECT p.id, p.type, p.title, p.authors_display, p.year, p.container_title, p.read_status, "
         "p.needs_review, coalesce(p.parent_id, p.id), CASE WHEN p.parent_id IS NULL THEN NULL ELSE p.page_start END, "
-        "p.volume, p.issue, p.month, "
+        "p.volume, p.issue, p.month, p.rating, CASE WHEN p.parent_id IS NULL THEN NULL ELSE p.page_end END, "
         "(SELECT CASE WHEN max(kind = 'retraction') THEN 'retraction' WHEN max(kind = 'partial_retraction') THEN 'partial_retraction' "
         "WHEN max(kind IN ('withdrawal', 'removal')) THEN 'withdrawal' END FROM publication_notice WHERE publication_id = p.id)"
         + query.sql + " LIMIT ? OFFSET ?");
@@ -468,6 +511,7 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
     QList<PublicationSummary> rows;
     QList<qint64> fileOwners;
     QList<int> firstPages; // An article's, for its cover. 0 for anything else.
+    QList<int> lastPages;
     rows.reserve(limit);
     fileOwners.reserve(limit);
     firstPages.reserve(limit);
@@ -486,29 +530,41 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
         row.volume = select->textAt(10);
         row.issue = select->textAt(11);
         row.month = select->optIntAt(12);
-        row.coverNotice = select->textAt(13);
+        row.rating = select->optIntAt(13);
+        lastPages << select->optIntAt(14).value_or(0);
+        row.coverNotice = select->textAt(15);
         rows << row;
     }
 
     // Read afterwards rather than joined, so it only ever costs one small lookup per row shown.
     Statement &file = m_db.cached(
-        "SELECT f.sha256, f.format, f.status, "
+        "SELECT f.sha256, f.format, f.status, f.page_count, "
         "(SELECT group_concat(DISTINCT f2.format) FROM publication_file pf2 JOIN file f2 ON f2.id = pf2.file_id "
         " WHERE pf2.publication_id = pf.publication_id) "
         "FROM publication_file pf JOIN file f ON f.id = pf.file_id "
         "WHERE pf.publication_id = ? ORDER BY pf.is_primary DESC, f.id LIMIT 1");
+    Statement &reading = m_db.cached("SELECT location, last_opened FROM reading_state WHERE publication_id = ?");
     for (qsizetype i = 0; i < rows.size(); ++i) {
+        std::optional<int> pageCount;
         file.bind(1, fileOwners.at(i));
         if (file.step()) {
             rows[i].coverSha = articleCoverKey(file.textAt(0), firstPages.at(i));
             rows[i].format = file.textAt(1);
             rows[i].fileStatus = file.textAt(2);
-            rows[i].formats = file.textAt(3).split(u',', Qt::SkipEmptyParts);
+            pageCount = file.optIntAt(3);
+            rows[i].formats = file.textAt(4).split(u',', Qt::SkipEmptyParts);
             // The main file's format comes first, wherever SQLite happened to put it.
             if (rows[i].formats.removeOne(rows[i].format))
                 rows[i].formats.prepend(rows[i].format);
         }
         file.reset();
+
+        reading.bind(1, rows.at(i).id);
+        if (reading.step()) {
+            rows[i].lastOpened = reading.optInt64At(1).value_or(0);
+            rows[i].progress = readingProgress(reading.textAt(0), firstPages.at(i), lastPages.at(i), pageCount);
+        }
+        reading.reset();
     }
     return rows;
 }
@@ -539,6 +595,11 @@ QList<FacetValue> LibraryQuery::facet(const PublicationFilter &filter, Facet fac
     case Facet::Jurisdiction: sql = columnFacetSql("p.jurisdiction", c); break;
     case Facet::Language: sql = columnFacetSql("p.language", c); break;
     case Facet::ReadStatus: sql = columnFacetSql("p.read_status", c); break;
+    case Facet::Rating:
+        // Unrated too, as "0", after the rest.
+        sql = "SELECT coalesce(p.rating, 0), coalesce(p.rating, 0), count(*) FROM publication p" + c.whereClause()
+            + " GROUP BY 1 ORDER BY 1 DESC LIMIT ?";
+        break;
     case Facet::Author: {
         // With nothing selected there's no need to go through the publication table at all.
         const QByteArray scope = c.clauses.isEmpty()
@@ -678,6 +739,13 @@ FlagCounts LibraryQuery::flagCounts(const PublicationFilter &filter)
     retracted.retracted = true;
     counts.retracted = countWith(retracted);
     return counts;
+}
+
+qint64 LibraryQuery::openedSinceCount(const PublicationFilter &filter, qint64 since)
+{
+    PublicationFilter opened = withoutOwnSelection(filter, Facet::ReadStatus);
+    opened.openedSince = since;
+    return count(opened);
 }
 
 std::optional<std::pair<int, int>> LibraryQuery::yearRange(const PublicationFilter &filter)

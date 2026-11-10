@@ -806,6 +806,59 @@ ON publication BEGIN
 END;
 )sql";
 
+// Bookmarks inside documents, papers related to a publication as OpenAlex lists them, and sorting by rating and
+// by when something was last opened.
+//
+// A bookmark belongs to a document's contents, as a highlight does, so it survives the file moving. A fixed page keeps
+// its page and how far down it is; a reflowable document keeps a place that survives a change of layout.
+//
+// Related papers are only a copy of what OpenAlex said, kept so the list opens again without asking. `record` is the
+// paper's details as JSON.
+const char *const kMigration21 = R"sql(
+CREATE TABLE IF NOT EXISTS bookmark (
+    id              INTEGER PRIMARY KEY,
+    uuid            TEXT NOT NULL UNIQUE,
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    content_hash    TEXT,
+    format          TEXT NOT NULL DEFAULT '',
+    page            INTEGER NOT NULL DEFAULT 0,
+    y               REAL NOT NULL DEFAULT 0,
+    place           TEXT,
+    label           TEXT NOT NULL DEFAULT '',
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS bookmark_publication ON bookmark(publication_id);
+CREATE INDEX IF NOT EXISTS bookmark_content ON bookmark(content_hash);
+
+CREATE TABLE IF NOT EXISTS related_fetch (
+    publication_id  INTEGER PRIMARY KEY REFERENCES publication(id) ON DELETE CASCADE,
+    doi             TEXT NOT NULL,
+    openalex_id     TEXT,
+    reference_total INTEGER NOT NULL DEFAULT 0,
+    cited_by_total  INTEGER NOT NULL DEFAULT 0,
+    fetched_at      INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS related_work (
+    publication_id  INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    relation        TEXT NOT NULL CHECK (relation IN ('reference', 'cited_by')),
+    position        INTEGER NOT NULL,
+    openalex_id     TEXT NOT NULL,
+    cited_by_count  INTEGER NOT NULL DEFAULT 0,
+    record          TEXT NOT NULL,
+    PRIMARY KEY (publication_id, relation, position)
+) STRICT, WITHOUT ROWID;
+
+-- As for the year indexes, the coalesce keeps unrated records last both ways, and has to match LibraryQuery.
+CREATE INDEX IF NOT EXISTS publication_rating_desc ON publication(coalesce(rating, 0) DESC, title_sort);
+CREATE INDEX IF NOT EXISTS publication_rating_asc ON publication(coalesce(rating, 6), title_sort);
+CREATE INDEX IF NOT EXISTS publication_type_rating_desc ON publication(type, coalesce(rating, 0) DESC, title_sort);
+CREATE INDEX IF NOT EXISTS publication_type_rating_asc ON publication(type, coalesce(rating, 6), title_sort);
+CREATE INDEX IF NOT EXISTS publication_rating ON publication(rating) WHERE rating IS NOT NULL;
+CREATE INDEX IF NOT EXISTS reading_state_last_opened ON reading_state(last_opened);
+)sql";
+
 void addCaseLaw(Database &db)
 {
     // Each read of the schema is finished with before it's changed, which an unfinished one would stop.
@@ -865,6 +918,7 @@ const std::vector<Migration> &libraryMigrations()
         {18, kMigration18},
         {19, kMigration19},
         {20, nullptr, addCaseLaw, true},
+        {21, kMigration21},
     };
     return migrations;
 }

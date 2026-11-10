@@ -3,6 +3,7 @@
 #include "core/db/Database.h"
 #include "core/repo/FullTextIndex.h"
 
+#include <QDateTime>
 #include <QMutexLocker>
 
 #include <exception>
@@ -152,7 +153,7 @@ void SidebarQueryThread::run()
     }
 
     static const QList<Facet> facets = {Facet::Author,     Facet::Journal,  Facet::Publisher, Facet::Conference,
-                                        Facet::Language,   Facet::Format,   Facet::ReadStatus};
+                                        Facet::Language,   Facet::Format,   Facet::ReadStatus, Facet::Rating};
 
     while (true) {
         SidebarData data;
@@ -177,6 +178,8 @@ void SidebarQueryThread::run()
                 abandoned = hasNewerRequest();
                 if (!abandoned) {
                     data.flags = query->flagCounts(filter);
+                    data.flags.openedRecently
+                        = query->openedSinceCount(filter, QDateTime::currentMSecsSinceEpoch() - kRecentlyOpenedMs);
                     data.years = query->yearRange(filter);
                 }
                 QList<Facet> wanted = facets;

@@ -12,6 +12,7 @@
 #include <QSet>
 #include <QSizeF>
 #include <QTimer>
+#include <QTransform>
 #include <QVector>
 
 #include <optional>
@@ -76,6 +77,13 @@ public:
     void zoomBy(double factor);
 
     int pageCount() const { return int(m_sizes.size()); }
+    // A page's own size in points, however it's turned.
+    QSizeF pageSize(int page) const { return m_sizes.value(page); }
+
+    // Turns every page clockwise by 0, 90, 180 or 270 degrees. Everything given to the view and everything it reports,
+    // such as marks, selections and points on a page, stays in the page's own unturned points.
+    void setRotation(int degrees);
+    int rotation() const { return m_rotation; }
 
     // Shows only pages `first` to `last`, counting from 0, such as one article in a volume. A negative
     // `first` shows them all again. Pages outside aren't laid out, so they can't be scrolled to.
@@ -99,9 +107,11 @@ public:
     void nextPage();
     void previousPage();
 
-    // Goes back to where the last followed link was clicked.
+    // Goes back to where the last followed link was clicked, and forward again to where it led.
     void goBack();
     bool canGoBack() const { return !m_history.isEmpty(); }
+    void goForward();
+    bool canGoForward() const { return !m_forward.isEmpty(); }
 
     void setSearchHits(int page, const QList<QRectF> &rects);
     void clearSearch();
@@ -161,6 +171,9 @@ signals:
     void areaChosen(int page, const QRectF &rect, const QPoint &viewportPoint);
     void areaRefused();
 
+    // Escape was pressed with nothing here for it to stop, such as a selection, so something around the view may use it.
+    void escapeUnused();
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -207,6 +220,13 @@ private:
     double contentY() const;
     void updateFitScale();
     void drawPage(QPainter &painter, int page, const QRectF &target);
+    void drawUnturnedPage(QPainter &painter, int page, const QRectF &target);
+
+    // A page's size as shown, turned by the rotation, in points.
+    QSizeF shownSize(int page) const;
+    // From a page's own points to content pixels, through its scale and rotation, and back.
+    QTransform pageToContent(int page) const;
+    QPointF contentToPage(int page, const QPointF &content) const;
 
     // The page and the point on it, in points, at a place in the view. Nearest page if between pages.
     std::optional<std::pair<int, QPointF>> pageAt(const QPoint &viewportPoint, bool nearest = false) const;
@@ -232,6 +252,7 @@ private:
     ZoomMode m_zoomMode = ZoomMode::FitWidth;
     Colours m_colours = Colours::Light;
     double m_scale = 96.0 / 72.0;
+    int m_rotation = 0;
 
     QHash<int, CachedImage> m_images;
     QSet<int> m_failedPages;
@@ -265,6 +286,7 @@ private:
     QPointF m_areaEnd;
 
     QList<Place> m_history;
+    QList<Place> m_forward; // Places gone back from, until something new is followed.
     QTimer m_wantedTimer;
     int m_lastCurrentPage = -1;
     bool m_settingScroll = false;

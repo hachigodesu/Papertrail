@@ -68,7 +68,8 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("library.view"), QStringLiteral("grid"), K::Value,
          {QStringLiteral("grid"), QStringLiteral("list")}},
         {QStringLiteral("library.sort_field"), QStringLiteral("title"), K::Value,
-         {QStringLiteral("title"), QStringLiteral("author"), QStringLiteral("year"), QStringLiteral("added")}},
+         {QStringLiteral("title"), QStringLiteral("author"), QStringLiteral("year"), QStringLiteral("added"),
+          QStringLiteral("rating"), QStringLiteral("last_opened")}},
         {QStringLiteral("library.sort_ascending"), true, K::Value, {}},
         {QStringLiteral("library.rescan_on_startup"), true, K::Value, {}},
         {QStringLiteral("library.watch_folders"), true, K::Value, {}},
@@ -79,7 +80,8 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("library.last_import_folder"), QStringLiteral(""), K::MachinePath, {}},
         {QStringLiteral("window.geometry"), QStringLiteral(""), K::ThisComputer, {}},
         {QStringLiteral("window.splitter"), QStringLiteral(""), K::ThisComputer, {}},
-        {QStringLiteral("window.list_columns"), QStringLiteral(""), K::ThisComputer, {}},
+        {QStringLiteral("window.list_columns"), QStringLiteral(""), K::ThisComputer, {}}, // Before the later columns.
+        {QStringLiteral("window.list_columns_all"), QStringLiteral(""), K::ThisComputer, {}},
         // When the newest retraction or concern the user has been told about was first found, in ms since the epoch.
         // Kept out of exports, since another library's notices are found at other times.
         {QStringLiteral("notices.seen_until"), 0.0, K::ThisComputer, {}},

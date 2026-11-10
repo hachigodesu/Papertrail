@@ -50,6 +50,7 @@ public:
         ReadStatuses,
         Courts,        // Only on the Case Law tab: see setCaseLawShown.
         Jurisdictions,
+        Ratings,
         SectionCount,
     };
 

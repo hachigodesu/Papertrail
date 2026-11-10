@@ -448,7 +448,7 @@ Considered and declined: **publication types of the user's own,** and removing t
 
 ### Ideas to explore later
 
-Candidates for 1.1.0 and after. Sizes are rough.
+Candidates for 1.2.0 and after. Sizes are rough.
 
 - **Related papers:** references and cited-by from OpenAlex, marking those already in the library. Medium to large, and uses up OpenAlex's anonymous allowance.
 - **Open-access copies:** PDFs fetched through Unpaywall for publications with no file, saved to a folder the user chooses. Unpaywall requires an email address with each request, so it would only work once one is entered.

@@ -88,7 +88,8 @@ void PageView::updateTypicalPageSize()
     QVector<double> heights;
     widths.reserve(m_sizes.size());
     heights.reserve(m_sizes.size());
-    for (const QSizeF &size : m_sizes) {
+    for (int page = 0; page < m_sizes.size(); ++page) {
+        const QSizeF size = shownSize(page);
         widths << size.width();
         heights << size.height();
     }
@@ -112,6 +113,7 @@ void PageView::forgetAllPages()
     m_selected.clear();
     m_selectionText.clear();
     m_history.clear();
+    m_forward.clear();
     emit historyChanged();
     emit selectionChanged();
 }
@@ -174,8 +176,8 @@ void PageView::updateFitScale()
         height = m_typicalPageSize.height();
     } else {
         for (int i = rowStart(m_shownRow); i < rowStart(m_shownRow) + perRow && i < shownEnd(); ++i) {
-            width += m_sizes.at(i).width();
-            height = qMax(height, m_sizes.at(i).height());
+            width += shownSize(i).width();
+            height = qMax(height, shownSize(i).height());
         }
     }
     if (width <= 0 || height <= 0)
@@ -208,7 +210,7 @@ void PageView::relayout()
     for (int row = 0; row < rows; ++row) {
         double height = 0;
         for (int i = rowStart(row); i < rowStart(row) + perRow && i < pages; ++i)
-            height = qMax(height, m_sizes.at(i).height() * m_scale);
+            height = qMax(height, shownSize(i).height() * m_scale);
         m_rowHeights[row] = height;
     }
 
@@ -221,11 +223,11 @@ void PageView::relayout()
         m_rowTops[row] = y;
         double width = -kGap;
         for (int i = rowStart(row); i < rowStart(row) + perRow && i < pages; ++i)
-            width += m_sizes.at(i).width() * m_scale + kGap;
+            width += shownSize(i).width() * m_scale + kGap;
         // Centred if it fits, and otherwise from the left, with the scroll bar to reach the rest.
         double x = width + 2 * kMargin <= viewport()->width() ? (viewport()->width() - width) / 2 : kMargin;
         for (int i = rowStart(row); i < rowStart(row) + perRow && i < pages; ++i) {
-            const QSizeF size = m_sizes.at(i) * m_scale;
+            const QSizeF size = shownSize(i) * m_scale;
             m_pageRects[i] = QRectF(QPointF(std::round(x), std::round(y)), QSizeF(std::round(size.width()), std::round(size.height())));
             x += size.width() + kGap;
         }
@@ -235,6 +237,47 @@ void PageView::relayout()
 
     updateScrollBars();
     viewport()->update();
+}
+
+QSizeF PageView::shownSize(int page) const
+{
+    const QSizeF size = m_sizes.value(page);
+    return m_rotation % 180 == 0 ? size : size.transposed();
+}
+
+// The page's own points, scaled to pixels, are turned about its top left corner and moved back into its rectangle.
+QTransform PageView::pageToContent(int page) const
+{
+    const QRectF shown = m_pageRects.value(page);
+    const double width = m_rotation % 180 == 0 ? shown.width() : shown.height(); // Unturned, in pixels.
+    const double height = m_rotation % 180 == 0 ? shown.height() : shown.width();
+    QTransform turn;
+    switch (m_rotation) {
+    case 90: turn.translate(shown.x() + height, shown.y()); break;
+    case 180: turn.translate(shown.x() + width, shown.y() + height); break;
+    case 270: turn.translate(shown.x(), shown.y() + width); break;
+    default: turn.translate(shown.x(), shown.y()); break;
+    }
+    turn.rotate(m_rotation);
+    return QTransform::fromScale(m_scale, m_scale) * turn;
+}
+
+QPointF PageView::contentToPage(int page, const QPointF &content) const
+{
+    return pageToContent(page).inverted().map(content);
+}
+
+void PageView::setRotation(int degrees)
+{
+    const int rotation = ((degrees % 360) + 360) % 360 / 90 * 90;
+    if (rotation == m_rotation)
+        return;
+    const int page = topPage();
+    m_rotation = rotation;
+    updateTypicalPageSize();
+    relayout();
+    goToPage(page);
+    scheduleWanted();
 }
 
 void PageView::relayoutKeepingPlace()
@@ -345,9 +388,17 @@ void PageView::goToPoint(int page, double y)
     if (m_sizes.isEmpty())
         return;
     m_history << Place{topPage(), topOffset()};
+    m_forward.clear();
     emit historyChanged();
-    const double height = m_sizes.value(qBound(0, page, int(m_sizes.size()) - 1)).height();
-    goToPage(page, height > 0 ? qBound(0.0, y / height, 1.0) : 0);
+    const int target = qBound(0, page, int(m_sizes.size()) - 1);
+    const QRectF shown = m_pageRects.value(target);
+    if (shown.height() <= 0) {
+        goToPage(page, 0);
+        return;
+    }
+    // On a page turned on its side, a height on the page runs across the screen, so it goes to the page's top.
+    const double turnedY = m_rotation % 180 == 0 ? pageToContent(target).map(QPointF(0, y)).y() - shown.y() : 0;
+    goToPage(page, qBound(0.0, turnedY / shown.height(), 1.0));
 }
 
 void PageView::goBack()
@@ -355,6 +406,17 @@ void PageView::goBack()
     if (m_history.isEmpty())
         return;
     const Place place = m_history.takeLast();
+    m_forward << Place{topPage(), topOffset()};
+    emit historyChanged();
+    goToPage(place.page, place.offset);
+}
+
+void PageView::goForward()
+{
+    if (m_forward.isEmpty())
+        return;
+    const Place place = m_forward.takeLast();
+    m_history << Place{topPage(), topOffset()};
     emit historyChanged();
     goToPage(place.page, place.offset);
 }
@@ -593,11 +655,10 @@ void PageView::setCurrentHit(int page, const QRectF &rect)
     // Only moves if the match isn't already on screen.
     const QRectF pageArea = m_pageRects.value(page);
     const QRectF visible(contentX(), contentY(), viewport()->width(), viewport()->height());
-    const QRectF hit(pageArea.x() + rect.x() * m_scale, pageArea.y() + rect.y() * m_scale, rect.width() * m_scale,
-                     rect.height() * m_scale);
+    const QRectF hit = pageToContent(page).mapRect(rect);
     if (pageArea.isNull() || !visible.contains(hit)) {
-        const double height = m_sizes.value(page).height();
-        goToPage(page, height > 0 ? qMax(0.0, (rect.y() * m_scale - viewport()->height() / 3.0) / (height * m_scale)) : 0);
+        const double height = pageArea.height();
+        goToPage(page, height > 0 ? qMax(0.0, (hit.y() - pageArea.y() - viewport()->height() / 3.0) / height) : 0);
     }
     viewport()->update();
 }
@@ -689,8 +750,8 @@ QRectF PageView::pageRect(int page) const
 
 QPoint PageView::viewportPointFor(int page, const QPointF &point) const
 {
-    const QRectF area = m_pageRects.value(page);
-    return QPoint(int(area.x() + point.x() * m_scale - contentX()), int(area.y() + point.y() * m_scale - contentY()));
+    const QPointF content = pageToContent(page).map(point);
+    return QPoint(int(content.x() - contentX()), int(content.y() - contentY()));
 }
 
 std::optional<std::pair<int, QPointF>> PageView::pageAt(const QPoint &viewportPoint, bool nearest) const
@@ -702,9 +763,8 @@ std::optional<std::pair<int, QPointF>> PageView::pageAt(const QPoint &viewportPo
     const int perRow = pagesPerRow();
     for (int i = rowStart(row); i < rowStart(row) + perRow && i < shownEnd(); ++i) {
         const QRectF area = m_pageRects.at(i);
-        if (area.contains(content)) {
-            return std::make_pair(i, QPointF((content.x() - area.x()) / m_scale, (content.y() - area.y()) / m_scale));
-        }
+        if (area.contains(content))
+            return std::make_pair(i, contentToPage(i, content));
     }
     if (!nearest)
         return std::nullopt;
@@ -716,7 +776,7 @@ std::optional<std::pair<int, QPointF>> PageView::pageAt(const QPoint &viewportPo
     if (area.isNull())
         return std::nullopt;
     const QPointF clamped(qBound(area.left(), content.x(), area.right()), qBound(area.top(), content.y(), area.bottom()));
-    return std::make_pair(best, QPointF((clamped.x() - area.x()) / m_scale, (clamped.y() - area.y()) / m_scale));
+    return std::make_pair(best, contentToPage(best, clamped));
 }
 
 std::optional<ReaderLink> PageView::linkAtPoint(const QPoint &viewportPoint) const
@@ -769,7 +829,21 @@ void PageView::resizeEvent(QResizeEvent *)
     scheduleWanted();
 }
 
-void PageView::drawPage(QPainter &painter, int page, const QRectF &target)
+void PageView::drawPage(QPainter &painter, int page, const QRectF &shownTarget)
+{
+    // Drawn as if unturned, at the origin, with the painter doing the turning.
+    painter.save();
+    QTransform turn = QTransform::fromTranslate(-m_pageRects.value(page).x(), -m_pageRects.value(page).y())
+        * QTransform::fromScale(1 / m_scale, 1 / m_scale) * pageToContent(page);
+    turn *= QTransform::fromTranslate(shownTarget.x() - m_pageRects.value(page).x(), shownTarget.y() - m_pageRects.value(page).y());
+    painter.setTransform(turn, true);
+    const QSizeF unturned = m_rotation % 180 == 0 ? shownTarget.size() : shownTarget.size().transposed();
+    const QRectF target(QPointF(m_pageRects.value(page).x(), m_pageRects.value(page).y()), unturned);
+    drawUnturnedPage(painter, page, target);
+    painter.restore();
+}
+
+void PageView::drawUnturnedPage(QPainter &painter, int page, const QRectF &target)
 {
     const auto cached = m_images.find(page);
     if (cached != m_images.end()) {
@@ -912,11 +986,10 @@ void PageView::startArea()
 
 QPointF PageView::pointOnPage(int page, const QPoint &viewportPoint) const
 {
-    const QRectF area = m_pageRects.value(page);
     const QSizeF size = m_sizes.value(page);
     const QPointF content(viewportPoint.x() + contentX(), viewportPoint.y() + contentY());
-    return QPointF(qBound(0.0, (content.x() - area.x()) / m_scale, size.width()),
-                   qBound(0.0, (content.y() - area.y()) / m_scale, size.height()));
+    const QPointF point = contentToPage(page, content);
+    return QPointF(qBound(0.0, point.x(), size.width()), qBound(0.0, point.y(), size.height()));
 }
 
 QRectF PageView::drawnArea() const
@@ -1042,14 +1115,24 @@ void PageView::keyPressEvent(QKeyEvent *event)
         }
         break;
     case Qt::Key_Right:
+        if (event->modifiers() & Qt::AltModifier) {
+            goForward();
+            return;
+        }
         if (horizontalScrollBar()->maximum() == 0) {
             nextPage();
             return;
         }
         break;
     case Qt::Key_Escape:
-        if (m_drawingArea || m_areaMode)
+        if (m_drawingArea || m_areaMode) {
             stopDrawingArea();
+        } else if (hasSelection()) {
+            clearSelection();
+        } else {
+            emit escapeUnused();
+            return;
+        }
         clearSelection();
         break;
     default:
@@ -1060,6 +1143,15 @@ void PageView::keyPressEvent(QKeyEvent *event)
 
 void PageView::mousePressEvent(QMouseEvent *event)
 {
+    // A mouse's own back and forward buttons, as in a browser.
+    if (event->button() == Qt::BackButton) {
+        goBack();
+        return;
+    }
+    if (event->button() == Qt::ForwardButton) {
+        goForward();
+        return;
+    }
     if (event->button() != Qt::LeftButton)
         return;
     m_pressPosition = event->position().toPoint();

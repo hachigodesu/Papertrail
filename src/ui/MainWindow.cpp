@@ -146,6 +146,8 @@ QString sortFieldSetting(SortField field)
     case SortField::FirstAuthor: return QStringLiteral("author");
     case SortField::Year: return QStringLiteral("year");
     case SortField::Added: return QStringLiteral("added");
+    case SortField::Rating: return QStringLiteral("rating");
+    case SortField::LastOpened: return QStringLiteral("last_opened");
     default: return QStringLiteral("title");
     }
 }
@@ -158,7 +160,20 @@ SortField sortFieldFromSetting(const QString &value)
         return SortField::Year;
     if (value == QLatin1StringView("added"))
         return SortField::Added;
+    if (value == QLatin1StringView("rating"))
+        return SortField::Rating;
+    if (value == QLatin1StringView("last_opened"))
+        return SortField::LastOpened;
     return SortField::Title;
+}
+
+// These read best with the highest or newest first, so that's how choosing one sorts.
+const QList<int> kLaterColumns
+    = {PublicationListModel::RatingColumn, PublicationListModel::LastOpenedColumn, PublicationListModel::ProgressColumn};
+
+bool sortsDescendingFirst(SortField field)
+{
+    return field == SortField::Rating || field == SortField::LastOpened;
 }
 
 QString encodeState(const QByteArray &state)
@@ -422,6 +437,7 @@ void MainWindow::changeEvent(QEvent *event)
 void MainWindow::buildToolbar()
 {
     auto *bar = addToolBar(tr("Library"));
+    m_libraryBar = bar;
     bar->setMovable(false);
     bar->setFloatable(false);
     bar->setContextMenuPolicy(Qt::PreventContextMenu);
@@ -440,6 +456,14 @@ void MainWindow::buildToolbar()
         if (m_documentTabs && m_documentTabs->currentIndex() != 0)
             m_documentTabs->setCurrentIndex(0);
     });
+
+    // One issue's articles, shown by Show its articles. Clicking it shows everything again.
+    m_holderChip = new QToolButton(container);
+    m_holderChip->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_holderChip->setAutoRaise(false);
+    m_holderChip->hide();
+    connect(m_holderChip, &QToolButton::clicked, this, [this] { setHolderFilter(std::nullopt); });
+    row->addWidget(m_holderChip);
     row->addWidget(m_search, 1);
 
     // Every way of searching, each with an example that's added to the search when chosen.
@@ -556,6 +580,8 @@ void MainWindow::buildCentre()
     m_sortBox->addItem(tr("First author"), int(SortField::FirstAuthor));
     m_sortBox->addItem(tr("Year"), int(SortField::Year));
     m_sortBox->addItem(tr("Date added"), int(SortField::Added));
+    m_sortBox->addItem(tr("Rating"), int(SortField::Rating));
+    m_sortBox->addItem(tr("Last opened"), int(SortField::LastOpened));
     m_sortBox->addItem(tr("Best match"), int(SortField::Relevance));
     connect(m_sortBox, &QComboBox::activated, this, &MainWindow::chooseSort);
     strip->addWidget(m_sortBox);
@@ -586,7 +612,20 @@ void MainWindow::buildCentre()
     column->addWidget(m_splitter, 1);
 
     m_sidebar = new FilterSidebar(m_session.tags(), m_session.collections(), m_splitter);
-    connect(m_sidebar, &FilterSidebar::filterChanged, this, &MainWindow::applyFilters);
+    connect(m_sidebar, &FilterSidebar::filterChanged, this, [this] {
+        // What's been opened recently is for picking up where you were, so choosing it shows the newest first.
+        PublicationFilter chosen;
+        m_sidebar->applyTo(chosen);
+        const bool recent = chosen.openedSince.has_value();
+        if (recent && !m_recentChosen && m_sortField != SortField::LastOpened) {
+            m_sortField = SortField::LastOpened;
+            m_sortAscending = false;
+            m_sortChosenForSearch = isSearching();
+            syncSortControls();
+        }
+        m_recentChosen = recent;
+        applyFilters();
+    });
     connect(m_sidebar, &FilterSidebar::tagsChanged, this, &MainWindow::refreshNow);
     connect(m_sidebar, &FilterSidebar::collectionsChanged, this, [this] {
         refreshNow();
@@ -695,7 +734,24 @@ void MainWindow::buildCentre()
     header->resizeSection(PublicationListModel::TypeColumn, 110);
     header->resizeSection(PublicationListModel::FormatColumn, 70);
     header->resizeSection(PublicationListModel::ReadColumn, 64);
+    header->resizeSection(PublicationListModel::RatingColumn, 76);
+    header->resizeSection(PublicationListModel::LastOpenedColumn, 96);
+    header->resizeSection(PublicationListModel::ProgressColumn, 70);
+    for (const int column : kLaterColumns)
+        header->setSectionHidden(column, true);
     connect(header, &QHeaderView::sectionClicked, this, &MainWindow::onHeaderClicked);
+    // Right-clicking the header chooses which columns show. The title always does.
+    header->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(header, &QHeaderView::customContextMenuRequested, this, [this, header](const QPoint &position) {
+        QMenu menu(this);
+        for (int column = PublicationListModel::AuthorsColumn; column < PublicationListModel::ColumnCount; ++column) {
+            QAction *action = menu.addAction(m_model->headerData(column, Qt::Horizontal).toString());
+            action->setCheckable(true);
+            action->setChecked(!header->isSectionHidden(column));
+            connect(action, &QAction::toggled, this, [header, column](bool shown) { header->setSectionHidden(column, !shown); });
+        }
+        menu.exec(header->mapToGlobal(position));
+    });
     m_stack->addWidget(m_list);
 
     // Both views share one selection, so switching between them keeps it.
@@ -749,6 +805,7 @@ void MainWindow::buildCentre()
             m_search->clear();
             m_sidebar->clearSelection();
             m_tabs->setCurrentIndex(0);
+            setHolderFilter(std::nullopt);
             applyFilters();
         }
     });
@@ -825,6 +882,21 @@ void MainWindow::buildCentre()
     }
     connect(m_documentTabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeDocumentTab);
     connect(m_documentTabs, &QTabWidget::currentChanged, this, [this](int index) {
+        const bool reading = index > 0 && !readersIn(m_documentTabs->widget(index)).isEmpty();
+        // Full screen follows to another document, and ends with the library.
+        if (isFullScreenReading()) {
+            if (!reading) {
+                m_fullScreen->setChecked(false);
+            } else if (m_documentTabs->widget(index) != m_fullScreenTab) {
+                for (ReaderTab *reader : readersIn(m_fullScreenTab))
+                    reader->setChromeHidden(false);
+                m_fullScreenTab = m_documentTabs->widget(index);
+                for (ReaderTab *reader : readersIn(m_fullScreenTab))
+                    reader->setChromeHidden(true);
+            }
+        }
+        if (m_fullScreen)
+            m_fullScreen->setEnabled(reading);
         if (index == 0 && m_lookup)
             offerWhatsDue();
         if (index > 0 && !readersIn(m_documentTabs->widget(index)).isEmpty())
@@ -956,6 +1028,23 @@ void MainWindow::buildMenus()
             reader->showContentsPopup();
     });
     m_goTo->setToolTip(tr("Search the open document's contents, or go to a page"));
+    QAction *clockwise = view->addAction(tr("Turn pages &clockwise"), QKeySequence(Qt::CTRL | Qt::Key_R), this, [this] {
+        if (ReaderTab *reader = activeReader())
+            reader->rotateBy(90);
+    });
+    clockwise->setToolTip(tr("Turn the open document's pages a quarter turn clockwise"));
+    view->addAction(tr("Turn pages &anticlockwise"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R), this, [this] {
+        if (ReaderTab *reader = activeReader())
+            reader->rotateBy(-90);
+    });
+    m_fullScreen = view->addAction(tr("&Full screen"));
+    m_fullScreen->setShortcut(QKeySequence(Qt::Key_F11));
+    m_fullScreen->setCheckable(true);
+    m_fullScreen->setEnabled(false);
+    m_fullScreen->setToolTip(tr("Show only the document, over the whole screen. Escape or F11 comes back."));
+    connect(m_fullScreen, &QAction::toggled, this, &MainWindow::setFullScreenReading);
+    // Kept working while the menu bar is hidden, as it is in full screen.
+    addAction(m_fullScreen);
     view->addAction(tr("Close &tab"), QKeySequence(Qt::CTRL | Qt::Key_W), this, [this] {
         if (m_documentTabs->currentIndex() > 0)
             closeDocumentTab(m_documentTabs->currentIndex());
@@ -1116,9 +1205,17 @@ void MainWindow::restoreWindowState()
     const QByteArray splitter = decodeState(settings.value(QStringLiteral("window.splitter")));
     if (!splitter.isEmpty())
         m_splitter->restoreState(splitter);
-    const QByteArray columns = decodeState(settings.value(QStringLiteral("window.list_columns")));
-    if (!columns.isEmpty())
-        m_list->horizontalHeader()->restoreState(columns);
+    // A layout from before the later columns is used as it is, with them hidden.
+    QHeaderView *header = m_list->horizontalHeader();
+    const QByteArray columns = decodeState(settings.value(QStringLiteral("window.list_columns_all")));
+    const QByteArray earlier = decodeState(settings.value(QStringLiteral("window.list_columns")));
+    if (!columns.isEmpty()) {
+        header->restoreState(columns);
+    } else if (!earlier.isEmpty()) {
+        header->restoreState(earlier);
+        for (const int column : kLaterColumns)
+            header->setSectionHidden(column, true);
+    }
 
     m_sidebar->setVisible(settings.value(QStringLiteral("library.show_filters")).toBool());
     m_details->setVisible(settings.value(QStringLiteral("library.show_details")).toBool());
@@ -1135,7 +1232,7 @@ void MainWindow::saveWindowState()
         SettingsStore &settings = m_session.settings();
         settings.setValue(QStringLiteral("window.geometry"), encodeState(saveGeometry()));
         settings.setValue(QStringLiteral("window.splitter"), encodeState(m_splitter->saveState()));
-        settings.setValue(QStringLiteral("window.list_columns"), encodeState(m_list->horizontalHeader()->saveState()));
+        settings.setValue(QStringLiteral("window.list_columns_all"), encodeState(m_list->horizontalHeader()->saveState()));
     });
 }
 
@@ -1143,6 +1240,7 @@ PublicationFilter MainWindow::currentFilter() const
 {
     PublicationFilter filter;
     filter.searchText = m_search->text().trimmed();
+    filter.parentId = m_holder;
     filter.tabTypes = typesForTab(kTabs.value(m_tabs->currentIndex(), LibraryTab::All));
     m_sidebar->applyTo(filter);
     filter.searchContents = m_searchInside->isChecked();
@@ -1187,9 +1285,20 @@ void MainWindow::refreshNow()
 
 void MainWindow::onSearchTextChanged()
 {
+    updateSortForSearch();
+    m_searchTimer->start();
+}
+
+bool MainWindow::isSearching() const
+{
+    return !m_search->text().trimmed().isEmpty() || m_holder;
+}
+
+void MainWindow::updateSortForSearch()
+{
     // A search shows the best matches first, unless a sort has been picked by hand for this
     // search. Clearing the search goes back to the sort from before.
-    const bool searching = !m_search->text().trimmed().isEmpty();
+    const bool searching = isSearching();
     if (!searching) {
         m_sortChosenForSearch = false;
         const SortField remembered
@@ -1199,7 +1308,6 @@ void MainWindow::onSearchTextChanged()
         m_sortField = SortField::Relevance;
     }
     syncSortControls();
-    m_searchTimer->start();
 }
 
 void MainWindow::chooseSort(int comboIndex)
@@ -1207,11 +1315,16 @@ void MainWindow::chooseSort(int comboIndex)
     const auto field = SortField(m_sortBox->itemData(comboIndex).toInt());
     if (field == m_sortField)
         return;
+    // Going to or from a sort that starts with the highest, the direction goes with it.
+    if (sortsDescendingFirst(field) || sortsDescendingFirst(m_sortField)) {
+        m_sortAscending = !sortsDescendingFirst(field);
+        m_session.settings().setValue(QStringLiteral("library.sort_ascending"), m_sortAscending);
+    }
     m_sortField = field;
     if (field != SortField::Relevance) {
-        if (m_search->text().trimmed().isEmpty())
+        if (!isSearching())
             m_session.settings().setValue(QStringLiteral("library.sort_field"), sortFieldSetting(field));
-        m_sortChosenForSearch = !m_search->text().trimmed().isEmpty();
+        m_sortChosenForSearch = isSearching();
     } else {
         m_sortChosenForSearch = false;
     }
@@ -1228,6 +1341,10 @@ void MainWindow::onHeaderClicked(int section)
         field = SortField::FirstAuthor;
     else if (section == PublicationListModel::YearColumn)
         field = SortField::Year;
+    else if (section == PublicationListModel::RatingColumn)
+        field = SortField::Rating;
+    else if (section == PublicationListModel::LastOpenedColumn)
+        field = SortField::LastOpened;
 
     if (!field) {
         syncSortControls(); // Those columns can't be sorted on: put the arrow back where it was.
@@ -1258,6 +1375,8 @@ void MainWindow::syncSortControls()
     case SortField::Title: header->setSortIndicator(PublicationListModel::TitleColumn, order); break;
     case SortField::FirstAuthor: header->setSortIndicator(PublicationListModel::AuthorsColumn, order); break;
     case SortField::Year: header->setSortIndicator(PublicationListModel::YearColumn, order); break;
+    case SortField::Rating: header->setSortIndicator(PublicationListModel::RatingColumn, order); break;
+    case SortField::LastOpened: header->setSortIndicator(PublicationListModel::LastOpenedColumn, order); break;
     default: header->setSortIndicator(-1, order); break;
     }
 }
@@ -1297,6 +1416,7 @@ const QList<QPair<FilterSidebar::Section, QString>> kSectionKeys = {
     {FilterSidebar::ReadStatuses, QStringLiteral("read_statuses")},
     {FilterSidebar::Courts, QStringLiteral("courts")},
     {FilterSidebar::Jurisdictions, QStringLiteral("jurisdictions")},
+    {FilterSidebar::Ratings, QStringLiteral("ratings")},
 };
 
 // Tags, collections and people are chosen by id here, but kept by what names them in any library.
@@ -1340,6 +1460,16 @@ QJsonObject MainWindow::currentSearchDefinition()
         }
     });
     definition.insert(QStringLiteral("filters"), filters);
+    if (m_holder) {
+        guarded(tr("Reading the filters"), [&] {
+            const QString key = SavedSearchRepository(m_session.database()).publicationKey(*m_holder);
+            const std::optional<Publication> holder = m_session.publications().get(*m_holder);
+            if (!key.isEmpty())
+                definition.insert(QStringLiteral("articles_in"),
+                                  QJsonObject{{QStringLiteral("key"), key},
+                                              {QStringLiteral("label"), holder ? holder->title.simplified() : QString()}});
+        });
+    }
     if (!choices.yearFrom.isEmpty())
         definition.insert(QStringLiteral("year_from"), choices.yearFrom);
     if (!choices.yearTo.isEmpty())
@@ -1360,7 +1490,7 @@ std::optional<qint64> MainWindow::saveCurrentSearch(const QString &name)
 void MainWindow::askToSaveSearch()
 {
     const QString search = m_search->text().trimmed();
-    if (search.isEmpty() && !m_sidebar->hasSelection() && m_tabs->currentIndex() == 0) {
+    if (search.isEmpty() && !m_holder && !m_sidebar->hasSelection() && m_tabs->currentIndex() == 0) {
         QMessageBox::information(this, tr("Save this search"),
                                  tr("Search, or choose a tab or filters, first. A saved search shows them all again."));
         return;
@@ -1376,11 +1506,22 @@ void MainWindow::showSavedSearch(qint64 id)
 {
     std::optional<SavedSearch> search;
     SidebarChoices choices;
+    std::optional<qint64> holder;
+    QString holderTitle;
     guarded(tr("Reading the saved search"), [&] {
         SavedSearchRepository searches(m_session.database());
         search = searches.get(id);
         if (!search)
             return;
+        // An issue deleted since is left out, like a tag.
+        const QJsonObject articlesIn = search->definition.value(QStringLiteral("articles_in")).toObject();
+        if (!articlesIn.isEmpty()) {
+            holder = searches.publicationFromKey(articlesIn.value(QStringLiteral("key")).toString());
+            if (holder) {
+                const std::optional<Publication> publication = m_session.publications().get(*holder);
+                holderTitle = publication ? publication->title.simplified() : QString();
+            }
+        }
         // Anything deleted since, such as a tag, is left out.
         const QJsonObject filters = search->definition.value(QStringLiteral("filters")).toObject();
         for (const auto &[section, name] : kSectionKeys) {
@@ -1423,6 +1564,7 @@ void MainWindow::showSavedSearch(qint64 id)
     m_searchInside->setChecked(definition.value(QStringLiteral("inside")).toBool());
     m_sidebar->setChoices(choices);
     m_search->setText(definition.value(QStringLiteral("search")).toString());
+    setHolderFilter(holder, holderTitle);
 }
 
 void MainWindow::refreshSavedSearches()
@@ -1441,16 +1583,33 @@ void MainWindow::showArticlesOf(qint64 holder)
         const std::optional<Publication> publication = m_session.publications().get(holder);
         if (!publication)
             return;
-        // A quote would end the search's own quotes early, so it's left out: the words still match.
-        QString title = publication->title.simplified();
-        title.remove(u'"');
         // Everything else is cleared, since a tab or filter for issues would leave out their articles.
         m_sidebar->clearSelection();
         setTab(LibraryTab::All);
         if (m_documentTabs)
             m_documentTabs->setCurrentIndex(0);
-        m_search->setText(QStringLiteral("in:\"%1\"").arg(title));
+        m_search->clear();
+        setHolderFilter(holder, publication->title.simplified());
     });
+}
+
+void MainWindow::setHolderFilter(std::optional<qint64> holder, const QString &title)
+{
+    if (holder == m_holder)
+        return;
+    m_holder = holder;
+    m_sortChosenForSearch = false;
+    if (holder) {
+        const QString shown = title.isEmpty() ? tr("an untitled publication") : title;
+        const QFontMetrics metrics(m_holderChip->font());
+        m_holderChip->setText(tr("Articles in: %1  ×").arg(metrics.elidedText(shown, Qt::ElideMiddle, 280)));
+        // Not the title itself, which can come from a document, since a tooltip may read it as rich text.
+        m_holderChip->setToolTip(tr("Only this publication's articles, in page order. Click to show everything again."));
+        m_holderChip->setAccessibleName(tr("Showing only the articles in %1. Show everything").arg(shown));
+    }
+    m_holderChip->setVisible(bool(holder));
+    updateSortForSearch();
+    applyFilters();
 }
 
 void MainWindow::setViewMode(ViewMode mode)
@@ -1806,6 +1965,12 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
         connect(reader, &ReaderTab::statusMessage, this,
                 [this](const QString &message) { statusBar()->showMessage(message, 8000); });
         connect(reader, &ReaderTab::closeSideRequested, this, [this, reader] { closeSide(reader); });
+        connect(reader, &ReaderTab::escapeUnused, this, [this] {
+            if (isFullScreenReading())
+                m_fullScreen->setChecked(false);
+        });
+        if (isFullScreenReading())
+            reader->setChromeHidden(true);
 
         // In a tab bar, & marks a shortcut key, and a long title would crowd out the other tabs.
         QString title = publication->title;
@@ -2793,6 +2958,49 @@ void MainWindow::askAndLookUpSelected()
 ReviewTab *MainWindow::reviewTab() const
 {
     return m_reviewTab;
+}
+
+void MainWindow::setFullScreenReading(bool on)
+{
+    if (on == isFullScreenReading())
+        return;
+    QWidget *tab = m_documentTabs->currentWidget();
+    if (on && (m_documentTabs->currentIndex() == 0 || readersIn(tab).isEmpty())) {
+        const QSignalBlocker blocker(m_fullScreen);
+        m_fullScreen->setChecked(false);
+        return;
+    }
+    if (on) {
+        m_fullScreenTab = tab;
+        m_maximizedBeforeFullScreen = isMaximized();
+        for (ReaderTab *reader : readersIn(tab))
+            reader->setChromeHidden(true);
+        // Hidden menus' shortcuts stop working, so it's made too small to see instead, keeping Ctrl+F and the rest.
+        menuBar()->setFixedHeight(0);
+        statusBar()->hide();
+        m_libraryBar->hide();
+        m_documentTabs->setTabBarAutoHide(false);
+        m_documentTabs->tabBar()->hide();
+        showFullScreen();
+        if (ReaderTab *reader = activeReader())
+            reader->pageView()->setFocus();
+    } else {
+        for (ReaderTab *reader : readersIn(m_fullScreenTab))
+            reader->setChromeHidden(false);
+        m_fullScreenTab = nullptr;
+        menuBar()->setMinimumHeight(0);
+        menuBar()->setMaximumHeight(QWIDGETSIZE_MAX);
+        statusBar()->show();
+        m_libraryBar->show();
+        m_documentTabs->tabBar()->show();
+        m_documentTabs->setTabBarAutoHide(true);
+        if (m_maximizedBeforeFullScreen)
+            showMaximized();
+        else
+            showNormal();
+    }
+    const QSignalBlocker blocker(m_fullScreen);
+    m_fullScreen->setChecked(on);
 }
 
 ReaderTab *MainWindow::activeReader() const

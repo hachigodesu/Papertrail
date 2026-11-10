@@ -34,6 +34,7 @@ class QTabBar;
 class QTabWidget;
 class QTableView;
 class QTimer;
+class QToolBar;
 class QToolButton;
 
 namespace papertrail::summary {
@@ -95,6 +96,10 @@ public:
     IndexThread *indexThread() const { return m_index; }
     QCheckBox *searchInsideBox() const { return m_searchInside; }
     QToolButton *searchHelpButton() const { return m_searchHelp; }
+    // Shows only the articles in this issue, proceedings or book, or clears that with nullopt.
+    void setHolderFilter(std::optional<qint64> holder, const QString &title = QString());
+    std::optional<qint64> holderFilter() const { return m_holder; }
+    QToolButton *holderChip() const { return m_holderChip; }
     QAction *indexContentsAction() const { return m_indexContents; }
     QPushButton *reviewButton() const { return m_reviewButton; }
     QMessageBox *reviewOffer() const { return m_reviewOffer; }
@@ -224,6 +229,10 @@ public:
     // What right-clicking a document's tab offers, for tests too.
     QMenu *documentTabMenu(int tabIndex); // The caller owns it.
     QAction *goToAction() const { return m_goTo; }
+    // Shows only the document being read, over the whole screen. Only while a document's tab is showing.
+    QAction *fullScreenAction() const { return m_fullScreen; }
+    void setFullScreenReading(bool on);
+    bool isFullScreenReading() const { return m_fullScreenTab != nullptr; }
     ReferenceImportActions *referenceImports() const { return m_references; }
     // What an empty library says, for tests.
     QPushButton *welcomeImportButton() const { return m_welcomeImport; }
@@ -297,6 +306,10 @@ private:
     void onHeaderClicked(int section);
     void syncSortControls();
     void onSearchTextChanged();
+    // Whether the list shows a search's results: words in the search box, or one issue's articles.
+    bool isSearching() const;
+    // Best match while searching, unless a sort was chosen by hand; the remembered sort otherwise.
+    void updateSortForSearch();
 
     QAbstractItemView *activeView() const;
     void showContextMenu(const QPoint &position);
@@ -357,6 +370,10 @@ private:
     QTimer *m_batchTimer = nullptr;
     QPushButton *m_summaryStatus = nullptr;
     QAction *m_goTo = nullptr;
+    QAction *m_fullScreen = nullptr;
+    QToolBar *m_libraryBar = nullptr;
+    QPointer<QWidget> m_fullScreenTab; // The document tab shown over the whole screen.
+    bool m_maximizedBeforeFullScreen = false;
     QPointer<QWidget> m_lastDocument; // The document tab last shown.
     ReaderTab *createReader(qint64 publicationId, qint64 fileId, bool articleOnly);
     void insertReaderTab(ReaderTab *reader, int index);
@@ -405,6 +422,8 @@ private:
     QTabWidget *m_documentTabs = nullptr;
     QObject *m_documentTabBar = nullptr; // What the event filter watches, kept so it never has to ask the tabs.
     QLineEdit *m_search = nullptr;
+    QToolButton *m_holderChip = nullptr;
+    std::optional<qint64> m_holder;
     QTabBar *m_tabs = nullptr;
     QComboBox *m_sortBox = nullptr;
     QToolButton *m_sortDirection = nullptr;
@@ -442,6 +461,7 @@ private:
     core::SortField m_sortField = core::SortField::Title;
     bool m_sortAscending = true;
     bool m_sortChosenForSearch = false; // The sort was picked by hand during this search.
+    bool m_recentChosen = false; // Opened recently is chosen in the sidebar.
     std::optional<qint64> m_selectedId;
     int m_waitingForRow = -1;
     int m_lastCount = -1;

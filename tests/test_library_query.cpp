@@ -5,6 +5,7 @@
 #include "core/repo/CollectionRepository.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
+#include "core/repo/ReadingStateRepository.h"
 #include "core/repo/TagRepository.h"
 
 #include <QSet>
@@ -321,6 +322,27 @@ private slots:
         // A sort chosen by hand still applies.
         QCOMPARE(titlesInOrder(SortField::Title),
                  (QStringList{QStringLiteral("Alpha Comes Last"), QStringLiteral("Middle Piece"), QStringLiteral("Zeta Comes First")}));
+
+        // Chosen by the issue itself, an issue whose title contains this one's doesn't join in, and the order's the same.
+        Publication longer;
+        longer.type = PublicationType::JournalIssue;
+        longer.title = QStringLiteral("Ordered Issue 7 Supplement");
+        const qint64 longerId = m_publications->create(longer);
+        Publication extra;
+        extra.type = PublicationType::JournalArticle;
+        extra.title = QStringLiteral("From the Supplement");
+        extra.parentId = longerId;
+        extra.pageStart = 1;
+        m_publications->create(extra);
+        QCOMPARE(titlesInOrder(SortField::Relevance).size(), 4); // By title, both issues' articles.
+        filter.searchText.clear();
+        filter.parentId = issueId;
+        QCOMPARE(titlesInOrder(SortField::Relevance),
+                 (QStringList{QStringLiteral("Zeta Comes First"), QStringLiteral("Middle Piece"), QStringLiteral("Alpha Comes Last")}));
+        QCOMPARE(m_query->count(filter), qint64(3));
+        // Words still narrow it.
+        filter.searchText = QStringLiteral("middle");
+        QCOMPARE(titlesInOrder(SortField::Relevance), (QStringList{QStringLiteral("Middle Piece")}));
     }
 
     void searchFindsHighlightsAndNotes()
@@ -422,6 +444,107 @@ private slots:
         anonymous.title = QStringLiteral("Anonymous");
         m_publications->create(anonymous);
         QCOMPARE(titles({}, {SortField::FirstAuthor, true}).last(), QStringLiteral("Anonymous"));
+    }
+
+    void ratingsSortBestFirstAndFilterIncludingNone()
+    {
+        rate(QStringLiteral("Beam Fatigue"), 5);
+        rate(QStringLiteral("Old Beams"), 2);
+        rate(QStringLiteral("Ceramic Thesis"), 5);
+
+        // Highest first, ties by title, and anything unrated last either way.
+        const QStringList best = titles({}, {SortField::Rating, false});
+        QCOMPARE(best.mid(0, 3),
+                 (QStringList{QStringLiteral("Beam Fatigue"), QStringLiteral("Ceramic Thesis"), QStringLiteral("Old Beams")}));
+        QCOMPARE(titles({}, {SortField::Rating, true}).mid(0, 3),
+                 (QStringList{QStringLiteral("Old Beams"), QStringLiteral("Beam Fatigue"), QStringLiteral("Ceramic Thesis")}));
+        QCOMPARE(titles({}, {SortField::Rating, true}).size(), 6);
+
+        PublicationFilter filter;
+        filter.ratings = {5};
+        QCOMPARE(titleSet(filter), (QSet<QString>{QStringLiteral("Beam Fatigue"), QStringLiteral("Ceramic Thesis")}));
+        filter.ratings = {2, 0};
+        QCOMPARE(m_query->count(filter), qint64(4)); // Old Beams and the three unrated.
+        filter.ratings = {0};
+        QCOMPARE(m_query->count(filter), qint64(3));
+
+        // Counted like any facet, unrated last.
+        filter.ratings = {5};
+        const QList<FacetValue> facet = m_query->facet(filter, Facet::Rating);
+        QCOMPARE(facet.size(), 3);
+        QCOMPARE(facet.at(0).key, QStringLiteral("5"));
+        QCOMPARE(facet.at(0).count, qint64(2));
+        QCOMPARE(facet.at(1).key, QStringLiteral("2"));
+        QCOMPARE(facet.at(2).key, QStringLiteral("0"));
+        QCOMPARE(facet.at(2).count, qint64(3));
+    }
+
+    void lastOpenedSortsNewestFirstAndRecentlyOpenedGoesWithReadStatuses()
+    {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        open(QStringLiteral("Neural Bridges"), now - 1000, QJsonObject{{QStringLiteral("page"), 3}});
+        open(QStringLiteral("Ceramic Thesis"), now - 5000, QJsonObject{{QStringLiteral("page"), 0}});
+        open(QStringLiteral("Old Beams"), now - 2 * kRecentlyOpenedMs, QJsonObject{{QStringLiteral("page"), 0}});
+
+        const QStringList newest = titles({}, {SortField::LastOpened, false});
+        QCOMPARE(newest.mid(0, 3),
+                 (QStringList{QStringLiteral("Neural Bridges"), QStringLiteral("Ceramic Thesis"), QStringLiteral("Old Beams")}));
+        QCOMPARE(newest.size(), 6);
+        const QStringList oldest = titles({}, {SortField::LastOpened, true});
+        QCOMPARE(oldest.mid(0, 3),
+                 (QStringList{QStringLiteral("Old Beams"), QStringLiteral("Ceramic Thesis"), QStringLiteral("Neural Bridges")}));
+
+        PublicationFilter filter;
+        filter.openedSince = now - kRecentlyOpenedMs;
+        QCOMPARE(titleSet(filter), (QSet<QString>{QStringLiteral("Neural Bridges"), QStringLiteral("Ceramic Thesis")}));
+        // With a read status, either will do, as they're offered together.
+        filter.readStatuses = {ReadStatus::Read};
+        QCOMPARE(titleSet(filter), (QSet<QString>{QStringLiteral("Neural Bridges"), QStringLiteral("Ceramic Thesis"),
+                                                  QStringLiteral("Beam Fatigue")}));
+        // Its count ignores the read statuses chosen, as a facet's does.
+        QCOMPARE(m_query->openedSinceCount(filter, now - kRecentlyOpenedMs), qint64(2));
+        filter.journals = {QStringLiteral("Journal B")};
+        QCOMPARE(m_query->openedSinceCount(filter, now - kRecentlyOpenedMs), qint64(1));
+    }
+
+    void summariesSayHowFarSomethingsBeenRead()
+    {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        open(QStringLiteral("Neural Bridges"), now,
+             QJsonObject{{QStringLiteral("page"), 3}, {QStringLiteral("reached"), 0.5}, {QStringLiteral("savedAt"), double(now)}});
+        rate(QStringLiteral("Neural Bridges"), 4);
+        PublicationFilter filter;
+        filter.searchText = QStringLiteral("neural");
+        const PublicationSummary row = m_query->page(filter, {}, 0, 1).first();
+        QCOMPARE(row.rating.value_or(0), 4);
+        QCOMPARE(row.lastOpened, now);
+        QCOMPARE(row.progress.value_or(-1), 0.5);
+
+        filter.searchText = QStringLiteral("ceramic");
+        QVERIFY(!m_query->page(filter, {}, 0, 1).first().progress); // Never opened.
+        QCOMPARE(m_query->page(filter, {}, 0, 1).first().lastOpened, qint64(0));
+    }
+
+    void progressComesFromThePlaceSavedLast()
+    {
+        const auto location = [](const QJsonObject &formats) {
+            return QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("formats"), formats}}).toJson());
+        };
+        // The latest format's, even if another reached further.
+        QCOMPARE(readingProgress(location({{QStringLiteral("pdf"), QJsonObject{{QStringLiteral("reached"), 0.9}, {QStringLiteral("savedAt"), 10.0}}},
+                                           {QStringLiteral("epub"), QJsonObject{{QStringLiteral("reached"), 0.2}, {QStringLiteral("savedAt"), 20.0}}}}),
+                                 0, 0, std::nullopt)
+                     .value_or(-1),
+                 0.2);
+        // Older places say only their page, counted from 0.
+        QCOMPARE(readingProgress(location({{QStringLiteral("pdf"), QJsonObject{{QStringLiteral("page"), 4}}}}), 0, 0, 10).value_or(-1), 0.5);
+        // An article's against its own pages of its volume's file, which count from 1.
+        QCOMPARE(readingProgress(location({{QStringLiteral("pdf"), QJsonObject{{QStringLiteral("page"), 10}}}}), 10, 13, 200).value_or(-1), 0.5);
+        // A place from before formats were kept apart.
+        QCOMPARE(readingProgress(QStringLiteral("{\"page\": 9}"), 0, 0, 10).value_or(-1), 1.0);
+        QVERIFY(!readingProgress(location({{QStringLiteral("pdf"), QJsonObject{{QStringLiteral("page"), 4}}}}), 0, 0, std::nullopt));
+        QVERIFY(!readingProgress(QString(), 0, 0, 10));
+        QVERIFY(!readingProgress(QStringLiteral("not json"), 0, 0, 10));
     }
 
     void relevancePutsTitleMatchesFirst()
@@ -695,6 +818,26 @@ private slots:
     }
 
 private:
+    qint64 idOf(const QString &title)
+    {
+        PublicationFilter filter;
+        filter.searchText = QStringLiteral("title:\"%1\"").arg(title);
+        const QList<qint64> ids = m_query->ids(filter, {});
+        return ids.isEmpty() ? 0 : ids.first();
+    }
+
+    void rate(const QString &title, int rating)
+    {
+        Publication publication = *m_publications->get(idOf(title));
+        publication.rating = rating;
+        m_publications->update(publication);
+    }
+
+    void open(const QString &title, qint64 when, const QJsonObject &place)
+    {
+        ReadingStateRepository(*m_db).setPlaceFor(idOf(title), QStringLiteral("pdf"), place, when);
+    }
+
     void buildLibrary()
     {
         m_fem = m_tags->ensurePath(QStringLiteral("Engineering > Structures > FEM"));

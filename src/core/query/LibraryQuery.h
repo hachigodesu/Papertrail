@@ -25,6 +25,7 @@ enum class Facet {
     Language,
     Format,
     ReadStatus,
+    Rating, // Keys "1" to "5", and "0" for none.
 };
 
 struct FacetValue {
@@ -55,6 +56,7 @@ struct FlagCounts {
     qint64 missingOrOffline = 0;
     qint64 unreadable = 0;
     qint64 retracted = 0;
+    qint64 openedRecently = 0; // Not set by flagCounts: see openedSinceCount.
 };
 
 // Read-only queries behind the library view.
@@ -77,6 +79,9 @@ public:
     // ignores which collections are chosen.
     QList<CollectionCount> collectionCounts(const PublicationFilter &filter);
     FlagCounts flagCounts(const PublicationFilter &filter);
+    // How many would match if what's been opened since then were chosen. Like a facet, this ignores the read statuses
+    // chosen, which it's offered with.
+    qint64 openedSinceCount(const PublicationFilter &filter, qint64 since);
     std::optional<std::pair<int, int>> yearRange(const PublicationFilter &filter);
 
 private:

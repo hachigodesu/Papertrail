@@ -207,8 +207,21 @@ public:
 
     void setThumbnail(int page, const QImage &image)
     {
-        m_cache.insert(page, new QPixmap(QPixmap::fromImage(image)));
+        const QImage turned = m_rotation == 0 ? image : image.transformed(QTransform().rotate(m_rotation));
+        m_cache.insert(page, new QPixmap(QPixmap::fromImage(turned)));
         emit dataChanged(index(page), index(page), {Qt::DecorationRole});
+    }
+
+    // The pages are turned as the view turns them, so each is fetched again.
+    void setRotation(int degrees)
+    {
+        if (degrees == m_rotation)
+            return;
+        beginResetModel();
+        m_rotation = degrees;
+        m_cache.clear();
+        m_asked.clear();
+        endResetModel();
     }
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override
@@ -230,7 +243,8 @@ public:
         if (role == Qt::DecorationRole) {
             if (const QPixmap *pixmap = m_cache.object(page))
                 return *pixmap;
-            const double width = m_sizes.value(page).width();
+            const QSizeF size = m_sizes.value(page);
+            const double width = m_rotation % 180 == 0 ? size.width() : size.height(); // Across, as it's shown.
             if (width > 0 && !m_asked.contains(page)) {
                 m_asked.insert(page);
                 m_client.requestThumbnail(page, double(kThumbnailWidth) / width);
@@ -245,6 +259,7 @@ public:
 private:
     DocumentClient &m_client;
     QList<QSizeF> m_sizes;
+    int m_rotation = 0;
     mutable QCache<int, QPixmap> m_cache;
     mutable QSet<int> m_asked;
 };
@@ -373,6 +388,9 @@ void ReaderTab::buildToolbar()
     m_backButton = button(QStringLiteral("←"), tr("Back to where the last link was followed"), [this] { m_view->goBack(); });
     m_backButton->setEnabled(false);
     m_toolbar->addWidget(m_backButton);
+    m_forwardButton = button(QStringLiteral("→"), tr("Forward to where going back came from (Alt+Right)"), [this] { m_view->goForward(); });
+    m_forwardButton->setEnabled(false);
+    m_toolbar->addWidget(m_forwardButton);
     m_toolbar->addWidget(button(QStringLiteral("▲"), tr("Previous page"), [this] { m_view->previousPage(); }));
     m_toolbar->addWidget(button(QStringLiteral("▼"), tr("Next page"), [this] { m_view->nextPage(); }));
 
@@ -659,7 +677,11 @@ void ReaderTab::connectClient()
             m_saveTimer->start();
     });
     connect(m_view, &PageView::externalLinkActivated, this, &ReaderTab::followExternalLink);
-    connect(m_view, &PageView::historyChanged, this, [this] { m_backButton->setEnabled(m_view->canGoBack()); });
+    connect(m_view, &PageView::escapeUnused, this, &ReaderTab::escapeUnused);
+    connect(m_view, &PageView::historyChanged, this, [this] {
+        m_backButton->setEnabled(m_view->canGoBack());
+        m_forwardButton->setEnabled(m_view->canGoForward());
+    });
 }
 
 void ReaderTab::onOpened(int pageCount, bool reflowable)
@@ -754,6 +776,11 @@ void ReaderTab::restorePlace()
         }
         return;
     }
+    m_reached = qBound(0.0, place.value(QStringLiteral("reached")).toDouble(), 1.0);
+    if (!m_reflowable && place.value(QStringLiteral("rotation")).toInt() != 0) {
+        m_view->setRotation(place.value(QStringLiteral("rotation")).toInt());
+        m_thumbnailModel->setRotation(m_view->rotation());
+    }
 
     if (place.contains(QStringLiteral("zoom"))) {
         const double zoom = place.value(QStringLiteral("zoom")).toDouble();
@@ -785,6 +812,15 @@ void ReaderTab::saveState()
     QJsonObject place;
     place.insert(QStringLiteral("page"), m_view->topPage());
     place.insert(QStringLiteral("offset"), m_view->topOffset());
+    // How far it's been read, for the library to show: the furthest page reached of the pages shown.
+    const int first = m_view->firstShownPage();
+    const int last = m_view->lastShownPage();
+    if (m_view->pageCount() > 0 && last >= first)
+        m_reached = qMax(m_reached, qBound(0.0, double(m_view->topPage() - first + 1) / double(last - first + 1), 1.0));
+    place.insert(QStringLiteral("reached"), m_reached);
+    if (m_view->rotation() != 0)
+        place.insert(QStringLiteral("rotation"), m_view->rotation());
+    place.insert(QStringLiteral("savedAt"), double(QDateTime::currentMSecsSinceEpoch()));
     if (m_reflowable && !m_bookmark.isEmpty()) {
         place.insert(QStringLiteral("bookmark"), m_bookmark);
         place.insert(QStringLiteral("fontSize"), m_layout.fontSize);
@@ -945,6 +981,20 @@ void ReaderTab::setSidePanelVisible(bool visible)
     // A panel hidden from the start has no width of its own to come back to.
     if (visible && m_splitter->sizes().value(0) < 80)
         m_splitter->setSizes({220, qMax(200, m_splitter->width() - 220)});
+}
+
+void ReaderTab::setChromeHidden(bool hidden)
+{
+    if (hidden == m_chromeHidden)
+        return;
+    m_chromeHidden = hidden;
+    if (hidden)
+        m_sideShownBeforeHiding = m_side->isVisible();
+    m_toolbar->setVisible(!hidden);
+    if (hidden)
+        m_side->hide();
+    else
+        setSidePanelVisible(m_sideShownBeforeHiding);
 }
 
 void ReaderTab::onContentsActivated(QTreeWidgetItem *item)
@@ -1225,9 +1275,9 @@ void ReaderTab::showReferenceAt(int page, const QPointF &point, const QPoint &vi
         reference.found = true;
         reference.label = tr("Link");
         reference.page = link->page;
-        const QRectF pageArea = m_view->pageRect(link->page);
-        const double width = pageArea.width() / m_view->scale();
-        const double height = pageArea.height() / m_view->scale();
+        const QSizeF pageSize = m_view->pageSize(link->page);
+        const double width = pageSize.width();
+        const double height = pageSize.height();
         reference.rect = QRectF(0, link->y, width, 12);
         reference.region = QRectF(width * 0.04, qMax(0.0, link->y - 10), width * 0.92, height * 0.3);
         onReference(reference);
@@ -1263,7 +1313,7 @@ void ReaderTab::showReferencePreview(const QImage &picture)
     }
     if (m_referencePreview)
         m_referencePreview->close();
-    QImage shown = withPageColours(picture, int(m_view->colours()), reference.kind == 0);
+    QImage shown = withPageColours(turned(picture), int(m_view->colours()), reference.kind == 0);
     shown.setDevicePixelRatio(devicePixelRatioF());
     QString label = reference.label;
     if (!label.isEmpty())
@@ -1289,14 +1339,14 @@ void ReaderTab::onAreaPicture(qint64 token, int, const QImage &image)
         if (image.isNull()) {
             emit statusMessage(tr("A picture of that area couldn't be made."));
         } else {
-            QApplication::clipboard()->setImage(image);
+            QApplication::clipboard()->setImage(turned(image));
             emit statusMessage(tr("Copied a picture of the area."));
         }
         return;
     }
     if (image.isNull())
         return;
-    QImage picture = image;
+    QImage picture = turned(image);
     picture.setDevicePixelRatio(devicePixelRatioF());
     m_areaPictures.insert(token, picture);
     for (int row = 0; row < m_annotationList->count(); ++row) {
@@ -1304,6 +1354,29 @@ void ReaderTab::onAreaPicture(qint64 token, int, const QImage &image)
         if (item->data(Qt::UserRole).toLongLong() == token)
             item->setData(AnnotationDelegate::PictureRole, picture);
     }
+}
+
+QImage ReaderTab::turned(const QImage &picture) const
+{
+    const int rotation = m_view->rotation();
+    return rotation == 0 || picture.isNull() ? picture : picture.transformed(QTransform().rotate(rotation));
+}
+
+void ReaderTab::rotateBy(int degrees)
+{
+    if (!m_ready)
+        return;
+    if (m_reflowable) {
+        emit statusMessage(tr("Only documents with fixed pages, such as PDFs, can be turned."));
+        return;
+    }
+    m_view->setRotation(m_view->rotation() + degrees);
+    m_thumbnailModel->setRotation(m_view->rotation());
+    // The Notes panel's pictures of areas are turned to match.
+    m_areaPictures.clear();
+    m_areaPicturesAsked.clear();
+    requestAreaPictures();
+    m_saveTimer->start();
 }
 
 void ReaderTab::copyAreaPicture(qint64 id)

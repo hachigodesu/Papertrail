@@ -81,6 +81,7 @@ public:
     bool isArticleOnly() const { return m_articleOnly; }
     bool isArticle() const { return m_articlePages.has_value(); }
     QToolButton *wholeFileButton() const { return m_wholeFile; }
+    QToolButton *forwardButton() const { return m_forwardButton; }
 
     // For tests.
     PageView *pageView() const { return m_view; }
@@ -101,7 +102,12 @@ public:
     bool isReflowable() const { return m_reflowable; }
     double fontSize() const { return m_layout.fontSize; }
     void changeFontSize(double change);
+    // Turns the pages clockwise by this much, kept with the place. Only fixed pages can be turned.
+    void rotateBy(int degrees);
     void setSidePanelVisible(bool visible);
+    // Full screen: leaves only the pages, and puts the toolbar and side panel back as they were afterwards.
+    void setChromeHidden(bool hidden);
+    bool isChromeHidden() const { return m_chromeHidden; }
     void followExternalLink(const QString &uri);
     void setOpenLinkHandler(const std::function<void(const QUrl &)> &handler) { m_openLink = handler; }
     void nextHit();
@@ -159,6 +165,9 @@ signals:
     // Close this side of two documents side by side.
     void closeSideRequested();
 
+    // Escape was pressed on the pages with nothing there for it to stop, as full screen uses to leave.
+    void escapeUnused();
+
 private:
     struct Hit {
         int page = 0;
@@ -173,6 +182,7 @@ private:
     void updatePageBox();
     void updateZoomBox();
     void restorePlace();
+    QImage turned(const QImage &picture) const; // A picture of part of a page, turned as the pages are.
     void onOutline(const QList<papertrail::ui::ReaderOutlineItem> &items);
     void onSearchHits(int page, const QList<QRectF> &rects);
     void updateSearchStatus();
@@ -268,6 +278,7 @@ private:
     QComboBox *m_layoutBox = nullptr;
     QComboBox *m_coloursBox = nullptr;
     QToolButton *m_backButton = nullptr;
+    QToolButton *m_forwardButton = nullptr;
     QToolButton *m_smallerText = nullptr;
     QToolButton *m_largerText = nullptr;
     QAction *m_smallerTextAction = nullptr;
@@ -279,6 +290,8 @@ private:
 
     QSplitter *m_splitter = nullptr;
     QTabWidget *m_side = nullptr;
+    bool m_chromeHidden = false;
+    bool m_sideShownBeforeHiding = false;
     QTreeWidget *m_contents = nullptr;
     QPointer<ContentsPopup> m_contentsPopup;
     QListView *m_thumbnails = nullptr;
@@ -292,6 +305,7 @@ private:
     bool m_reflowable = false;
     bool m_failedToOpen = false;
     QString m_bookmark;
+    double m_reached = 0; // The furthest it's been read, from 0 to 1, kept with the place.
     int m_bookmarkPage = -1;
     bool m_restoring = false;
     std::function<void(const QUrl &)> m_openLink;

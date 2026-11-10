@@ -2,6 +2,9 @@
 
 #include "ui/Labels.h"
 
+#include <QDateTime>
+#include <QLocale>
+
 namespace papertrail::ui {
 
 using namespace core;
@@ -184,7 +187,23 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
         case TypeColumn: return typeLabel(row->type);
         case FormatColumn: return row->formats.join(QStringLiteral(", ")).toUpper();
         case ReadColumn: return readStatusLabel(row->readStatus);
+        case RatingColumn: return ratingStars(row->rating.value_or(0));
+        case LastOpenedColumn: {
+            if (row->lastOpened <= 0)
+                return {};
+            const QDateTime opened = QDateTime::fromMSecsSinceEpoch(row->lastOpened);
+            // Today's by the time, anything older by the day.
+            if (opened.date() == QDate::currentDate())
+                return QLocale().toString(opened.time(), QLocale::ShortFormat);
+            return QLocale().toString(opened.date(), QLocale::ShortFormat);
         }
+        case ProgressColumn:
+            return row->progress ? tr("%1%").arg(qRound(*row->progress * 100)) : QVariant();
+        }
+        return {};
+    case Qt::TextAlignmentRole:
+        if (index.column() == ProgressColumn || index.column() == LastOpenedColumn)
+            return QVariant(Qt::AlignRight | Qt::AlignVCenter);
         return {};
     case Qt::ToolTipRole: {
         if (index.column() != TitleColumn)
@@ -202,6 +221,8 @@ QVariant PublicationListModel::data(const QModelIndex &index, int role) const
         return text;
     }
     case Qt::AccessibleTextRole: {
+        if (index.column() == RatingColumn)
+            return ratingLabel(row->rating.value_or(0));
         QString text = row->title;
         if (!row->authors.isEmpty())
             text += QStringLiteral(", ") + row->authors;
@@ -238,6 +259,9 @@ QVariant PublicationListModel::headerData(int section, Qt::Orientation orientati
     case TypeColumn: return tr("Type");
     case FormatColumn: return tr("Format");
     case ReadColumn: return tr("Status");
+    case RatingColumn: return tr("Rating");
+    case LastOpenedColumn: return tr("Last opened");
+    case ProgressColumn: return tr("Progress");
     }
     return {};
 }
