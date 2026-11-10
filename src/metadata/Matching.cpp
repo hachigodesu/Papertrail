@@ -275,4 +275,69 @@ QString providerLabel(const QString &provider)
     return provider;
 }
 
+// ---- Finding something already in the library
+
+namespace {
+
+bool titlesAgree(const QString &a, const QString &b)
+{
+    if (a.isEmpty() || b.isEmpty())
+        return true;
+    return mainTitleKey(a) == mainTitleKey(b) || titleSimilarity(a, b) >= 0.6;
+}
+
+} // namespace
+
+std::optional<qint64> publicationWithIdentifier(core::Database &db, const core::Publication &entry)
+{
+    const auto lookUp = [&](const char *sql, const QString &value) -> std::optional<qint64> {
+        if (value.isEmpty())
+            return std::nullopt;
+        auto select = db.prepare(sql);
+        select->bind(1, value);
+        while (select->step()) {
+            const qint64 id = select->int64At(0);
+            // An identifier copied wrongly into one manager shouldn't join two different works.
+            if (titlesAgree(entry.title, select->textAt(1)))
+                return id;
+        }
+        return std::nullopt;
+    };
+    if (auto id = lookUp("SELECT id, title FROM publication WHERE doi = ?", normaliseDoi(entry.doi)))
+        return id;
+    if (auto id = lookUp("SELECT id, title FROM publication WHERE isbn13 = ?", normaliseIsbn(entry.isbn13)))
+        return id;
+    if (auto id = lookUp("SELECT id, title FROM publication WHERE isbn10 = ?", normaliseIsbn(entry.isbn10)))
+        return id;
+    return lookUp("SELECT id, title FROM publication WHERE arxiv_id = ?", normaliseArxivId(entry.arxivId));
+}
+
+// The same main title, and the same year and first author where both have them. Certain only for a distinctive one.
+std::optional<std::pair<qint64, bool>> publicationWithTitle(core::Database &db, const core::Publication &entry)
+{
+    const QString key = mainTitleKey(entry.title);
+    if (key.isEmpty())
+        return std::nullopt;
+    auto select = db.prepare("SELECT id FROM publication WHERE title_sort >= ? AND title_sort < ? ORDER BY id");
+    select->bind(1, key);
+    select->bind(2, key + QChar(0xFFFF));
+    QList<qint64> candidates;
+    while (select->step())
+        candidates << select->int64At(0);
+    PublicationRepository publications(db);
+    for (const qint64 id : std::as_const(candidates)) {
+        const std::optional<Publication> found = publications.get(id);
+        if (!found || mainTitleKey(found->title) != key)
+            continue;
+        if (entry.year && found->year && *entry.year != *found->year)
+            continue;
+        if (!entry.authors.isEmpty() && !found->authors.isEmpty()
+            && nameSortKey(entry.authors.first().family) != nameSortKey(found->authors.first().family))
+            continue;
+        return std::make_pair(id, isDistinctiveTitle(key));
+    }
+    return std::nullopt;
+}
+
+
 } // namespace papertrail::metadata

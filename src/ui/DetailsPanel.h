@@ -94,6 +94,8 @@ signals:
     void summariesRequested(qint64 publicationId);
     // The Cite button's menu is about to show, for whoever fills it.
     void citeMenuRequested(QMenu *menu, qint64 publicationId);
+    // Papers this cites and that cite it.
+    void relatedRequested(qint64 publicationId);
 
     // Where a search found something inside a document.
     void openMatchRequested(qint64 publicationId, qint64 fileId, int page, const QString &text);
@@ -166,6 +168,7 @@ private:
     QPushButton *m_showInFolder = nullptr;
     QPushButton *m_edit = nullptr;
     QPushButton *m_cite = nullptr;
+    QPushButton *m_related = nullptr;
 
     QLabel *m_manyCount = nullptr;
     QLineEdit *m_manyTagEdit = nullptr;

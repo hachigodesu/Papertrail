@@ -66,6 +66,8 @@ QUrl openLibraryUrl(const ProviderUrls &urls, const QString &isbn);
 std::optional<FoundRecord> parseCrossrefWork(const QByteArray &body);
 QList<FoundRecord> parseCrossrefSearch(const QByteArray &body);
 std::optional<FoundRecord> parseOpenAlexWork(const QByteArray &body);
+// What one of OpenAlex's works says, as from parseOpenAlexWork.
+FoundRecord openAlexRecord(const QJsonObject &work);
 QList<FoundRecord> parseOpenAlexSearch(const QByteArray &body);
 std::optional<FoundRecord> parseArxiv(const QByteArray &body);
 std::optional<FoundRecord> parseOpenLibrary(const QByteArray &body);

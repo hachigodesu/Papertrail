@@ -7,6 +7,9 @@
 #include <QString>
 #include <QStringList>
 
+#include <optional>
+#include <utility>
+
 namespace papertrail::core {
 class Database;
 }
@@ -58,5 +61,12 @@ int undoLastLookup(core::Database &db, qint64 publicationId);
 
 // A readable name for a source.
 QString providerLabel(const QString &provider);
+
+// A publication in the library with the same DOI, ISBN or arXiv number, whose title agrees, so an identifier copied
+// wrongly somewhere doesn't join two different works.
+std::optional<qint64> publicationWithIdentifier(core::Database &db, const core::Publication &entry);
+// One with the same main title, and the same year and first author where both have them. The bool says whether that's
+// certain, which it is only for a distinctive title.
+std::optional<std::pair<qint64, bool>> publicationWithTitle(core::Database &db, const core::Publication &entry);
 
 } // namespace papertrail::metadata

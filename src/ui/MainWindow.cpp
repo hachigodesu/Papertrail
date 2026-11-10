@@ -42,6 +42,7 @@
 #include "ui/PublicationListModel.h"
 #include "ui/ReaderPair.h"
 #include "ui/ReferenceImportDialog.h"
+#include "ui/RelatedPapersDialog.h"
 #include "ui/ReaderTab.h"
 #include "core/repo/SavedSearchRepository.h"
 #include "ui/SettingsDialog.h"
@@ -822,6 +823,7 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
     connect(m_details, &DetailsPanel::openMatchRequested, this, &MainWindow::openAtMatch);
     connect(m_details, &DetailsPanel::summarizeRequested, this, &MainWindow::showSummaryDialog);
+    connect(m_details, &DetailsPanel::relatedRequested, this, &MainWindow::showRelatedPapers);
     connect(m_details, &DetailsPanel::summariesRequested, this, [this](qint64 id) { showSummariesDialog(id); });
     connect(m_details, &DetailsPanel::findFileRequested, this, [this](qint64 id) {
         QString start;
@@ -2446,6 +2448,7 @@ void MainWindow::showContextMenu(const QPoint &position)
             menu.addAction(tr("Show in folder"), this, [this, publication] { showPublicationInFolder(publication); });
             menu.addAction(tr("Edit..."), this, [this, publication] { editPublication(publication); });
             menu.addAction(tr("Summarize with Claude..."), this, [this, publication] { showSummaryDialog(publication); });
+            menu.addAction(tr("Related papers..."), this, [this, publication] { showRelatedPapers(publication); });
             menu.addAction(tr("Summarize later at half price..."), this, &MainWindow::showBatchSummaryDialog);
             bool marked = false;
             guarded(tr("Reading the highlights"), [&] { marked = markedPdfFor(m_session, publication).has_value(); });
@@ -2962,6 +2965,31 @@ void MainWindow::askAndLookUpSelected()
 ReviewTab *MainWindow::reviewTab() const
 {
     return m_reviewTab;
+}
+
+RelatedPapersDialog *MainWindow::showRelatedPapers(qint64 publicationId)
+{
+    // One for each publication, brought forward if it's already open.
+    for (RelatedPapersDialog *open : findChildren<RelatedPapersDialog *>()) {
+        if (open->publicationId() == publicationId) {
+            open->raise();
+            open->activateWindow();
+            return open;
+        }
+    }
+    auto *dialog = new RelatedPapersDialog(m_session, m_lookup, publicationId, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &RelatedPapersDialog::libraryChanged, this, &MainWindow::scheduleRefresh);
+    connect(dialog, &RelatedPapersDialog::showRequested, this, [this](qint64 id) {
+        if (m_documentTabs)
+            m_documentTabs->setCurrentIndex(0);
+        m_details->setVisible(true);
+        m_showDetails->setChecked(true);
+        m_details->showPublication(id);
+    });
+    dialog->show();
+    dialog->load();
+    return dialog;
 }
 
 void MainWindow::setFullScreenReading(bool on)

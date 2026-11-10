@@ -191,6 +191,10 @@ void DetailsPanel::buildSinglePage()
     actions->addWidget(m_showInFolder);
     actions->addWidget(m_edit);
     actions->addWidget(m_cite);
+    m_related = new QPushButton(tr("Related"));
+    m_related->setToolTip(tr("Papers this cites, and papers that cite it, from OpenAlex"));
+    connect(m_related, &QPushButton::clicked, this, [this] { if (m_id) emit relatedRequested(*m_id); });
+    actions->addWidget(m_related);
     connect(m_open, &QPushButton::clicked, this, [this] { if (m_id) emit openRequested(*m_id); });
     connect(m_showInFolder, &QPushButton::clicked, this, [this] { if (m_id) emit showInFolderRequested(*m_id); });
     connect(m_edit, &QPushButton::clicked, this, [this] { if (m_id) emit editRequested(*m_id); });

@@ -29,6 +29,10 @@ public:
     void checkNotices();
     bool isCheckingNotices() const { return m_checkingNotices; }
 
+    // Asks OpenAlex for a publication's related papers, only if online lookups are on, and keeps them. relatedFound
+    // or relatedFailed says how it went.
+    void findRelated(qint64 publicationId, bool refresh);
+
 signals:
     void progress(qint64 done, qint64 remaining, const QString &source);
     void publicationChanged(qint64 publicationId);
@@ -39,6 +43,10 @@ signals:
     void noticesChanged(const QList<qint64> &publicationIds);
     void noticesChecked(int checked, int newWarnings);
 
+    void relatedFound(qint64 publicationId);
+    void relatedFailed(qint64 publicationId, int problem, const QString &detail); // See metadata::RelatedProblem.
+
+    void relatedRequested(qint64 publicationId, bool refresh);
     void kickRequested();
     void stopRequested();
     void noticesRequested();
@@ -53,6 +61,8 @@ private:
     std::atomic_bool m_busy = false;
     std::atomic_bool m_noticesWaiting = false;
     std::atomic_bool m_checkingNotices = false;
+    std::atomic<qint64> m_relatedWaiting = 0; // Asked for before the thread was ready.
+    std::atomic_bool m_relatedRefresh = false;
 };
 
 } // namespace papertrail::ui

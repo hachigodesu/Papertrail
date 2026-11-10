@@ -10,6 +10,8 @@
 #include "metadata/LookupEngine.h"
 #include "metadata/Matching.h"
 #include "metadata/NoticeChecker.h"
+#include "metadata/RelatedFinder.h"
+#include "ui/RelatedPapersDialog.h"
 #include "metadata/Providers.h"
 #include "metadata/Transport.h"
 #include "ui/Delegates.h"
@@ -317,6 +319,88 @@ private slots:
         QVERIFY(finished.wait(kWaitMs));
         QCOMPARE(notices.warningCount(), qint64(0));
         QVERIFY(m_fake->asked.last().contains(QStringLiteral("mailto")));
+    }
+
+    void relatedPapersAreFoundByDoiAloneAndKept()
+    {
+        const qint64 paper = addPublication(QStringLiteral("Made Up Study"), QStringLiteral("10.1000/made.up"), false);
+        const qint64 earlier = addPublication(QStringLiteral("A Made-Up Earlier Study"), QStringLiteral("10.1000/earlier"), false);
+        // Most specific first, since the first answer whose text is in the address is given.
+        m_fake->answer(QStringLiteral("filter=openalex"),
+                       "{\"meta\":{\"count\":2},\"results\":["
+                       "{\"id\":\"https://openalex.org/W2\",\"doi\":\"https://doi.org/10.1000/earlier\",\"title\":\"A Made-Up Earlier Study\","
+                       "\"publication_year\":2001,\"cited_by_count\":5,\"type\":\"article\"},"
+                       "{\"id\":\"https://openalex.org/W1\",\"doi\":\"https://doi.org/10.1000/other\",\"title\":\"Another Made-Up Paper\","
+                       "\"publication_year\":2003,\"cited_by_count\":9,\"type\":\"preprint\",\"authorships\":[{\"author\":{\"display_name\":\"Ada Example\"}}]}]}");
+        m_fake->answer(QStringLiteral("filter=cites"),
+                       "{\"meta\":{\"count\":120},\"results\":["
+                       "{\"id\":\"https://openalex.org/W9\",\"title\":\"A Later Made-Up Paper\",\"cited_by_count\":40,\"type\":\"article\"},"
+                       "{\"id\":\"not an id\",\"title\":\"Something Odd\",\"cited_by_count\":1}]}");
+        m_fake->answer(QStringLiteral("/works/doi"),
+                       "{\"id\":\"https://openalex.org/W100\",\"cited_by_count\":120,\"referenced_works\":"
+                       "[\"https://openalex.org/W1\",\"https://openalex.org/W2\",\"javascript:alert(1)\",\"https://openalex.org/W1\"]}");
+
+        RelatedFinder finder(*m_db, *m_transport);
+        QSignalSpy found(&finder, &RelatedFinder::found);
+        QSignalSpy failed(&finder, &RelatedFinder::failed);
+        finder.find(paper, false);
+        QTRY_VERIFY_WITH_TIMEOUT(!found.isEmpty() || !failed.isEmpty(), kWaitMs);
+        QVERIFY2(failed.isEmpty(), qPrintable(failed.isEmpty() ? QString() : failed.first().at(1).toString() + u' '
+                                                  + failed.first().at(2).toString() + u' ' + m_fake->asked.join(u' ')));
+
+        // The DOI, then what it cites by OpenAlex's ids, then what cites it. Nothing else about it goes.
+        QCOMPARE(m_fake->count(), 3);
+        QVERIFY2(m_fake->asked.at(0).contains(QStringLiteral("doi:10.1000/made.up")), qPrintable(m_fake->asked.at(0)));
+        QVERIFY2(m_fake->asked.at(1).contains(QStringLiteral("W1")) && m_fake->asked.at(1).contains(QStringLiteral("W2")),
+                 qPrintable(m_fake->asked.at(1)));
+        QVERIFY(m_fake->asked.at(2).contains(QStringLiteral("W100")));
+        const QString asked = m_fake->asked.join(u'\n');
+        QVERIFY(!asked.contains(QStringLiteral("alert")));
+        QVERIFY(!asked.contains(QStringLiteral("Made")));
+        QVERIFY(!asked.contains(QStringLiteral("mailto")));
+
+        // In the order the paper cites them, marking the one already here.
+        RelatedPapers papers = relatedPapersFor(*m_db, paper);
+        QVERIFY(papers.fetched);
+        QCOMPARE(papers.references.size(), 2);
+        QCOMPARE(papers.references.at(0).openAlexId, QStringLiteral("W1"));
+        QVERIFY(!papers.references.at(0).inLibrary);
+        QCOMPARE(papers.references.at(1).inLibrary.value_or(0), earlier);
+        QCOMPARE(papers.citedBy.size(), 1);
+        QCOMPARE(papers.citedByTotal, 120);
+        QCOMPARE(papers.references.at(0).record.publication.authors.first().family, QStringLiteral("Example"));
+
+        // Kept, so asking again doesn't go online.
+        found.clear();
+        finder.find(paper, false);
+        QTRY_COMPARE_WITH_TIMEOUT(found.size(), 1, kWaitMs); // At once, from what's kept.
+        QCOMPARE(m_fake->count(), 3);
+
+        // Added without a file, it's then in the library. A preprint is only ever a hint.
+        const qint64 added = addRelatedToLibrary(*m_db, papers.references.at(0).record);
+        const Publication made = *m_publications->get(added);
+        QCOMPARE(made.title, QStringLiteral("Another Made-Up Paper"));
+        QCOMPARE(made.doi, QStringLiteral("10.1000/other"));
+        QVERIFY(made.type != PublicationType::Preprint);
+        QVERIFY(made.extraJson.contains(QStringLiteral("preprintHint")));
+        QCOMPARE(relatedPapersFor(*m_db, paper).references.at(0).inLibrary.value_or(0), added);
+
+        // With no DOI there's nothing to ask about.
+        const qint64 none = addPublication(QStringLiteral("Made Up With No DOI"), QString(), false);
+        finder.find(none, false);
+        QTRY_COMPARE_WITH_TIMEOUT(failed.size(), 1, kWaitMs);
+        QCOMPARE(failed.first().at(1).toInt(), int(RelatedProblem::NoDoi));
+        QCOMPARE(m_fake->count(), 3);
+
+        // Out of allowance, it says so and keeps what it had.
+        TransportReply limited;
+        limited.status = 429;
+        m_fake->oneOff << limited;
+        failed.clear();
+        finder.find(paper, true);
+        QTRY_COMPARE_WITH_TIMEOUT(failed.size(), 1, kWaitMs);
+        QCOMPARE(failed.first().at(1).toInt(), int(RelatedProblem::RateLimited));
+        QCOMPARE(relatedPapersFor(*m_db, paper).references.size(), 2);
     }
 
     void aFailedNoticeCheckIsTriedAgainLater()
@@ -1182,6 +1266,31 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!server.requests.isEmpty(), kWaitMs);
         QVERIFY2(server.requests.first().contains("updates:10.1000/made.up"), qPrintable(server.requests.first()));
         QVERIFY(!server.requests.first().contains("Made"));
+    }
+
+    void relatedPapersAreOnlyAskedForOnline()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        openWindow(&server);
+        const qint64 id = addSessionPublication(QStringLiteral("Made Up Study"), QStringLiteral("10.1000/made.up"));
+
+        // No choice made yet, which is offline: the window says so and nothing is sent.
+        RelatedPapersDialog *dialog = m_window->showRelatedPapers(id);
+        QVERIFY(dialog);
+        QTRY_VERIFY_WITH_TIMEOUT(dialog->status()->text().contains(QStringLiteral("offline")), kWaitMs);
+        QTest::qWait(300);
+        QCOMPARE(server.connections.load(), 0);
+
+        // Online, it asks with the real network code, about the DOI and nothing else.
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        dialog->refreshButton()->click();
+        QTRY_VERIFY_WITH_TIMEOUT(!server.requests.isEmpty(), kWaitMs);
+        QVERIFY2(server.requests.first().contains("doi:10.1000/made.up"), qPrintable(server.requests.first()));
+        QVERIFY(!server.requests.first().contains("Made"));
+        // The server knows nothing, which it says.
+        QTRY_VERIFY_WITH_TIMEOUT(dialog->status()->text().contains(QStringLiteral("doesn't know")), kWaitMs);
+        dialog->close();
     }
 
     void aRetractionIsShownWithItsPublication()

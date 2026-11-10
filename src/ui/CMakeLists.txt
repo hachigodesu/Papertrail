@@ -46,6 +46,8 @@ add_library(papertrail_ui STATIC
     ReaderPair.cpp
     ReferenceImportDialog.cpp
     ReferenceImportDialog.h
+    RelatedPapersDialog.cpp
+    RelatedPapersDialog.h
     ReaderPair.h
     ReaderTab.cpp
     ReaderTab.h

@@ -3,6 +3,7 @@
 #include "core/db/Database.h"
 #include "core/settings/SettingsStore.h"
 #include "metadata/NoticeChecker.h"
+#include "metadata/RelatedFinder.h"
 #include "metadata/Transport.h"
 
 #include <exception>
@@ -35,6 +36,16 @@ void LookupThread::checkNotices()
     m_noticesWaiting = true;
     if (m_ready)
         emit noticesRequested();
+}
+
+void LookupThread::findRelated(qint64 publicationId, bool refresh)
+{
+    if (m_ready) {
+        emit relatedRequested(publicationId, refresh);
+    } else {
+        m_relatedRefresh = refresh;
+        m_relatedWaiting = publicationId;
+    }
 }
 
 void LookupThread::stopLookups()
@@ -93,6 +104,28 @@ void LookupThread::run()
     };
     connect(this, &LookupThread::noticesRequested, &notices, checkNotices, Qt::QueuedConnection);
 
+    // Related papers, only ever asked for by the user, and only with online lookups on.
+    RelatedFinder related(*db, *transport);
+    related.setProviderUrls(m_paths.providerUrls);
+    connect(&related, &RelatedFinder::found, this, &LookupThread::relatedFound);
+    connect(&related, &RelatedFinder::failed, this, &LookupThread::relatedFailed);
+    const auto findRelated = [this, &related, &db](qint64 publicationId, bool refresh) {
+        try {
+            core::SettingsStore settings(*db);
+            if (!settings.value(QStringLiteral("metadata.mode_chosen")).toBool()
+                || settings.value(QStringLiteral("metadata.mode")).toString() == QLatin1StringView("offline")) {
+                emit relatedFailed(publicationId, int(RelatedProblem::Offline), QString());
+                return;
+            }
+            related.setContactEmail(settings.value(QStringLiteral("metadata.crossref_email")).toString());
+        } catch (const std::exception &error) {
+            emit relatedFailed(publicationId, int(RelatedProblem::Network), QString::fromUtf8(error.what()));
+            return;
+        }
+        related.find(publicationId, refresh);
+    };
+    connect(this, &LookupThread::relatedRequested, &related, findRelated, Qt::QueuedConnection);
+
     connect(&engine, &LookupEngine::finished, this, [this, checkNotices](const LookupSummary &summary) {
         m_busy = false;
         emit busyChanged(false);
@@ -121,6 +154,8 @@ void LookupThread::run()
     }, Qt::QueuedConnection);
 
     m_ready = true;
+    if (const qint64 waiting = m_relatedWaiting.exchange(0); waiting != 0)
+        findRelated(waiting, m_relatedRefresh);
     if (m_kickWaiting)
         start();
     else

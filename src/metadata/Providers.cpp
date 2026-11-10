@@ -241,6 +241,11 @@ FoundRecord recordFromOpenAlex(const QJsonObject &work)
 
 } // namespace
 
+FoundRecord openAlexRecord(const QJsonObject &work)
+{
+    return recordFromOpenAlex(work);
+}
+
 QJsonObject FoundRecord::toJson() const
 {
     QJsonObject fields;

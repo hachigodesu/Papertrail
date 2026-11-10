@@ -7,6 +7,8 @@ add_library(papertrail_metadata STATIC
     NoticeChecker.h
     Providers.cpp
     Providers.h
+    RelatedFinder.cpp
+    RelatedFinder.h
     Transport.cpp
     Transport.h)
 

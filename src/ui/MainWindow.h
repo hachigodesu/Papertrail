@@ -44,6 +44,7 @@ class SummaryBatches;
 namespace papertrail::ui {
 
 class BackupsDialog;
+class RelatedPapersDialog;
 class BulkChanges;
 class DailyBackupThread;
 class MarkedCopyActions;
@@ -232,6 +233,8 @@ public:
     // Shows only the document being read, over the whole screen. Only while a document's tab is showing.
     QAction *fullScreenAction() const { return m_fullScreen; }
     void setFullScreenReading(bool on);
+    // Papers this cites, and that cite it, in a window of their own.
+    RelatedPapersDialog *showRelatedPapers(qint64 publicationId);
     bool isFullScreenReading() const { return m_fullScreenTab != nullptr; }
     ReferenceImportActions *referenceImports() const { return m_references; }
     // What an empty library says, for tests.
