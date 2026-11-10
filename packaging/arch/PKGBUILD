@@ -19,7 +19,7 @@ source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         "libmobi-0.12.tar.gz::https://github.com/bfabiszewski/libmobi/archive/refs/tags/v0.12.tar.gz"
         "qtkeychain-0.15.0.tar.gz::https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz")
 noextract=("sqlite-amalgamation-3540100.zip")
-sha256sums=('d0bcc06b192e7bc43a0480dcf0e5a672394f5d000d595c7ad4e65694a51c760e'
+sha256sums=('db5e008d1e3d61a8c4487d44a0f5a83a4fae363bdfd6aa8954096dbe241dc3d0'
             '0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9'
             '78826d161c02ce93ff1cd62838b4d749df754f52185474b82e4093badf4689c1'
             'f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22')
