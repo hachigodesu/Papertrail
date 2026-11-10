@@ -29,8 +29,6 @@ add_library(papertrail_ui STATIC
     MarkedCopy.cpp
     MarkedCopy.h
     MetadataEditor.h
-    NotesDialog.cpp
-    NotesDialog.h
     SummariesDialog.cpp
     SummariesDialog.h
     OnlineLookupDialog.cpp
@@ -69,6 +67,8 @@ add_library(papertrail_ui STATIC
     TransferDialogs.h
     ApiKeyStore.cpp
     ApiKeyStore.h
+    HighlightsWindow.cpp
+    HighlightsWindow.h
     KeyField.cpp
     KeyField.h
     LibraryCheckDialog.cpp

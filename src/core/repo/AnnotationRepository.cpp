@@ -246,25 +246,83 @@ QList<Annotation> AnnotationRepository::forPublication(qint64 publicationId)
 
 QList<AnnotationListing> AnnotationRepository::everywhere(const QString &search, int limit, qint64 *total)
 {
-    const QString match = parseSearch(search).contentsMatch;
+    AnnotationFilter filter;
+    filter.search = search;
+    filter.limit = limit;
+    return everywhere(filter, total);
+}
+
+QList<AnnotationListing> AnnotationRepository::everywhere(const AnnotationFilter &filter, qint64 *total)
+{
+    const QString match = parseSearch(filter.search).contentsMatch;
+    if (total)
+        *total = 0;
+    if (!filter.search.trimmed().isEmpty() && match.isEmpty())
+        return {}; // Nothing searchable in it, such as only punctuation.
+
+    // Ids go in as numbers, and everything else as values bound in order.
+    const auto idList = [](const QList<qint64> &ids) {
+        QStringList numbers;
+        for (const qint64 id : ids)
+            numbers << QString::number(id);
+        return numbers.join(u',').toLatin1();
+    };
     QByteArray where = "WHERE publication_id NOT IN (SELECT publication_id FROM hidden_publication) ";
-    if (!match.isEmpty())
-        where += "AND id IN (SELECT rowid FROM annotation_fts WHERE annotation_fts MATCH ?1) ";
+    QStringList values;
+    if (!match.isEmpty()) {
+        where += "AND id IN (SELECT rowid FROM annotation_fts WHERE annotation_fts MATCH ?) ";
+        values << match;
+    }
+    if (!filter.colour.isEmpty()) {
+        where += "AND lower(colour) = lower(?) ";
+        values << filter.colour;
+    }
+    switch (filter.kind) {
+    case AnnotationKind::Any: break;
+    case AnnotationKind::Highlight: where += "AND type = 'highlight' AND location_json NOT LIKE '%\"area\":true%' "; break;
+    case AnnotationKind::Underline: where += "AND type = 'underline' "; break;
+    case AnnotationKind::Note: where += "AND type = 'note' "; break;
+    case AnnotationKind::Area: where += "AND location_json LIKE '%\"area\":true%' "; break;
+    }
+    if (filter.withNote)
+        where += "AND note IS NOT NULL AND trim(note) <> '' ";
+    if (filter.publicationId != 0) {
+        const QByteArray id = QByteArray::number(filter.publicationId);
+        where += "AND (publication_id = " + id + " OR publication_id IN (SELECT id FROM publication WHERE parent_id = " + id + ")) ";
+    }
+    // A publication in a collection or with a tag, or an article inside one that is.
+    const auto ownedBy = [](const QByteArray &members) {
+        return "AND (publication_id IN (" + members + ") OR publication_id IN (SELECT id FROM publication WHERE parent_id IN ("
+               + members + "))) ";
+    };
+    if (!filter.collectionIds.isEmpty()) {
+        where += ownedBy("SELECT publication_id FROM collection_publication WHERE collection_id IN (WITH RECURSIVE down(id) AS "
+                         "(SELECT id FROM collection WHERE id IN (" + idList(filter.collectionIds) + ") UNION SELECT cp.collection_id "
+                         "FROM collection_parent cp JOIN down ON cp.parent_id = down.id) SELECT id FROM down)");
+    }
+    if (!filter.tagIds.isEmpty()) {
+        where += ownedBy("SELECT publication_id FROM publication_tag WHERE tag_id IN (WITH RECURSIVE down(id) AS "
+                         "(SELECT id FROM tag WHERE id IN (" + idList(filter.tagIds) + ") UNION SELECT t.id FROM tag t "
+                         "JOIN down ON t.parent_id = down.id) SELECT id FROM down)");
+    }
+    const auto bindAll = [&](Statement &statement) {
+        for (qsizetype i = 0; i < values.size(); ++i)
+            statement.bind(int(i + 1), values.at(i));
+    };
     if (total) {
         auto count = m_db.prepare("SELECT count(*) FROM annotation " + where);
-        if (!match.isEmpty())
-            count->bind(1, match);
+        bindAll(*count);
         count->step();
         *total = count->int64At(0);
     }
-    QList<AnnotationListing> found;
-    if (!search.trimmed().isEmpty() && match.isEmpty())
-        return found; // Nothing searchable in it, such as only punctuation.
-    auto select = m_db.prepare(QByteArray(kColumns) + where + "ORDER BY updated_at DESC, id DESC LIMIT ?2");
-    if (!match.isEmpty())
-        select->bind(1, match);
-    select->bind(2, limit);
+    const QByteArray order = filter.byPublication
+                                 ? "ORDER BY (SELECT title_sort FROM publication WHERE id = annotation.publication_id), publication_id, "
+                                   "created_at, id "
+                                 : "ORDER BY updated_at DESC, id DESC ";
+    auto select = m_db.prepare(QByteArray(kColumns) + where + order + "LIMIT " + QByteArray::number(qMax(0, filter.limit)));
+    bindAll(*select);
     Statement &title = m_db.cached("SELECT title FROM publication WHERE id = ?");
+    QList<AnnotationListing> found;
     while (select->step()) {
         AnnotationListing listing;
         listing.annotation = annotationFrom(*select);
@@ -273,6 +331,17 @@ QList<AnnotationListing> AnnotationRepository::everywhere(const QString &search,
             listing.publicationTitle = title.textAt(0);
         title.reset();
         found << listing;
+    }
+    // Each publication's in the order they come in it.
+    if (filter.byPublication) {
+        for (qsizetype start = 0; start < found.size();) {
+            qsizetype end = start;
+            while (end < found.size() && found.at(end).annotation.publicationId == found.at(start).annotation.publicationId)
+                ++end;
+            std::stable_sort(found.begin() + start, found.begin() + end,
+                             [](const AnnotationListing &a, const AnnotationListing &b) { return comesBefore(a.annotation, b.annotation); });
+            start = end;
+        }
     }
     return found;
 }

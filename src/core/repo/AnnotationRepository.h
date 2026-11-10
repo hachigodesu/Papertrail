@@ -53,6 +53,20 @@ struct Annotation {
     bool isArea() const;
 };
 
+// What to list of the highlights and notes across the library.
+enum class AnnotationKind { Any, Highlight, Underline, Note, Area };
+struct AnnotationFilter {
+    QString search;  // Only those whose words or note have all of these, each as the start of a word.
+    QString colour;  // As #rrggbb, or empty for any.
+    AnnotationKind kind = AnnotationKind::Any;
+    QList<qint64> collectionIds; // With the collections inside them, and the articles of issues in them.
+    QList<qint64> tagIds;        // With the tags beneath them.
+    bool withNote = false;
+    qint64 publicationId = 0;    // Only those made in this publication, or in its articles, or 0 for any.
+    bool byPublication = false;  // By publication, then in document order, rather than most recently changed first.
+    int limit = 2000;
+};
+
 // A highlight or note, with what it's in, for listing across the library.
 struct AnnotationListing {
     Annotation annotation;
@@ -81,6 +95,8 @@ public:
     // that are out of sight. With `search`, only those whose words or note have all its words, each as the start of
     // a word. `total` is set to how many there are in all, of which at most `limit` are returned.
     QList<AnnotationListing> everywhere(const QString &search, int limit, qint64 *total = nullptr);
+    // The same, chosen by more than words.
+    QList<AnnotationListing> everywhere(const AnnotationFilter &filter, qint64 *total = nullptr);
 
 private:
     Database &m_db;

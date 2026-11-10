@@ -134,6 +134,10 @@ public:
     void showMatch(int page, const QString &text);
     // Goes to a highlight or note, once the document is ready if it isn't yet.
     void showAnnotation(qint64 id);
+    // Reads this document's highlights and notes again, after a change made elsewhere.
+    void reloadAnnotations() { loadAnnotations(); }
+    // This document's highlights and notes, as last read. For tests.
+    const QList<core::Annotation> &annotations() const { return m_annotations; }
 
     // Highlights and notes. These are kept in the library's database, and never in the file.
     void annotateSelection(core::AnnotationType type, const QString &note = QString(), const QString &colour = QString());

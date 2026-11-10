@@ -1,5 +1,7 @@
 #include "ui/ReaderTab.h"
 
+#include "ui/HighlightsWindow.h"
+
 #include "core/repo/ReadingStateRepository.h"
 #include "core/repo/VolumeArticles.h"
 #include "import/ImportService.h"
@@ -11,6 +13,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDir>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QMessageBox>
 #include <QFileDialog>
@@ -1590,6 +1593,15 @@ void ReaderTab::onAreaPicture(qint64 token, int, const QImage &image)
     if (image.isNull())
         return;
     QImage picture = turned(image);
+    // Kept, so the highlights window can show it without opening the document.
+    for (const Annotation &annotation : std::as_const(m_annotations)) {
+        if (annotation.id != token)
+            continue;
+        const QString path = areaPicturePath(m_session.paths().cacheDirectory, annotation);
+        if (!path.isEmpty() && !QFileInfo::exists(path) && QDir().mkpath(QFileInfo(path).absolutePath()))
+            picture.save(path, "PNG");
+        break;
+    }
     picture.setDevicePixelRatio(devicePixelRatioF());
     m_areaPictures.insert(token, picture);
     for (int row = 0; row < m_annotationList->count(); ++row) {

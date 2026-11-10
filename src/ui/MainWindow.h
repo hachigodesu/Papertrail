@@ -252,7 +252,9 @@ public:
     QLabel *welcomePlaceLabel() const { return m_welcomePlace; }
 
     // Every highlight and note in the library, each opening its document there.
-    void showNotesDialog();
+    // View > Highlights and notes, kept open beside the library. With a publication, only those made in it.
+    void showHighlights(qint64 publicationId = 0);
+    class HighlightsWindow *highlightsWindow() const;
     // Opens the document a highlight or note is in, at its place. Returns whether it could.
     bool openAnnotation(qint64 annotationId);
 
@@ -410,6 +412,7 @@ private:
     QWidget *m_libraryPage = nullptr; // Always the first tab.
     ArticleCoverThread *m_articleCovers = nullptr;
     QPointer<QDialog> m_libraryCheck; // A LibraryCheckDialog.
+    QPointer<QWidget> m_highlights;    // A HighlightsWindow.
     std::unique_ptr<ApiKeyStore> m_keys;
     std::unique_ptr<ApiKeyStore> m_openAlexKeys;
     std::unique_ptr<ApiKeyStore> m_courtListenerKeys;

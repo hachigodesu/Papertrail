@@ -13,7 +13,9 @@
 #include "ui/LibrarySession.h"
 #include "ui/MainWindow.h"
 #include "ui/MarkedCopy.h"
-#include "ui/NotesDialog.h"
+#include "core/repo/CollectionRepository.h"
+#include "core/repo/TagRepository.h"
+#include "ui/HighlightsWindow.h"
 #include "ui/PageView.h"
 #include "ui/ReaderTab.h"
 
@@ -335,36 +337,145 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), kLongWaitMs);
         closeReaders();
 
-        NotesDialog dialog(*m_session);
-        QCOMPARE(dialog.list()->topLevelItemCount(), 1);
-        QTreeWidgetItem *item = dialog.list()->topLevelItem(0);
+        m_window->showHighlights();
+        HighlightsWindow *window = m_window->highlightsWindow();
+        QVERIFY(window);
+        const auto settle = [&] { QTRY_VERIFY_WITH_TIMEOUT(!window->isLoading(), kLongWaitMs); };
+        settle();
+        QCOMPARE(window->list()->topLevelItemCount(), 1);
+        QTreeWidgetItem *item = window->list()->topLevelItem(0);
         QCOMPARE(item->text(0), QStringLiteral("a made-up quotation"));
         QCOMPARE(item->text(1), QStringLiteral("compare with chapter two"));
         QCOMPARE(item->text(3), QString::number(page + 1));
-        QCOMPARE(dialog.countLabel()->text(), QStringLiteral("1 highlight or note"));
+        QCOMPARE(window->countLabel()->text(), QStringLiteral("1 highlight or note"));
 
         // Searching looks in both the words and the note.
-        dialog.searchBox()->setText(QStringLiteral("chap"));
-        dialog.reload();
-        QCOMPARE(dialog.list()->topLevelItemCount(), 1);
-        dialog.searchBox()->setText(QStringLiteral("nowhere"));
-        dialog.reload();
-        QCOMPARE(dialog.list()->topLevelItemCount(), 0);
-        QCOMPARE(dialog.countLabel()->text(), QStringLiteral("Nothing matches."));
-        dialog.searchBox()->setText(QStringLiteral("quotation"));
-        dialog.reload();
-        QCOMPARE(dialog.list()->topLevelItemCount(), 1);
+        window->searchBox()->setText(QStringLiteral("chap"));
+        window->reload();
+        settle();
+        QCOMPARE(window->list()->topLevelItemCount(), 1);
+        window->searchBox()->setText(QStringLiteral("nowhere"));
+        window->reload();
+        settle();
+        QCOMPARE(window->list()->topLevelItemCount(), 0);
+        QCOMPARE(window->countLabel()->text(), QStringLiteral("Nothing matches."));
+        window->searchBox()->setText(QStringLiteral("quotation"));
+        window->reload();
+        settle();
+        QCOMPARE(window->list()->topLevelItemCount(), 1);
 
-        // Opening it shows its page in its document.
-        QSignalSpy open(&dialog, &NotesDialog::openRequested);
-        emit dialog.list()->itemActivated(dialog.list()->topLevelItem(0), 0);
+        // Opening it shows its page in its document, and the window stays open beside it.
+        QSignalSpy open(window, &HighlightsWindow::openRequested);
+        emit window->list()->itemActivated(window->list()->topLevelItem(0), 0);
         QCOMPARE(open.size(), 1);
-        QVERIFY(m_window->openAnnotation(open.first().first().toLongLong()));
         QCOMPARE(m_window->documentTabs()->count(), 2);
         auto *opened = qobject_cast<ReaderTab *>(m_window->documentTabs()->currentWidget());
         QVERIFY(opened);
         QTRY_VERIFY_WITH_TIMEOUT(opened->isReady(), kLongWaitMs);
         QTRY_COMPARE_WITH_TIMEOUT(opened->pageView()->currentPage(), page, kLongWaitMs);
+        QVERIFY(m_window->highlightsWindow() == window && window->isVisible());
+
+        // A note changed in the window reaches the open document.
+        window->setNoteOf(window->shownIds().first(), QStringLiteral("a note changed elsewhere"));
+        QTRY_VERIFY_WITH_TIMEOUT(opened->annotations().size() == 1
+                                     && opened->annotations().first().note == QStringLiteral("a note changed elsewhere"),
+                                 kLongWaitMs);
+        settle();
+        QCOMPARE(window->list()->topLevelItem(0)->text(1), QStringLiteral("a note changed elsewhere"));
+
+        // What's shown is exported as Markdown, by publication.
+        const QString markdown = m_dir->filePath(QStringLiteral("highlights.md"));
+        QString error;
+        QVERIFY2(window->exportShown(markdown, &error), qPrintable(error));
+        QFile file(markdown);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QString written = QString::fromUtf8(file.readAll());
+        QVERIFY2(written.contains(QStringLiteral("a made-up quotation")), qPrintable(written));
+        QVERIFY(written.contains(QStringLiteral("a note changed elsewhere")));
+        window->close();
+    }
+
+    void highlightsAreChosenByColourKindCollectionAndTag()
+    {
+        Database &db = m_session->database();
+        PublicationRepository publications(db);
+        Publication first;
+        first.title = QStringLiteral("A Made-Up Book");
+        const qint64 book = publications.create(first);
+        Publication second;
+        second.title = QStringLiteral("Another Made-Up Book");
+        const qint64 other = publications.create(second);
+        Publication inside;
+        inside.title = QStringLiteral("A Chapter Inside");
+        inside.parentId = other;
+        const qint64 chapter = publications.create(inside);
+        const auto make = [&](qint64 publication, AnnotationType type, const QString &colour, const QString &note, bool area) {
+            Annotation annotation;
+            annotation.publicationId = publication;
+            annotation.contentHash = QStringLiteral("hash%1").arg(publication);
+            annotation.type = type;
+            annotation.colour = colour;
+            annotation.note = note;
+            AnnotationPart part;
+            part.text = QStringLiteral("made-up words");
+            part.page = 0;
+            part.rects = {QRectF(1, 1, 10, 10)};
+            part.area = area;
+            annotation.parts = {part};
+            return AnnotationRepository(db).create(annotation);
+        };
+        const qint64 yellow = make(book, AnnotationType::Highlight, QStringLiteral("#ffe45c"), QString(), false);
+        const qint64 green = make(book, AnnotationType::Underline, QStringLiteral("#8fe388"), QStringLiteral("a note"), false);
+        const qint64 area = make(other, AnnotationType::Highlight, QStringLiteral("#ffe45c"), QString(), true);
+        const qint64 inChapter = make(chapter, AnnotationType::Note, QStringLiteral("#7fc8f8"), QStringLiteral("another"), false);
+
+        const auto ids = [&](const AnnotationFilter &filter) {
+            QList<qint64> found;
+            for (const AnnotationListing &listing : AnnotationRepository(db).everywhere(filter))
+                found << listing.annotation.id;
+            std::sort(found.begin(), found.end());
+            return found;
+        };
+        AnnotationFilter filter;
+        QCOMPARE(ids(filter).size(), 4);
+        filter.colour = QStringLiteral("#FFE45C");
+        QCOMPARE(ids(filter), (QList<qint64>{yellow, area}));
+        filter = {};
+        filter.kind = AnnotationKind::Area;
+        QCOMPARE(ids(filter), QList<qint64>{area});
+        filter.kind = AnnotationKind::Highlight;
+        QCOMPARE(ids(filter), QList<qint64>{yellow});
+        filter.kind = AnnotationKind::Underline;
+        QCOMPARE(ids(filter), QList<qint64>{green});
+        filter = {};
+        filter.withNote = true;
+        QCOMPARE(ids(filter), (QList<qint64>{green, inChapter}));
+        filter = {};
+        filter.publicationId = other; // With its chapter's.
+        QCOMPARE(ids(filter), (QList<qint64>{area, inChapter}));
+
+        // A collection, with the collections inside it, and the chapters of what's in them.
+        CollectionRepository collections(db);
+        const qint64 project = collections.create(QStringLiteral("A Made-Up Project"));
+        const qint64 part = collections.create(QStringLiteral("Part One"), project);
+        collections.add(part, {other});
+        filter = {};
+        filter.collectionIds = {project};
+        QCOMPARE(ids(filter), (QList<qint64>{area, inChapter}));
+
+        // A tag, with those beneath it.
+        TagRepository tags(db);
+        const qint64 topic = tags.create(QStringLiteral("Made-Up Topic"));
+        const qint64 narrower = tags.create(QStringLiteral("Narrower"), topic);
+        tags.assign(book, narrower);
+        filter = {};
+        filter.tagIds = {topic};
+        QCOMPARE(ids(filter), (QList<qint64>{yellow, green}));
+
+        // Out of sight with a removed folder, out of the list.
+        db.exec(QStringLiteral("INSERT INTO hidden_publication (publication_id) VALUES (%1)").arg(book).toUtf8().constData());
+        filter = {};
+        QCOMPARE(ids(filter), (QList<qint64>{area, inChapter}));
     }
 
     void aCopyIsSavedWithItsHighlightsAndTheOriginalIsLeftAlone()

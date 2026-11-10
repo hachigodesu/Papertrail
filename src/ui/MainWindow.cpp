@@ -34,7 +34,7 @@
 #include "ui/BatchSummaryDialog.h"
 #include "summary/SummaryBatches.h"
 #include "ui/MarkedCopy.h"
-#include "ui/NotesDialog.h"
+#include "ui/HighlightsWindow.h"
 #include "ui/CitationActions.h"
 #include "ui/TransferDialogs.h"
 #include "ui/GridView.h"
@@ -1071,7 +1071,7 @@ void MainWindow::buildMenus()
         m_documentTabs->setCurrentIndex((m_documentTabs->currentIndex() + count - 1) % count);
     });
     view->addSeparator();
-    view->addAction(tr("&Highlights and notes..."), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this, &MainWindow::showNotesDialog);
+    view->addAction(tr("&Highlights and notes..."), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this, [this] { showHighlights(); });
     view->addAction(tr("Summaries from &Claude..."), this, [this] { showSummariesDialog(); });
     view->addSeparator();
     view->addAction(tr("&Grid"), QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] { setViewMode(ViewMode::Grid); });
@@ -2004,6 +2004,10 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
         connect(reader, &ReaderTab::statusMessage, this,
                 [this](const QString &message) { statusBar()->showMessage(message, 8000); });
         connect(reader, &ReaderTab::closeSideRequested, this, [this, reader] { closeSide(reader); });
+        connect(reader, &ReaderTab::annotationsChanged, this, [this] {
+            if (HighlightsWindow *window = highlightsWindow())
+                window->reload();
+        });
         connect(reader, &ReaderTab::recogniseDocumentWanted, this, [this, fileId] {
             guarded(tr("Reading the file"), [&] {
                 if (const std::optional<FileRecord> file = m_session.files().get(fileId))
@@ -2247,14 +2251,45 @@ void MainWindow::startDailyBackup()
     m_dailyBackup->start(QThread::LowPriority);
 }
 
-void MainWindow::showNotesDialog()
+HighlightsWindow *MainWindow::highlightsWindow() const
 {
-    NotesDialog dialog(m_session, this);
-    connect(&dialog, &NotesDialog::openRequested, this, [this, &dialog](qint64 id) {
-        if (openAnnotation(id))
-            dialog.accept();
-    });
-    dialog.exec();
+    return qobject_cast<HighlightsWindow *>(m_highlights.data());
+}
+
+void MainWindow::showHighlights(qint64 publicationId)
+{
+    HighlightsWindow *window = highlightsWindow();
+    if (!window) {
+        window = new HighlightsWindow(m_session, this);
+        window->setAttribute(Qt::WA_DeleteOnClose);
+        m_highlights = window;
+        // It stays open, beside the document it opens.
+        connect(window, &HighlightsWindow::openRequested, this, [this](qint64 id) {
+            if (openAnnotation(id)) {
+                raise();
+                activateWindow();
+            }
+        });
+        connect(window, &HighlightsWindow::annotationsChanged, this, [this](const QString &contentHash) {
+            for (int i = 0; i < m_documentTabs->count(); ++i) {
+                for (ReaderTab *reader : readersIn(m_documentTabs->widget(i))) {
+                    if (reader->contentHash() == contentHash)
+                        reader->reloadAnnotations();
+                }
+            }
+        });
+    }
+    if (publicationId != 0) {
+        QString title;
+        guarded(tr("Reading the publication"), [&] {
+            if (const std::optional<Publication> publication = m_session.publications().get(publicationId))
+                title = publication->title;
+        });
+        window->showOnlyPublication(publicationId, title);
+    }
+    window->show();
+    window->raise();
+    window->activateWindow();
 }
 
 bool MainWindow::openAnnotation(qint64 annotationId)
@@ -2493,6 +2528,8 @@ void MainWindow::showContextMenu(const QPoint &position)
             menu.addAction(tr("Edit..."), this, [this, publication] { editPublication(publication); });
             menu.addAction(tr("Summarize with Claude..."), this, [this, publication] { showSummaryDialog(publication); });
             menu.addAction(tr("Related papers..."), this, [this, publication] { showRelatedPapers(publication); });
+            menu.addAction(tr("Show its highlights"), this, [this, publication] { showHighlights(publication); })
+                ->setObjectName(QStringLiteral("showHighlights"));
             // For an old paper whose text layer is poor. Not for an article, whose file is its issue's.
             if (canRecogniseText()) {
                 QList<FileRecord> fixed;
