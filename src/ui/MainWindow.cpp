@@ -542,7 +542,11 @@ void MainWindow::buildCentre()
         m_tabs->addTab(tabLabel(tab));
     m_tabs->setTabToolTip(int(kTabs.indexOf(LibraryTab::Preprints)),
                           tr("Publications you've marked as preprints. Papertrail doesn't sort these by itself."));
-    connect(m_tabs, &QTabBar::currentChanged, this, &MainWindow::applyFilters);
+    connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
+        // Case law's own filters, such as its court, are only on its tab.
+        m_sidebar->setCaseLawShown(kTabs.value(index, LibraryTab::All) == LibraryTab::CaseLaw);
+        applyFilters();
+    });
     strip->addWidget(m_tabs, 1);
 
     strip->addWidget(new QLabel(tr("Sort:"), central));
@@ -772,7 +776,12 @@ void MainWindow::buildCentre()
             linkFileByHand(id, path);
     });
     connect(m_details, &DetailsPanel::citeMenuRequested, this, [this](QMenu *menu, qint64 id) {
-        m_citations->fillCiteMenu(menu, 1, [id] { return QList<qint64>{id}; });
+        bool isCase = false;
+        guarded(tr("Reading the publication"), [&] {
+            const std::optional<Publication> p = m_session.publications().get(id);
+            isCase = p && p->type == PublicationType::CaseLaw;
+        });
+        m_citations->fillCiteMenu(menu, 1, [id] { return QList<qint64>{id}; }, isCase);
     });
     connect(m_details, &DetailsPanel::articlesFromContentsRequested, this, &MainWindow::showContentsDialog);
     connect(m_details, &DetailsPanel::addArticleRequested, this, &MainWindow::showAddArticleDialog);
@@ -1286,6 +1295,8 @@ const QList<QPair<FilterSidebar::Section, QString>> kSectionKeys = {
     {FilterSidebar::Languages, QStringLiteral("languages")},
     {FilterSidebar::Formats, QStringLiteral("formats")},
     {FilterSidebar::ReadStatuses, QStringLiteral("read_statuses")},
+    {FilterSidebar::Courts, QStringLiteral("courts")},
+    {FilterSidebar::Jurisdictions, QStringLiteral("jurisdictions")},
 };
 
 // Tags, collections and people are chosen by id here, but kept by what names them in any library.
@@ -2293,7 +2304,20 @@ void MainWindow::showContextMenu(const QPoint &position)
         status->addAction(readStatusLabel(value), this, [this, value] { setSelectedReadStatus(value); });
     menu.addAction(tr("Mark as checked"), this, &MainWindow::markSelectedChecked);
     menu.addAction(tr("Look up details online"), this, &MainWindow::askAndLookUpSelected);
-    m_citations->addCiteMenu(&menu, count, [this] { return selectedIds(); });
+    // A selection of cases alone is offered their legal forms.
+    bool onlyCases = count > 0 && count <= CitationActions::kMaxToCopy;
+    if (onlyCases) {
+        guarded(tr("Reading the publications"), [&] {
+            for (const qint64 id : selectedIds()) {
+                const std::optional<Publication> p = m_session.publications().get(id);
+                if (!p || p->type != PublicationType::CaseLaw) {
+                    onlyCases = false;
+                    break;
+                }
+            }
+        });
+    }
+    m_citations->addCiteMenu(&menu, count, [this] { return selectedIds(); }, onlyCases);
     if (count > 1)
         menu.addAction(tr("Summarize %1 later at half price...").arg(count), this, &MainWindow::showBatchSummaryDialog);
     menu.addSeparator();

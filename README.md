@@ -185,7 +185,7 @@ Moving from another computer? Choose **Import a library from another computer...
 ### Finding things
 
 - **A cover grid and a detailed list,** sorted by title, first author, year, date added, or how well each matches a search.
-- **Filters with live counts:** tags, collections, year range, author, journal, publisher, conference, language, format and read status. Also **needs attention** filters: needing review, no text layer, no file, missing or offline files, unreadable files, and retracted or of concern.
+- **Filters with live counts:** tags, collections, year range, author, journal, publisher, conference, language, format and read status, and court and jurisdiction on the Case Law tab. Also **needs attention** filters: needing review, no text layer, no file, missing or offline files, unreadable files, and retracted or of concern.
 - **A search box** for plain words, `"exact phrases"`, and fields: `title:`, `author:`, `abstract:`, `journal:`, `conference:`, `publisher:`, `institution:`, `tag:`, `doi:`, `isbn:`, `issn:`, `arxiv:`, `type:`, `note:`, `in:` (articles in an issue or book), and `year:` with ranges such as `year:>2010`. The **?** beside it lists them all, with examples.
 - **Search inside documents:** tick **Inside documents** to find words in the text of every indexed document, and open the document at that page. Indexing happens in the background.
 - **Search your highlights and notes,** with `note:` or plain words.

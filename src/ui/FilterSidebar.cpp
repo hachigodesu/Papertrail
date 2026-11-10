@@ -55,6 +55,8 @@ Facet facetFor(FilterSidebar::Section section)
     case FilterSidebar::Conferences: return Facet::Conference;
     case FilterSidebar::Languages: return Facet::Language;
     case FilterSidebar::Formats: return Facet::Format;
+    case FilterSidebar::Courts: return Facet::Court;
+    case FilterSidebar::Jurisdictions: return Facet::Jurisdiction;
     default: return Facet::ReadStatus;
     }
 }
@@ -215,6 +217,8 @@ SidebarChoices FilterSidebar::choices() const
 {
     SidebarChoices choices;
     for (int section = 0; section < SectionCount; ++section) {
+        if (!isShown(section))
+            continue;
         QStringList keys(m_chosen[section].cbegin(), m_chosen[section].cend());
         keys.sort();
         for (const QString &key : keys)
@@ -301,6 +305,10 @@ void FilterSidebar::buildSections()
     add(Languages, tr("Language"));
     add(Formats, tr("Format"));
     add(ReadStatuses, tr("Read status"));
+    add(Courts, tr("Court"));
+    add(Jurisdictions, tr("Jurisdiction"));
+    m_sections[Courts]->setHidden(true);
+    m_sections[Jurisdictions]->setHidden(true);
     m_sections[Collections]->setExpanded(true);
     m_sections[Tags]->setExpanded(true);
     m_sections[Status]->setExpanded(true);
@@ -323,6 +331,10 @@ void FilterSidebar::applyTo(PublicationFilter &filter) const
     filter.publishers = strings(Publishers);
     filter.conferences = strings(Conferences);
     filter.languages = strings(Languages);
+    if (m_caseLawShown) {
+        filter.courts = strings(Courts);
+        filter.jurisdictions = strings(Jurisdictions);
+    }
     filter.formats = strings(Formats);
 
     filter.readStatuses.clear();
@@ -398,6 +410,20 @@ QTreeWidgetItem *FilterSidebar::findValue(Section section, const QString &key) c
         ++it;
     }
     return nullptr;
+}
+
+bool FilterSidebar::isShown(int section) const
+{
+    return m_caseLawShown || (section != Courts && section != Jurisdictions);
+}
+
+void FilterSidebar::setCaseLawShown(bool shown)
+{
+    if (shown == m_caseLawShown)
+        return;
+    m_caseLawShown = shown;
+    m_sections[Courts]->setHidden(!shown);
+    m_sections[Jurisdictions]->setHidden(!shown);
 }
 
 void FilterSidebar::setValueChosen(Section section, const QString &key, bool chosen)

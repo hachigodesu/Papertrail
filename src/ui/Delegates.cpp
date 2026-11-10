@@ -193,7 +193,7 @@ int layOutAnnotation(QPainter *painter, const QStyleOptionViewItem &option, cons
         const QImage picture = index.data(AnnotationDelegate::PictureRole).value<QImage>();
         const int left = area.left() + kQuoteIndent;
         const int width = std::max(area.right() - left, 20);
-        constexpr int kTallest = 180;
+        constexpr int kTallest = 420;
         constexpr int kWaiting = 48;
         QSize size(width, kWaiting);
         if (!picture.isNull()) {

@@ -68,21 +68,36 @@ QList<CitationItem> CitationActions::itemsFor(const QList<qint64> &ids)
     }
 }
 
-QMenu *CitationActions::addCiteMenu(QMenu *menu, qint64 count, const IdSource &ids)
+QMenu *CitationActions::addCiteMenu(QMenu *menu, qint64 count, const IdSource &ids, bool onlyCases)
 {
     QMenu *cite = menu->addMenu(tr("Cite"));
-    fillCiteMenu(cite, count, ids);
+    fillCiteMenu(cite, count, ids, onlyCases);
     return cite;
 }
 
-void CitationActions::fillCiteMenu(QMenu *menu, qint64 count, const IdSource &ids)
+void CitationActions::fillCiteMenu(QMenu *menu, qint64 count, const IdSource &ids, bool onlyCases)
 {
+    const bool canCopy = count > 0 && count <= kMaxToCopy;
+    if (onlyCases) {
+        // A case is cited in a legal form, whatever style the rest of a list is in.
+        for (const bool oscola : {false, true}) {
+            const QString form = oscola ? tr("OSCOLA") : tr("Bluebook");
+            QAction *copy = menu->addAction(count == 1 ? tr("Copy citation (%1)").arg(form) : tr("Copy %1 citations (%2)").arg(count).arg(form),
+                                            this, [this, ids, oscola] { copyCaseCitations(ids(), oscola); });
+            copy->setObjectName(oscola ? QStringLiteral("copyOscola") : QStringLiteral("copyBluebook"));
+            copy->setEnabled(canCopy);
+        }
+        menu->addSeparator();
+        QAction *exporting = menu->addAction(count == 1 ? tr("Export citation...") : tr("Export %1 citations...").arg(count), this,
+                                             [this, ids] { askAndExport(ids()); });
+        exporting->setEnabled(count > 0 && !isExporting());
+        return;
+    }
     const QString name = styleName(style());
     QAction *references = menu->addAction(count == 1 ? tr("Copy reference (%1)").arg(name)
                                                      : tr("Copy %1 references (%2)").arg(count).arg(name),
                                           this, [this, ids] { copyReferences(ids()); });
     QAction *inText = menu->addAction(tr("Copy in-text citation (%1)").arg(name), this, [this, ids] { copyInTextCitation(ids()); });
-    const bool canCopy = count > 0 && count <= kMaxToCopy;
     references->setEnabled(canCopy);
     inText->setEnabled(canCopy);
     if (count > kMaxToCopy)
@@ -140,6 +155,25 @@ bool CitationActions::copyReferences(const QList<qint64> &ids)
             + u' ' + tr("Look up details online can fill them in.");
     }
     emit message(text);
+    return true;
+}
+
+bool CitationActions::copyCaseCitations(const QList<qint64> &ids, bool oscola)
+{
+    if (ids.isEmpty() || ids.size() > kMaxToCopy)
+        return false;
+    QList<CitationItem> items = itemsFor(ids);
+    if (items.isEmpty())
+        return false;
+    QList<RichText> entries;
+    for (CitationItem &item : items) {
+        item.oscola = oscola;
+        entries << caseCitation(item);
+    }
+    putOnClipboard(entries);
+    const QString form = oscola ? tr("OSCOLA") : tr("the Bluebook");
+    emit message(items.size() == 1 ? tr("Copied a citation in %1's form.").arg(form)
+                                   : tr("Copied %1 citations in %2's form.").arg(items.size()).arg(form));
     return true;
 }
 

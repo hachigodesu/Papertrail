@@ -20,6 +20,8 @@ enum class Facet {
     Publisher,
     Conference,
     Institution,
+    Court,
+    Jurisdiction,
     Language,
     Format,
     ReadStatus,

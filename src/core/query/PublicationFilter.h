@@ -25,6 +25,8 @@ struct PublicationFilter {
     QStringList publishers;
     QStringList conferences;
     QStringList institutions;
+    QStringList courts;        // Case law's. The window only offers these on the Case Law tab.
+    QStringList jurisdictions;
     QStringList languages;
     QStringList formats;
     QList<ReadStatus> readStatuses;

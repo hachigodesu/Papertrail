@@ -2,6 +2,7 @@
 
 #include <QFrame>
 #include <QList>
+#include <QPair>
 #include <QString>
 
 class QLineEdit;
@@ -20,9 +21,12 @@ struct OutlineEntry {
     QString pageLabel; // As the reader numbers it, such as "12". Empty if it doesn't lead anywhere.
 };
 
-// The entries a search finds, by index: those with every word of it in their title or the titles they're inside,
-// ignoring case and accents, in any order. Those with every word in their own title come first, then in order.
+// The entries a search finds, by index, in the document's order: those with every word of it in their title or the
+// titles they're inside, ignoring case and accents, in any order.
 QList<int> contentsMatches(const QString &query, const QList<OutlineEntry> &entries);
+
+// Where these words are in `text`, ignoring case and accents, as (start, length) in `text` itself.
+QList<QPair<int, int>> matchedRanges(const QString &text, const QStringList &foldedWords);
 
 // A document's contents over its pages, searched as you type, for going somewhere without the side panel. Typing a
 // page number offers that page too. It closes when something's chosen, on Escape, or on a click elsewhere.

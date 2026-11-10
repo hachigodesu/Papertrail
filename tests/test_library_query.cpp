@@ -489,6 +489,39 @@ private slots:
         QCOMPARE(total, qint64(6));
     }
 
+    void casesAreFilteredByCourtAndJurisdiction()
+    {
+        const auto judgment = [&](const QString &title, const QString &court, const QString &jurisdiction) {
+            Publication p;
+            p.type = PublicationType::CaseLaw;
+            p.title = title;
+            p.court = court;
+            p.jurisdiction = jurisdiction;
+            return m_publications->create(p);
+        };
+        const qint64 first = judgment(QStringLiteral("Sample v Example"), QStringLiteral("9th Cir."), QStringLiteral("United States"));
+        judgment(QStringLiteral("Another v Example"), QStringLiteral("9th Cir."), QStringLiteral("United States"));
+        const qint64 uk = judgment(QStringLiteral("Made-Up Ltd v Example Plc"), QStringLiteral("Court of Appeal (Civil Division)"),
+                                   QStringLiteral("England and Wales"));
+
+        PublicationFilter cases;
+        cases.tabTypes = {PublicationType::CaseLaw};
+        const QList<FacetValue> courts = m_query->facet(cases, Facet::Court);
+        QCOMPARE(courts.size(), 2);
+        QCOMPARE(courts.first().key, QStringLiteral("9th Cir."));
+        QCOMPARE(courts.first().count, qint64(2));
+        QCOMPARE(m_query->facet(cases, Facet::Jurisdiction).size(), 2);
+
+        cases.courts = {QStringLiteral("Court of Appeal (Civil Division)")};
+        QCOMPARE(m_query->ids(cases, {}), QList<qint64>{uk});
+        // Choosing a court still shows the other, so it can be added.
+        QCOMPARE(m_query->facet(cases, Facet::Court).size(), 2);
+        cases.courts.clear();
+        cases.jurisdictions = {QStringLiteral("United States")};
+        QCOMPARE(m_query->ids(cases, {}).size(), 2);
+        QVERIFY(m_query->ids(cases, {}).contains(first));
+    }
+
     void facetsIgnoreTheirOwnSelectionOnly()
     {
         PublicationFilter filter;

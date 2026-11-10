@@ -1190,7 +1190,8 @@ void ReaderTab::requestAreaPictures()
 {
     if (!m_ready)
         return;
-    constexpr double kListWidth = 240;
+    // Wide enough for a wide Notes panel, where it's shrunk to fit, so the words in it stay readable.
+    constexpr double kListWidth = 640;
     const double ratio = devicePixelRatioF();
     for (const Annotation &annotation : std::as_const(m_annotations)) {
         if (!annotation.isArea() || m_areaPicturesAsked.contains(annotation.id))
@@ -1199,8 +1200,8 @@ void ReaderTab::requestAreaPictures()
         if (part.page < 0 || part.rects.isEmpty() || part.rects.first().width() <= 0)
             continue;
         m_areaPicturesAsked.insert(annotation.id);
-        // Shrunk to fit the list, but a small area no larger than a little over its size on the page.
-        const double scale = qMin(1.5, kListWidth / part.rects.first().width()) * ratio;
+        // Shrunk to fit the panel as it's drawn, and a small area at most twice its size on the page.
+        const double scale = qMin(2.0, kListWidth / part.rects.first().width()) * ratio;
         m_client->requestAreaPicture(annotation.id, part.page, part.rects.first(), scale, false);
     }
 }

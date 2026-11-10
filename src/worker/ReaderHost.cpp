@@ -135,6 +135,40 @@ namespace {
 
 constexpr qsizetype kLongestSingleLineText = 60;
 
+// The size most of a page's text is set in, to tell headings by.
+double bodySize(const QList<engine::TextLine> &lines)
+{
+    QList<QPair<double, qsizetype>> sizes;
+    qsizetype total = 0;
+    for (const engine::TextLine &line : lines) {
+        sizes << qMakePair(line.size, line.text.size());
+        total += line.text.size();
+    }
+    std::sort(sizes.begin(), sizes.end());
+    qsizetype counted = 0;
+    for (const auto &[size, length] : std::as_const(sizes)) {
+        counted += length;
+        if (counted * 2 >= total)
+            return size;
+    }
+    return 0;
+}
+
+// Whether there's a gap above a line, more than lines of a paragraph have, or nothing above it in its column.
+bool standsApart(const QList<engine::TextLine> &lines, int index)
+{
+    const QRectF line = lines.at(index).rect;
+    for (int i = index - 1; i >= 0; --i) {
+        const QRectF above = lines.at(i).rect;
+        const bool sameColumn = above.right() > line.left() && above.left() < line.right();
+        // Lines' boxes often overlap the next line's a little, so it's the line above that counts, however close.
+        if (!sameColumn || above.top() >= line.top() - 1)
+            continue;
+        return line.top() - above.bottom() > line.height() * 0.8;
+    }
+    return true;
+}
+
 class Host {
 public:
     Host(engine::Engine &engine, FILE *out) : m_engine(engine), m_out(out) {}
@@ -570,31 +604,61 @@ private:
 
         int targetPage = -1;
         int targetLine = -1;
-        const auto lookFor = [&](const QList<int> &pages, const std::function<bool(const QString &)> &matches) {
+        // The best of the lines that match, by how much they're set apart as a heading, caption or equation is, with the
+        // nearest winning a tie. A sentence that happens to wrap onto a new line with "Appendix E." scores nothing.
+        const auto lookForBest = [&](const QList<int> &pages, int least,
+                                     const std::function<int(const QList<engine::TextLine> &, int, double)> &score) {
+            int best = least - 1;
             for (const int at : pages) {
                 const QList<engine::TextLine> &lines = linesOn(at);
+                const double body = bodySize(lines);
                 for (int i = 0; i < lines.size(); ++i) {
-                    if (!isClicked(at, i) && matches(lines.at(i).text)) {
+                    if (isClicked(at, i))
+                        continue;
+                    const int points = score(lines, i, body);
+                    if (points > best) {
+                        best = points;
                         targetPage = at;
                         targetLine = i;
-                        return true;
                     }
                 }
             }
-            return false;
+            return targetPage >= 0;
         };
+        // A table of contents' entry has dots leading to its page number, which a caption or heading never has.
+        static const QRegularExpression leaders(QStringLiteral("(?:\\.\\s*){4,}\\d+\\s*$|…\\s*\\d+\\s*$"));
 
         switch (found->kind) {
         case Kind::Equation: {
-            // The nearest before it, where an equation's usually set out, or else after.
+            // Set apart from the text before it, with space before its number. The nearest before the mention first,
+            // where an equation's usually set out, or else after.
             QList<int> before;
             QList<int> after;
             for (const int at : std::as_const(outward))
                 (at <= number ? before : after) << at;
             std::sort(before.begin(), before.end(), std::greater<int>());
-            const auto numbered = [&](const QString &text) { return core::endsWithEquationNumber(text, found->number); };
-            if (!lookFor(before, numbered))
-                lookFor(after, numbered);
+            const auto numbered = [&](const QList<engine::TextLine> &lines, int i, double) {
+                const engine::TextLine &line = lines.at(i);
+                if (!core::endsWithEquationNumber(line.text, found->number))
+                    return -1;
+                const qsizetype open = line.text.lastIndexOf(u'(');
+                // The number on a line of its own, set to the right of the equation.
+                if (line.text.left(open).trimmed().isEmpty())
+                    return 3;
+                int points = 0;
+                qsizetype previous = open - 1;
+                while (previous >= 0 && line.text.at(previous).isSpace())
+                    --previous;
+                if (previous >= 0 && open < line.chars.size() && line.chars.at(open).left() - line.chars.at(previous).right() > 12)
+                    points += 3;
+                if (standsApart(lines, i))
+                    points += 1;
+                if (line.text.size() < 90)
+                    points += 1;
+                return points;
+            };
+            if (!lookForBest(before, 3, numbered))
+                lookForBest(after, 3, numbered);
             break;
         }
         case Kind::Citation:
@@ -641,15 +705,44 @@ private:
             break;
         }
         default: {
-            const auto caption = [&](const QString &text) { return core::isTargetLine(*found, text); };
-            if (!lookFor(outward, caption)) {
+            // A caption or heading has space above it, or is set in bold or another size, unlike a sentence that wraps
+            // onto a new line. A heading is short.
+            const bool heading = found->kind == Kind::Section || found->kind == Kind::Appendix;
+            const auto caption = [&](const core::TextReference &wanted) {
+                return [&, wanted](const QList<engine::TextLine> &lines, int i, double body) {
+                    const engine::TextLine &line = lines.at(i);
+                    // An appendix is often headed by its letter alone, as "E Derivations", in bold or larger type.
+                    static const QRegularExpression letterHeading(QStringLiteral("^\\s*([A-Z])[.:]?\\s+\\p{Lu}"));
+                    const bool styled = line.bold || line.size > body + 0.5;
+                    const QRegularExpressionMatch letter = letterHeading.match(line.text);
+                    const bool appendixByLetter = wanted.kind == Kind::Appendix && styled && letter.hasMatch()
+                                                  && letter.captured(1) == wanted.number && line.text.trimmed().size() < 80;
+                    if (!core::isTargetLine(wanted, line.text) && !appendixByLetter)
+                        return -1;
+                    if (leaders.match(line.text).hasMatch())
+                        return -1;
+                    int points = 0;
+                    if (standsApart(lines, i))
+                        points += 2;
+                    if (line.bold)
+                        points += 2;
+                    if (line.size > body + 0.5)
+                        points += 2;
+                    else if (line.size > 0 && line.size < body - 0.5)
+                        points += 1; // Captions are often set smaller.
+                    if (heading && !styled && line.text.trimmed().size() > 60)
+                        return -1; // A long line that isn't set apart is a sentence.
+                    return points;
+                };
+            };
+            if (!lookForBest(outward, 2, caption(*found))) {
                 // "Figure 3b" is often captioned as part of "Figure 3".
                 static const QRegularExpression lettered(QStringLiteral("^(\\d+(?:\\.\\d+)*)[a-z]$"));
                 const QRegularExpressionMatch base = lettered.match(found->number);
                 if (base.hasMatch()) {
                     core::TextReference whole = *found;
                     whole.number = base.captured(1);
-                    lookFor(outward, [&](const QString &text) { return core::isTargetLine(whole, text); });
+                    lookForBest(outward, 2, caption(whole));
                 }
             }
             break;

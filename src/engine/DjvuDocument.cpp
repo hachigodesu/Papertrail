@@ -180,9 +180,11 @@ public:
     // DjVu's hidden text places words, not characters, so each word's box is shared out evenly among its characters.
     QList<TextLine> textLines(int page) override
     {
+        // DjVu's hidden text has no fonts, so a line's height stands in for its size.
         QList<TextLine> lines;
         TextLine line;
         const auto finish = [&] {
+            line.size = line.rect.height() * 0.8;
             if (!line.text.trimmed().isEmpty())
                 lines << line;
             line = TextLine();

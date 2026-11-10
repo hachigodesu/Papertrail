@@ -379,6 +379,41 @@ private slots:
         QVERIFY(!found.first().first().value<ReaderReference>().found);
     }
 
+    void aMentionAtTheStartOfALineIsntTheThingItself()
+    {
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy hits(&client, &DocumentClient::searchHits);
+        QSignalSpy finished(&client, &DocumentClient::searchFinished);
+        QSignalSpy found(&client, &DocumentClient::referenceReady);
+        client.open(sample(QStringLiteral("smart_jump_headings.pdf")), {});
+        QVERIFY(opened.wait(kWaitMs));
+
+        // The first of each on the first page is the mention clicked.
+        const auto lookUp = [&](const QString &word) {
+            hits.clear();
+            finished.clear();
+            client.startSearch(word, 0);
+            if (!finished.wait(kWaitMs) || hits.isEmpty())
+                return ReaderReference{};
+            const QRectF first = hits.first().at(1).value<QList<QRectF>>().first();
+            found.clear();
+            client.requestReference(0, first.center(), 0, 2);
+            return found.wait(kWaitMs) ? found.first().first().value<ReaderReference>() : ReaderReference{};
+        };
+
+        // Not "Appendix E." wrapped onto the start of a line two lines down, but the heading in bold.
+        const ReaderReference appendix = lookUp(QStringLiteral("Appendix E,"));
+        QVERIFY(appendix.found);
+        QCOMPARE(appendix.label, QStringLiteral("Appendix E"));
+        QCOMPARE(appendix.page, 2);
+
+        // Not "Figure 4." starting a line in the paragraph, but its caption, set apart on the next page.
+        const ReaderReference figure = lookUp(QStringLiteral("Figure 4 of"));
+        QVERIFY(figure.found);
+        QCOMPARE(figure.page, 1);
+    }
+
     void selectsTextBetweenTwoPoints()
     {
         DocumentClient client(worker());
@@ -1165,6 +1200,8 @@ private slots:
         QTest::keyClicks(popup->searchBox(), QStringLiteral("section one"));
         QCOMPARE(popup->list()->topLevelItemCount(), 1);
         QCOMPARE(popup->list()->currentItem()->text(0), QStringLiteral("Chapter One › A Section"));
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty())
+            popup->grab().save(QDir(pictures).filePath(QStringLiteral("contents-popup-search.png")));
 
         // A page number goes to that page.
         popup->searchBox()->clear();
@@ -1193,10 +1230,15 @@ private slots:
         };
         QCOMPARE(contentsMatches(QStringLiteral("RESUME"), entries), QList<int>{0});
         QCOMPARE(contentsMatches(QStringLiteral("results résumé"), entries), QList<int>{0});
-        // Those with every word in their own title come first.
-        QCOMPARE(contentsMatches(QStringLiteral("method"), entries), (QList<int>{1, 3, 2}));
+        // In the document's order, including those inside a match.
+        QCOMPARE(contentsMatches(QStringLiteral("method"), entries), (QList<int>{1, 2, 3}));
         QCOMPARE(contentsMatches(QStringLiteral("methods sampling"), entries), QList<int>{2});
         QCOMPARE(contentsMatches(QStringLiteral("nothing"), entries), QList<int>{});
+
+        // The words searched for are found in the title as shown, accents and all, to be drawn in bold.
+        QCOMPARE(matchedRanges(QStringLiteral("Résumé of Results"), {QStringLiteral("resume")}), (QList<QPair<int, int>>{{0, 6}}));
+        QCOMPARE(matchedRanges(QStringLiteral("Results by method"), {QStringLiteral("method"), QStringLiteral("res")}),
+                 (QList<QPair<int, int>>{{0, 3}, {11, 6}}));
     }
 
     void thumbnailsLoadAsTheyreSeen()

@@ -179,7 +179,11 @@ void SidebarQueryThread::run()
                     data.flags = query->flagCounts(filter);
                     data.years = query->yearRange(filter);
                 }
-                for (const Facet facet : facets) {
+                QList<Facet> wanted = facets;
+                // Courts and jurisdictions only mean anything on the Case Law tab, which is the only one showing them.
+                if (filter.tabTypes == QList<PublicationType>{PublicationType::CaseLaw})
+                    wanted << Facet::Court << Facet::Jurisdiction;
+                for (const Facet facet : std::as_const(wanted)) {
                     if (abandoned || (abandoned = hasNewerRequest()))
                         break;
                     data.facets.insert(int(facet), query->facet(filter, facet));

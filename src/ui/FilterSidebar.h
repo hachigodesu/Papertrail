@@ -48,6 +48,8 @@ public:
         Languages,
         Formats,
         ReadStatuses,
+        Courts,        // Only on the Case Law tab: see setCaseLawShown.
+        Jurisdictions,
         SectionCount,
     };
 
@@ -69,6 +71,11 @@ public:
 
     // Chooses or clears one value, as ticking it would.
     void setValueChosen(Section section, const QString &key, bool chosen);
+
+    // Shows the filters only case law has, such as its court, for the Case Law tab. Elsewhere they're hidden, and what's
+    // chosen in them neither applies nor is kept in a saved search, until they're shown again.
+    void setCaseLawShown(bool shown);
+    bool isCaseLawShown() const { return m_caseLawShown; }
 
     // What's chosen, and replacing all of it at once, as a saved search does. Values not listed yet are
     // chosen all the same, and shown with their labels.
@@ -97,6 +104,8 @@ signals:
     void savedSearchDeleteRequested(qint64 id);
 
 private:
+    bool m_caseLawShown = false;
+    bool isShown(int section) const;
     void buildSections();
     void updateFacet(Section section, const QList<core::FacetValue> &values);
     struct TreeValue {

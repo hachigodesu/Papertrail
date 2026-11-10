@@ -152,6 +152,8 @@ Conditions buildConditions(const PublicationFilter &filter, const QByteArray &ft
     c.addIn("p.publisher", filter.publishers);
     c.addIn("p.conference_name", filter.conferences);
     c.addIn("p.institution", filter.institutions);
+    c.addIn("p.court", filter.courts);
+    c.addIn("p.jurisdiction", filter.jurisdictions);
     c.addIn("p.language", filter.languages);
 
     if (!filter.formats.isEmpty()) {
@@ -288,6 +290,8 @@ PublicationFilter withoutOwnSelection(PublicationFilter filter, Facet facet)
     case Facet::Publisher: filter.publishers.clear(); break;
     case Facet::Conference: filter.conferences.clear(); break;
     case Facet::Institution: filter.institutions.clear(); break;
+    case Facet::Court: filter.courts.clear(); break;
+    case Facet::Jurisdiction: filter.jurisdictions.clear(); break;
     case Facet::Language: filter.languages.clear(); break;
     case Facet::Format: filter.formats.clear(); break;
     case Facet::ReadStatus: filter.readStatuses.clear(); break;
@@ -531,6 +535,8 @@ QList<FacetValue> LibraryQuery::facet(const PublicationFilter &filter, Facet fac
     case Facet::Publisher: sql = columnFacetSql("p.publisher", c); break;
     case Facet::Conference: sql = columnFacetSql("p.conference_name", c); break;
     case Facet::Institution: sql = columnFacetSql("p.institution", c); break;
+    case Facet::Court: sql = columnFacetSql("p.court", c); break;
+    case Facet::Jurisdiction: sql = columnFacetSql("p.jurisdiction", c); break;
     case Facet::Language: sql = columnFacetSql("p.language", c); break;
     case Facet::ReadStatus: sql = columnFacetSql("p.read_status", c); break;
     case Facet::Author: {

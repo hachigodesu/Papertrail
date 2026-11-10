@@ -41,15 +41,6 @@ const ImportedReference *withKey(const ParsedReferences &parsed, const QString &
     return nullptr;
 }
 
-const ImportedReference *withTitle(const ParsedReferences &parsed, const QString &start)
-{
-    for (const ImportedReference &entry : parsed.entries) {
-        if (entry.publication.title.startsWith(start))
-            return &entry;
-    }
-    return nullptr;
-}
-
 } // namespace
 
 class ReferenceImportTest : public QObject {

@@ -413,6 +413,61 @@ def judgment_pdf(path):
              extra_pages=[[(10, "1. This made-up appeal concerns a made-up contract.")]])
 
 
+def smart_jump_headings_pdf(path):
+    """A made-up paper whose mentions of Appendix E and Figure 4 wrap onto the start of lines in the middle of a
+    paragraph, looking like a heading and a caption, before the real caption on page 2 and the real heading, in bold
+    and larger, on page 3."""
+
+    def placed(items):
+        """`items` is a list of (font, size, x, y, text), in points from the bottom left."""
+        return "\n".join(f"BT /{font} {size} Tf {x} {y} Td ({escape_pdf(text)}) Tj ET"
+                         for font, size, x, y, text in items).encode("latin-1")
+
+    pages = [
+        placed([("F1", 11, 50, 760, "The derivation is given in Appendix E, which sets out"),
+                ("F1", 11, 50, 746, "the made-up method in full, and the result is set out in"),
+                ("F1", 11, 50, 732, "Appendix E. In the following pages the method is made"),
+                ("F1", 11, 50, 718, "up as we go, and its result is shown as in Figure 4 of"),
+                ("F1", 11, 50, 704, "the results, which comes later. As it says in the text,"),
+                ("F1", 11, 50, 690, "Figure 4. As the made-up result shows, the beam bends."),
+                ("F1", 11, 50, 676, "That is all there is to say about it on this page.")]),
+        placed([("F1", 11, 50, 760, "A page with a made-up result on it."),
+                ("F1", 11, 50, 600, "Figure 4: The made-up result, as a caption.")]),
+        placed([("F2", 16, 50, 760, "Appendix E Made-Up Derivations"),
+                ("F1", 11, 50, 730, "The made-up derivation follows here.")]),
+    ]
+    objects = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        30: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    }
+    kids = []
+    for index, stream in enumerate(pages):
+        number = 4 + index * 2
+        kids.append(number)
+        objects[number] = (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents %d 0 R "
+                           b"/Resources << /Font << /F1 3 0 R /F2 30 0 R >> >> >>" % (number + 1))
+        objects[number + 1] = b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream)
+    objects[2] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
+        b" ".join(b"%d 0 R" % kid for kid in kids), len(kids))
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for number in sorted(objects):
+        offsets[number] = len(out)
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, objects[number])
+    xref = len(out)
+    size = max(objects) + 1
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % size
+    for number in range(1, size):
+        if number in offsets:
+            out += b"%010d 00000 n \n" % offsets[number]
+        else:
+            out += b"0000000000 00000 f \n"
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (size, xref)
+    path.write_bytes(bytes(out))
+
+
 def smart_jump_pdf(path):
     """A made-up paper whose text refers to its figure, table, equation, section and references, with no links, for
     finding what a reference points at. Page 1 has the mentions, page 2 the method, an equation numbered (3) at the
@@ -733,6 +788,7 @@ def main():
     drawing_only_pdf(out / "scanned_no_text.pdf")
     picture_pdf(out / "picture_page.pdf")
     smart_jump_pdf(out / "smart_jump.pdf")
+    smart_jump_headings_pdf(out / "smart_jump_headings.pdf")
     judgment_pdf(out / "judgment.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))
     encrypted_pdf(out / "encrypted.pdf", [(20, "Locked Paper"), (10, "You should not be able to read this text.")])

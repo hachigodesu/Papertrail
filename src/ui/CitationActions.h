@@ -39,14 +39,17 @@ public:
     // Adds a "Cite" menu for `count` publications. Which ones is only asked for when it's used, since working
     // out a large selection takes a moment.
     using IdSource = std::function<QList<qint64>()>;
-    QMenu *addCiteMenu(QMenu *menu, qint64 count, const IdSource &ids);
+    // For case law only, it offers each legal form instead, since cases are never cited in the chosen style's.
+    QMenu *addCiteMenu(QMenu *menu, qint64 count, const IdSource &ids, bool onlyCases = false);
     // Fills a menu with the same actions.
-    void fillCiteMenu(QMenu *menu, qint64 count, const IdSource &ids);
+    void fillCiteMenu(QMenu *menu, qint64 count, const IdSource &ids, bool onlyCases = false);
 
     // Puts formatted text on the clipboard, with italics for word processors and as plain text. These return
     // whether they could.
     bool copyReferences(const QList<qint64> &ids);
     bool copyInTextCitation(const QList<qint64> &ids);
+    // Cases in the Bluebook's form, or OSCOLA's, whichever each is set to be cited in.
+    bool copyCaseCitations(const QList<qint64> &ids, bool oscola);
 
     // Asks for a file, then exports in the background.
     void askAndExport(const QList<qint64> &ids);

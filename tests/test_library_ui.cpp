@@ -1433,6 +1433,89 @@ private slots:
     }
 
     // ---- Citations ----
+    void caseLawHasFiltersOfItsOwnOnItsTabOnly()
+    {
+        const auto judgment = [&](const QString &title, const QString &court) {
+            Publication p;
+            p.type = PublicationType::CaseLaw;
+            p.title = title;
+            p.court = court;
+            p.jurisdiction = QStringLiteral("United States");
+            return m_session->publications().create(p);
+        };
+        judgment(QStringLiteral("Sample v Example"), QStringLiteral("9th Cir."));
+        const qint64 other = judgment(QStringLiteral("Another v Example"), QStringLiteral("2d Cir."));
+        addPublication(QStringLiteral("A Made-Up Article"), PublicationType::JournalArticle);
+        openWindow();
+        FilterSidebar *sidebar = m_window->sidebar();
+        QTabBar *tabs = m_window->tabBar();
+
+        // Not on the All tab.
+        QCOMPARE(tabs->currentIndex(), 0);
+        QVERIFY(sidebar->sectionItem(FilterSidebar::Courts)->isHidden());
+        QVERIFY(sidebar->sectionItem(FilterSidebar::Jurisdictions)->isHidden());
+
+        // On the Case Law tab, with counts.
+        int caseLaw = -1;
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (tabs->tabText(i) == QStringLiteral("Case Law"))
+                caseLaw = i;
+        }
+        QVERIFY(caseLaw > 0);
+        tabs->setCurrentIndex(caseLaw);
+        QVERIFY(!sidebar->sectionItem(FilterSidebar::Courts)->isHidden());
+        QTRY_VERIFY_WITH_TIMEOUT(sidebar->findValue(FilterSidebar::Courts, QStringLiteral("2d Cir.")) != nullptr, kLongWaitMs);
+        QCOMPARE(sidebar->findValue(FilterSidebar::Courts, QStringLiteral("2d Cir."))->text(1), QStringLiteral("1"));
+        QTRY_VERIFY_WITH_TIMEOUT(sidebar->findValue(FilterSidebar::Jurisdictions, QStringLiteral("United States")) != nullptr,
+                                 kLongWaitMs);
+
+        // Choosing a court narrows it down.
+        sidebar->setValueChosen(FilterSidebar::Courts, QStringLiteral("2d Cir."), true);
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->model()->rowCount(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->model()->idAt(0).has_value(), kLongWaitMs);
+        QCOMPARE(*m_window->model()->idAt(0), other);
+        QCOMPARE(sidebar->choices().values.value(FilterSidebar::Courts).size(), 1);
+
+        // Back on All, it no longer applies, and isn't part of a search to save, until the tab's shown again.
+        tabs->setCurrentIndex(0);
+        QVERIFY(sidebar->sectionItem(FilterSidebar::Courts)->isHidden());
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->model()->rowCount(), 3, kLongWaitMs);
+        QVERIFY(!sidebar->choices().values.contains(FilterSidebar::Courts));
+        tabs->setCurrentIndex(caseLaw);
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->model()->rowCount(), 1, kLongWaitMs);
+    }
+
+    void aCaseIsCitedInEitherLegalForm()
+    {
+        Publication judgment;
+        judgment.type = PublicationType::CaseLaw;
+        judgment.title = QStringLiteral("Sample v Example County Board");
+        judgment.containerTitle = QStringLiteral("F.4th");
+        judgment.volume = QStringLiteral("12");
+        judgment.pages = QStringLiteral("345");
+        judgment.court = QStringLiteral("9th Cir.");
+        judgment.year = 2021;
+        const qint64 id = m_session->publications().create(judgment);
+        openWindow();
+        CitationActions *citations = m_window->citations();
+
+        // Its menu offers each legal form rather than the chosen style.
+        QMenu menu;
+        citations->fillCiteMenu(&menu, 1, [id] { return QList<qint64>{id}; }, true);
+        QStringList offered;
+        for (QAction *action : menu.actions())
+            offered << action->text();
+        QVERIFY2(offered.contains(QStringLiteral("Copy citation (Bluebook)")), qPrintable(offered.join(u'|')));
+        QVERIFY(offered.contains(QStringLiteral("Copy citation (OSCOLA)")));
+        QVERIFY(!offered.join(u'|').contains(QStringLiteral("Harvard")));
+
+        menu.findChild<QAction *>(QStringLiteral("copyBluebook"))->trigger();
+        QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("Sample v. Example County Board, 12 F.4th 345 (9th Cir. 2021)"));
+        QVERIFY(QApplication::clipboard()->mimeData()->html().contains(QStringLiteral("<i>Sample v. Example County Board</i>")));
+        menu.findChild<QAction *>(QStringLiteral("copyOscola"))->trigger();
+        QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("Sample v Example County Board [2021] 12 F.4th 345 (9th Cir.)"));
+    }
+
     void copyingAReferencePutsItOnTheClipboard()
     {
         const qint64 id = addCitable(QStringLiteral("Dent"), QStringLiteral("Carla"), QStringLiteral("Why Do Models Fail"), 2019);

@@ -66,6 +66,9 @@ struct TextLine {
     QString text;
     QRectF rect;
     QList<QRectF> chars;
+    // How it's set, which tells a heading or a caption from a sentence that happens to start a line.
+    double size = 0;   // The type's size in points, on average.
+    bool bold = false; // Most of it in a bold face.
 };
 
 // A highlight, underline, note or area to write into a copy of a document. Rectangles are in points in the page's

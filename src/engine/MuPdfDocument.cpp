@@ -23,6 +23,15 @@ namespace {
     throw EngineError(message.toStdString());
 }
 
+// Many fonts only say they're bold in their names, such as "Times-Bold" or "MinionPro-Semibold".
+bool boldByName(const char *name)
+{
+    if (!name)
+        return false;
+    const QByteArray lower = QByteArray(name).toLower();
+    return lower.contains("bold") || lower.contains("black") || lower.contains("heavy");
+}
+
 QByteArray takeBuffer(fz_context *ctx, fz_buffer *buffer)
 {
     if (!buffer)
@@ -573,6 +582,9 @@ public:
             for (fz_stext_line *line = block->u.t.first_line; line; line = line->next) {
                 TextLine out;
                 out.rect = QRectF(line->bbox.x0, line->bbox.y0, line->bbox.x1 - line->bbox.x0, line->bbox.y1 - line->bbox.y0);
+                double sizes = 0;
+                int letters = 0;
+                int boldLetters = 0;
                 for (fz_stext_char *ch = line->first_char; ch; ch = ch->next) {
                     const QString unit = QString::fromUcs4(reinterpret_cast<const char32_t *>(&ch->c), 1);
                     const QRectF box = rectFrom(ch->quad);
@@ -580,6 +592,16 @@ public:
                         out.text += unit.at(i);
                         out.chars << box;
                     }
+                    if (ch->c > ' ') {
+                        sizes += ch->size;
+                        ++letters;
+                        if (ch->font && (fz_font_is_bold(m_ctx, ch->font) || boldByName(fz_font_name(m_ctx, ch->font))))
+                            ++boldLetters;
+                    }
+                }
+                if (letters > 0) {
+                    out.size = sizes / letters;
+                    out.bold = boldLetters * 2 > letters;
                 }
                 if (!out.text.trimmed().isEmpty())
                     lines << out;
