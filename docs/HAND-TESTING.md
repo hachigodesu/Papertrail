@@ -110,3 +110,27 @@ What its tests can't vouch for. The packages are on the release's page.
 
 - **Upgrading:** opening a library from 1.0.2 adds case law to it, after a backup in its `backups` folder, keeping every publication, file, tag, collection, highlight and note. 1.0.2 can't open it afterwards.
 - **The release:** the tag's workflow takes each package from the commit's own CI runs rather than building them again.
+
+## For 1.2.0
+
+What its tests can't vouch for. The packages are on the release's page.
+
+**Reader**
+
+- **Smart Jump from contents:** in a real book whose contents have no links, Ctrl+click a chapter, a section and an appendix in the contents. Each preview shows its heading, not the contents again, and Go there goes to it. In a book whose printed page 1 comes well after the cover, it still finds the right chapter.
+- **Smart Jump to the thing itself:** a mention of an appendix or section far from it (such as "Appendix E" on page 8 of a 200-page book) previews the appendix, not its line in the contents. Figures and tables listed in a list of figures still go to their captions. A section's name repeated at the top of each page doesn't win over its heading.
+- **Bookmarks:** Ctrl+B, the page's right-click menu and the side panel's button each add one. Renaming with F2 or a slow second click, deleting with Delete, and going there by double-click. They're listed under Bookmarks in Ctrl+G. In an EPUB, a bookmark still goes to the same words after changing the text size.
+- **Full screen:** F11 from a document and from two side by side. Escape leaves, but first clears a selection or stops drawing an area. Ctrl+F, Ctrl+G and Ctrl+W still work while it's on. Going to the library tab leaves it. The window comes back maximized if it was.
+- **Turning pages:** Ctrl+R and Ctrl+Shift+R on a PDF and a DjVu file, in each layout. Highlights, selections, search matches, areas and links all stay on the right words; drawing an area and Ctrl+clicking work on a turned page; thumbnails and Smart Jump previews are turned too. The document opens turned the same way next time. An EPUB says it can't be turned.
+- **Forward:** after following a link or contents entry and going back, Alt+Right, the → button and a mouse's forward button go forward again.
+
+**Library**
+
+- **Related papers:** with lookups online, a paper with a DOI shows its references and citing papers. Those in your library are marked in bold, double-click shows them, and Add to library adds others without a file. A paper without a DOI, and lookups offline, each say why there's nothing. Refresh asks again.
+- **Reading at a glance:** right-click the list's header to show Rating, Last opened and Progress. Sorting by each from the Sort box and by clicking the header. The Rating filter, and Opened in the last 30 days under Read status, which sorts newest first. Progress follows reading a document further, and a column layout from 1.1 is kept.
+- **Show its articles:** an issue whose title is inside another's shows only its own articles, with a chip by the search box that clears it. Saving the search and showing it again shows the same issue's.
+
+**Elsewhere**
+
+- **Upgrading:** opening a library from 1.1.0 adds bookmarks and related papers to it, after a backup in its `backups` folder. 1.1.0 can't open it afterwards.
+- **Exporting** a library with bookmarks and importing it on another computer brings them.

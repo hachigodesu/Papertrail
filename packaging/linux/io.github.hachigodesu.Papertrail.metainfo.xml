@@ -59,6 +59,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.2.0" date="2026-11-10">
+      <description>
+        <p>Related papers from OpenAlex, Smart Jump from a table of contents and to the heading itself, bookmarks, full screen, turning pages, forward history, sorting and filtering by rating and by when something was last read, and an issue's articles shown exactly.</p>
+      </description>
+    </release>
     <release version="1.1.0" date="2026-11-10">
       <description>
         <p>Smart Jump to the figures, tables, equations and references a document mentions, its contents at Ctrl+G, two documents side by side, areas of a page kept as highlights, case law cited in the Bluebook's or OSCOLA's form, references imported from BibTeX and RIS, and new retractions pointed out.</p>

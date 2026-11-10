@@ -496,17 +496,48 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
                                              qint64 offset, int limit)
 {
     const QByteArray clause = searchClause(filter);
-    const ListQuery query = buildListQuery(filter, sort, clause, anyHidden(), m_matchesBeyondDetails);
-    auto select = m_db.prepare(
+    const QByteArray columns =
         "SELECT p.id, p.type, p.title, p.authors_display, p.year, p.container_title, p.read_status, "
         "p.needs_review, coalesce(p.parent_id, p.id), CASE WHEN p.parent_id IS NULL THEN NULL ELSE p.page_start END, "
         "p.volume, p.issue, p.month, p.rating, CASE WHEN p.parent_id IS NULL THEN NULL ELSE p.page_end END, "
         "(SELECT CASE WHEN max(kind = 'retraction') THEN 'retraction' WHEN max(kind = 'partial_retraction') THEN 'partial_retraction' "
-        "WHEN max(kind IN ('withdrawal', 'removal')) THEN 'withdrawal' END FROM publication_notice WHERE publication_id = p.id)"
-        + query.sql + " LIMIT ? OFFSET ?");
-    bindAll(*select, query.bindings);
-    select->bind(int(query.bindings.size()) + 1, limit);
-    select->bind(int(query.bindings.size()) + 2, offset);
+        "WHEN max(kind IN ('withdrawal', 'removal')) THEN 'withdrawal' END FROM publication_notice WHERE publication_id = p.id)";
+
+    // Each part of the page, as SQL from FROM on, its bindings, and how many rows from where.
+    struct Part {
+        QByteArray sql;
+        QList<Binding> bindings;
+        qint64 offset = 0;
+        int limit = 0;
+    };
+    QList<Part> parts;
+    if (sort.field == SortField::LastOpened) {
+        // Sorting everything by when it was opened means looking each one up, which is slow at 100,000. Only those
+        // opened have a time, so they come first through the index on it, and then everything else by title.
+        const Conditions c = buildConditions(filter, clause, anyHidden());
+        QByteArray where = c.whereClause();
+        where += where.isEmpty() ? " WHERE " : " AND ";
+        const QByteArray opened = " FROM reading_state r JOIN publication p ON p.id = r.publication_id" + where
+            + "r.last_opened IS NOT NULL";
+        auto count = m_db.prepare("SELECT count(*)" + opened);
+        bindAll(*count, c.bindings);
+        count->step();
+        const qint64 openedCount = count->int64At(0);
+        const QByteArray direction = sort.ascending ? " ASC" : " DESC";
+        if (offset < openedCount)
+            parts << Part{opened + " ORDER BY r.last_opened" + direction + ", p.title_sort ASC, p.id ASC", c.bindings, offset,
+                          int(qMin<qint64>(limit, openedCount - offset))};
+        const int rest = limit - (parts.isEmpty() ? 0 : parts.first().limit);
+        if (rest > 0) {
+            parts << Part{" FROM publication p" + where
+                              + "p.id NOT IN (SELECT publication_id FROM reading_state WHERE last_opened IS NOT NULL)"
+                              " ORDER BY p.title_sort ASC, p.id ASC",
+                          c.bindings, qMax<qint64>(0, offset - openedCount), rest};
+        }
+    } else {
+        const ListQuery query = buildListQuery(filter, sort, clause, anyHidden(), m_matchesBeyondDetails);
+        parts << Part{query.sql, query.bindings, offset, limit};
+    }
 
     QList<PublicationSummary> rows;
     QList<qint64> fileOwners;
@@ -515,25 +546,31 @@ QList<PublicationSummary> LibraryQuery::page(const PublicationFilter &filter, co
     rows.reserve(limit);
     fileOwners.reserve(limit);
     firstPages.reserve(limit);
-    while (select->step()) {
-        PublicationSummary row;
-        row.id = select->int64At(0);
-        row.type = publicationTypeFromDb(select->textAt(1)).value_or(PublicationType::Other);
-        row.title = select->textAt(2);
-        row.authors = select->textAt(3);
-        row.year = select->optIntAt(4);
-        row.containerTitle = select->textAt(5);
-        row.readStatus = readStatusFromDb(select->textAt(6)).value_or(ReadStatus::Unread);
-        row.needsReview = select->intAt(7) != 0;
-        fileOwners << select->int64At(8);
-        firstPages << select->optIntAt(9).value_or(0);
-        row.volume = select->textAt(10);
-        row.issue = select->textAt(11);
-        row.month = select->optIntAt(12);
-        row.rating = select->optIntAt(13);
-        lastPages << select->optIntAt(14).value_or(0);
-        row.coverNotice = select->textAt(15);
-        rows << row;
+    for (const Part &part : std::as_const(parts)) {
+        auto select = m_db.prepare(columns + part.sql + " LIMIT ? OFFSET ?");
+        bindAll(*select, part.bindings);
+        select->bind(int(part.bindings.size()) + 1, part.limit);
+        select->bind(int(part.bindings.size()) + 2, part.offset);
+        while (select->step()) {
+            PublicationSummary row;
+            row.id = select->int64At(0);
+            row.type = publicationTypeFromDb(select->textAt(1)).value_or(PublicationType::Other);
+            row.title = select->textAt(2);
+            row.authors = select->textAt(3);
+            row.year = select->optIntAt(4);
+            row.containerTitle = select->textAt(5);
+            row.readStatus = readStatusFromDb(select->textAt(6)).value_or(ReadStatus::Unread);
+            row.needsReview = select->intAt(7) != 0;
+            fileOwners << select->int64At(8);
+            firstPages << select->optIntAt(9).value_or(0);
+            row.volume = select->textAt(10);
+            row.issue = select->textAt(11);
+            row.month = select->optIntAt(12);
+            row.rating = select->optIntAt(13);
+            lastPages << select->optIntAt(14).value_or(0);
+            row.coverNotice = select->textAt(15);
+            rows << row;
+        }
     }
 
     // Read afterwards rather than joined, so it only ever costs one small lookup per row shown.

@@ -490,6 +490,18 @@ private slots:
         QCOMPARE(newest.mid(0, 3),
                  (QStringList{QStringLiteral("Neural Bridges"), QStringLiteral("Ceramic Thesis"), QStringLiteral("Old Beams")}));
         QCOMPARE(newest.size(), 6);
+        // Pages, which take those opened first and the rest after, follow the same order without repeating or skipping.
+        for (const bool ascending : {false, true}) {
+            QList<qint64> paged;
+            for (qint64 offset = 0;; offset += 2) {
+                const QList<PublicationSummary> rows = m_query->page({}, {SortField::LastOpened, ascending}, offset, 2);
+                if (rows.isEmpty())
+                    break;
+                for (const PublicationSummary &row : rows)
+                    paged << row.id;
+            }
+            QCOMPARE(paged, m_query->ids({}, {SortField::LastOpened, ascending}));
+        }
         const QStringList oldest = titles({}, {SortField::LastOpened, true});
         QCOMPARE(oldest.mid(0, 3),
                  (QStringList{QStringLiteral("Old Beams"), QStringLiteral("Ceramic Thesis"), QStringLiteral("Neural Bridges")}));

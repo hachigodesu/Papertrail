@@ -3,9 +3,11 @@
 #include "core/db/Database.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
+#include "core/repo/ReadingStateRepository.h"
 #include "core/repo/TagRepository.h"
 
 #include <QCryptographicHash>
+#include <QJsonObject>
 #include <QRandomGenerator>
 #include <QStringList>
 
@@ -109,6 +111,12 @@ public:
             if (!p.parentId && !chance(4)) {
                 addFile(id, i);
                 ++stats.files;
+            }
+            // About one in ten has been opened, at some time in the last two years.
+            if (chance(10)) {
+                ReadingStateRepository(m_db).setPlaceFor(
+                    id, QStringLiteral("pdf"), QJsonObject{{QStringLiteral("page"), between(0, 300)}},
+                    1730000000000LL + qint64(between(0, 63000000)) * 1000);
             }
         }
         transaction.commit();
@@ -260,6 +268,9 @@ private:
         const int status = between(1, 100);
         p.readStatus = status <= 70 ? ReadStatus::Unread : status <= 80 ? ReadStatus::Reading : ReadStatus::Read;
         p.needsReview = chance(3);
+        // About one in five rated, as a reader rates what matters to them.
+        if (chance(20))
+            p.rating = between(1, 5);
         return p;
     }
 

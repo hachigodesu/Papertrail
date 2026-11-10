@@ -117,11 +117,20 @@ private slots:
         add("everything, newest first", {}, {SortField::Year, false});
         add("everything, oldest first", {}, {SortField::Year, true});
         add("everything, recently added", {}, {SortField::Added, false});
+        add("everything, best rated", {}, {SortField::Rating, false});
+        add("everything, last opened", {}, {SortField::LastOpened, false});
+        PublicationFilter rated;
+        rated.ratings = {4, 5};
+        add("rated 4 or 5", rated);
+        PublicationFilter recent;
+        recent.openedSince = 1760000000000LL;
+        add("opened recently, newest first", recent, {SortField::LastOpened, false});
 
         PublicationFilter articles;
         articles.tabTypes = typesForTab(LibraryTab::JournalArticles);
         add("articles tab", articles);
         add("articles tab, newest first", articles, {SortField::Year, false});
+        add("articles tab, best rated", articles, {SortField::Rating, false});
 
         PublicationFilter standards;
         standards.tabTypes = typesForTab(LibraryTab::Standards);

@@ -197,17 +197,20 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Collections within collections,** for courses, projects or chapters of a thesis.
 - **Drag and drop** publications onto a tag or collection in the sidebar.
 - **Changes to many at once:** tag, add to a collection, set read status, look up details, cite, or summarise a whole selection.
-- **Read status, rating and personal notes** for each publication.
+- **Read status, rating and personal notes** for each publication. Sort by rating or by when you last opened something, filter by rating, and pick up what you've opened in the last 30 days. The list can show each publication's rating, when it was last opened and how far you've read.
 - **Edit any detail,** with the fields that suit each kind of publication and suggestions from the rest of your library.
 - **Import references** from Zotero, Mendeley, JabRef, EndNote or anything else that exports BibTeX or RIS, with **File > Import references...**. Each entry is matched to your publications by its file, DOI, ISBN, arXiv number or title, and brings its details, tags and notes. You see what will happen first, and details you've set yourself are never changed.
 - **Journal issues and books split into articles and chapters,** from their table of contents or, for an issue without one, from the DOIs on its pages. Each article opens at its own pages, is searched, tagged and cited on its own, and follows its issue into collections. Right-click an issue and choose **Show its articles** to list them in the library, in the order they're in it.
+- **Related papers:** what a publication cites, and the most cited papers citing it, from OpenAlex, with those already in your library marked and the others ready to add without a file.
 
 ### Reading
 
 - **A built-in reader** with each document in its own tab, opening where you left off.
 - **Continuous, single-page or two-page** layouts, with fit to width, fit to page or any zoom.
 - **Contents and page thumbnails** in a side panel, and the contents at **Ctrl+G**, searched as you type, or with a page number to go to.
-- **Smart Jump:** Ctrl+click a reference such as "Figure 3", "Eq. (4)", "[12]" or "Smith et al. (2020)" for a preview of the figure, equation or reference it points at, even in a PDF without links, then go there and back.
+- **Smart Jump:** Ctrl+click a reference such as "Figure 3", "Eq. (4)", "[12]" or "Smith et al. (2020)" for a preview of the figure, equation or reference it points at, even in a PDF without links, then go there and back. It goes to the heading or caption itself, not a mention of it in the contents, and an entry in a book's table of contents leads to its chapter or section.
+- **Bookmarks** with names of your own, at **Ctrl+B**, listed in the side panel and at Ctrl+G.
+- **Full screen** at F11, **pages turned** a quarter at a time at Ctrl+R, and **back and forward** at Alt+Left and Alt+Right.
 - **Two documents side by side** in one tab, or the same one twice at different pages.
 - **Search within a document,** stepping through every match.
 - **Select and copy text,** across pages.
@@ -274,7 +277,7 @@ To move your library to another computer, use **File > Export library...** rathe
 ## Your files and your privacy
 
 - **Your documents are never changed.** Highlights, notes and details are kept in Papertrail's own library.
-- **Papertrail stays offline until you choose otherwise.** If you turn lookups on, it sends a document's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library, and DOIs to Crossref to check for retractions. It never sends your files, notes or tags. An email address goes to Crossref and OpenAlex only if you enter one, which they ask for to contact heavy users.
+- **Papertrail stays offline until you choose otherwise.** If you turn lookups on, it sends a document's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library, DOIs to Crossref to check for retractions, and a DOI to OpenAlex when you ask for a publication's related papers. It never sends your files, notes or tags. An email address goes to Crossref and OpenAlex only if you enter one, which they ask for to contact heavy users.
 - **Summaries are sent to Anthropic only when you ask,** using your own API key. You're shown what will be sent and an estimated cost first. It sends identifying details such as the DOI and title, and Claude looks for the paper online. Your file is only sent if you choose that, with a confirmation of its own. The key is kept in your system's credential store, never in the library or its exports.
 - **Exports aren't encrypted.** A `.papertrail` file holds your notes and settings, so keep it as private as they are.
 - **There's no telemetry,** and nothing is sent anywhere else.
