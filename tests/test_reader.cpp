@@ -3,6 +3,7 @@
 #include "KindleSamples.h"
 
 #include "core/repo/PublicationMerge.h"
+#include "core/repo/BookmarkRepository.h"
 #include "core/repo/ReadingStateRepository.h"
 #include "ui/DetailsPanel.h"
 #include "ui/DocumentClient.h"
@@ -28,6 +29,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QSignalSpy>
 #include <QStatusBar>
@@ -1447,6 +1449,92 @@ private slots:
         reader->searchBox()->setText(QStringLiteral("findmethird"));
         reader->applySearch();
         QTRY_COMPARE_WITH_TIMEOUT(reader->hitCount(), 1, kWaitMs);
+    }
+
+    void bookmarksAreKeptNamedAndFoundAgain()
+    {
+        openLibraryWindow();
+        const qint64 id = addLinkedPublication(QStringLiteral("reader_doc.pdf"));
+        m_session->files().setHash(m_session->files().filesFor(id).first().id, QStringLiteral("made-up-hash"));
+        ReaderTab *reader = waitForReader(id);
+        QVERIFY(reader && reader->isReady());
+        PageView *view = reader->pageView();
+        view->goToPage(3, 0.5);
+        reader->addBookmark();
+        QListWidget *list = reader->bookmarkList();
+        QCOMPARE(list->count(), 1);
+        QCOMPARE(list->item(0)->text(), QStringLiteral("Page 4"));
+
+        // Renamed in place, and kept.
+        list->item(0)->setText(QStringLiteral("Made-up place"));
+        const QList<Bookmark> kept = BookmarkRepository(m_session->database()).forContents(QStringLiteral("made-up-hash"));
+        QCOMPARE(kept.size(), 1);
+        QCOMPARE(kept.first().label, QStringLiteral("Made-up place"));
+        QCOMPARE(kept.first().page, 3);
+        QVERIFY(kept.first().y > 0);
+
+        // Going there can be come back from.
+        view->goToPage(0);
+        reader->goToBookmark(kept.first().id);
+        QCOMPARE(view->topPage(), 3);
+        QVERIFY(view->canGoBack());
+
+        // It's among what Ctrl+G finds.
+        m_window->goToAction()->trigger();
+        ContentsPopup *popup = reader->contentsPopup();
+        QVERIFY(popup);
+        QTest::keyClicks(popup->searchBox(), QStringLiteral("made-up"));
+        QCOMPARE(popup->list()->topLevelItemCount(), 1);
+        QVERIFY(popup->list()->topLevelItem(0)->text(0).contains(QStringLiteral("Made-up place")));
+        QTest::keyClick(popup->searchBox(), Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->contentsPopup() == nullptr, kWaitMs);
+
+        // Still there next time, and deleted with Delete.
+        m_window->closeDocumentTab(1);
+        reader = waitForReader(id);
+        QVERIFY(reader && reader->isReady());
+        list = reader->bookmarkList();
+        QCOMPARE(list->count(), 1);
+        QCOMPARE(list->item(0)->text(), QStringLiteral("Made-up place"));
+        list->setCurrentRow(0);
+        QAction *remove = nullptr;
+        for (QAction *action : list->actions()) {
+            if (action->shortcut() == QKeySequence(QKeySequence::Delete))
+                remove = action;
+        }
+        QVERIFY(remove);
+        remove->trigger();
+        QCOMPARE(list->count(), 0);
+        QVERIFY(BookmarkRepository(m_session->database()).forContents(QStringLiteral("made-up-hash")).isEmpty());
+    }
+
+    void anEpubsBookmarkFollowsItsTextToANewPage()
+    {
+        openLibraryWindow();
+        const qint64 id = addLinkedPublication(QStringLiteral("reader_nav.epub"));
+        m_session->files().setHash(m_session->files().filesFor(id).first().id, QStringLiteral("made-up-epub-hash"));
+        ReaderTab *reader = waitForReader(id);
+        QVERIFY(reader && reader->isReflowable());
+        PageView *view = reader->pageView();
+        const int pages = view->pageCount();
+        QVERIFY(pages > 3);
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(reader->contents()->topLevelItemCount(), 3, kWaitMs);
+        view->goToPage(pages - 1);
+        QCOMPARE(view->topPage(), pages - 1);
+        reader->addBookmark();
+        BookmarkRepository bookmarks(m_session->database());
+        QTRY_VERIFY_WITH_TIMEOUT(!bookmarks.forContents(QStringLiteral("made-up-epub-hash")).value(0).place.isEmpty(), kWaitMs);
+        const qint64 bookmark = bookmarks.forContents(QStringLiteral("made-up-epub-hash")).first().id;
+
+        // Larger text moves it to a later page, where it's found again.
+        QSignalSpy changed(reader->client(), &DocumentClient::layoutChanged);
+        reader->changeFontSize(+8);
+        QVERIFY(changed.wait(kWaitMs));
+        QTRY_VERIFY_WITH_TIMEOUT(reader->bookmarkPage(bookmark) > pages - 1, kWaitMs);
+        view->goToPage(0);
+        reader->goToBookmark(bookmark);
+        QCOMPARE(view->topPage(), reader->bookmarkPage(bookmark));
     }
 
     void aDocumentOpensWhereItWasLeft()

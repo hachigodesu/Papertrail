@@ -267,6 +267,8 @@ QString describeImport(const ImportReport &report)
                  .arg(report.collectionsAdded)
                  .arg(report.annotationsAdded)
                  .arg(report.annotationsUpdated);
+    if (report.bookmarksAdded > 0)
+        lines << QCoreApplication::translate("LibraryTransfer", "%n bookmark(s) added.", nullptr, int(report.bookmarksAdded));
     if (report.settings.applied > 0)
         lines << QCoreApplication::translate("LibraryTransfer", "%n setting(s) brought in.", nullptr, report.settings.applied);
     if (report.removedAdded > 0)

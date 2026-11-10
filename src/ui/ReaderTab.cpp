@@ -582,6 +582,172 @@ void ReaderTab::buildSidePanel()
     connect(exportButton, &QPushButton::clicked, this, [this] { askToExportAnnotations(); });
     notes->addWidget(exportButton);
     m_side->addTab(m_annotationPanel, tr("Notes"));
+
+    // Bookmarks are named after their page, and renamed by editing them in place.
+    auto *bookmarkPanel = new QWidget(m_side);
+    auto *bookmarks = new QVBoxLayout(bookmarkPanel);
+    bookmarks->setContentsMargins(0, 0, 0, 0);
+    m_bookmarkList = new QListWidget(bookmarkPanel);
+    m_bookmarkList->setAccessibleName(tr("Bookmarks"));
+    m_bookmarkList->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+    m_bookmarkList->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_bookmarkList, &QListWidget::itemActivated, this,
+            [this](QListWidgetItem *item) { goToBookmark(item->data(Qt::UserRole).toLongLong()); });
+    connect(m_bookmarkList, &QListWidget::itemChanged, this, [this](QListWidgetItem *item) {
+        const qint64 id = item->data(Qt::UserRole).toLongLong();
+        const QString label = item->text().simplified();
+        for (Bookmark &bookmark : m_bookmarks) {
+            if (bookmark.id != id || bookmark.label == label)
+                continue;
+            try {
+                BookmarkRepository(m_session.database()).rename(id, label);
+                bookmark.label = label;
+            } catch (const std::exception &error) {
+                emit statusMessage(tr("The bookmark couldn't be renamed: %1").arg(QString::fromUtf8(error.what())));
+            }
+        }
+    });
+    connect(m_bookmarkList, &QListWidget::customContextMenuRequested, this, [this](const QPoint &position) {
+        QListWidgetItem *item = m_bookmarkList->itemAt(position);
+        if (!item)
+            return;
+        m_bookmarkList->setCurrentItem(item);
+        const qint64 id = item->data(Qt::UserRole).toLongLong();
+        QMenu menu(this);
+        menu.addAction(tr("Go there"), this, [this, id] { goToBookmark(id); });
+        menu.addAction(tr("Rename"), this, [this, item] { m_bookmarkList->editItem(item); });
+        menu.addAction(tr("Delete"), this, [this] { deleteChosenBookmark(); });
+        menu.exec(m_bookmarkList->viewport()->mapToGlobal(position));
+    });
+    auto *deleteBookmark = new QAction(tr("Delete"), m_bookmarkList);
+    deleteBookmark->setShortcut(QKeySequence::Delete);
+    deleteBookmark->setShortcutContext(Qt::WidgetShortcut);
+    connect(deleteBookmark, &QAction::triggered, this, [this] { deleteChosenBookmark(); });
+    m_bookmarkList->addAction(deleteBookmark);
+    bookmarks->addWidget(m_bookmarkList, 1);
+    auto *addButton = new QPushButton(tr("Bookmark this place (Ctrl+B)"), bookmarkPanel);
+    connect(addButton, &QPushButton::clicked, this, &ReaderTab::addBookmark);
+    bookmarks->addWidget(addButton);
+    m_side->addTab(bookmarkPanel, tr("Bookmarks"));
+}
+
+void ReaderTab::loadBookmarks()
+{
+    try {
+        m_bookmarks = BookmarkRepository(m_session.database()).forContents(m_contentHash);
+    } catch (const std::exception &error) {
+        m_bookmarks.clear();
+        emit statusMessage(tr("The bookmarks couldn't be read: %1").arg(QString::fromUtf8(error.what())));
+    }
+    locateBookmarks();
+}
+
+// A fixed page's bookmark is where it was. A reflowable one's place is looked for in the text as it's laid out now.
+void ReaderTab::locateBookmarks()
+{
+    m_bookmarkPages.clear();
+    ++m_bookmarkRound;
+    for (const Bookmark &bookmark : std::as_const(m_bookmarks)) {
+        m_bookmarkPages.insert(bookmark.id, bookmark.page);
+        if (m_reflowable && !bookmark.place.isEmpty())
+            m_client->requestPlacePage(-(m_bookmarkRound * kTokenRound + bookmark.id), bookmark.place);
+    }
+    refreshBookmarkList();
+}
+
+int ReaderTab::bookmarkPage(qint64 id) const
+{
+    return m_bookmarkPages.value(id, -1);
+}
+
+void ReaderTab::refreshBookmarkList()
+{
+    const QSignalBlocker blocker(m_bookmarkList);
+    const qint64 chosen = m_bookmarkList->currentItem() ? m_bookmarkList->currentItem()->data(Qt::UserRole).toLongLong() : 0;
+    m_bookmarkList->clear();
+    QList<Bookmark> ordered = m_bookmarks;
+    std::stable_sort(ordered.begin(), ordered.end(), [this](const Bookmark &a, const Bookmark &b) {
+        const int pageA = bookmarkPage(a.id);
+        const int pageB = bookmarkPage(b.id);
+        return pageA != pageB ? pageA < pageB : a.y < b.y;
+    });
+    const int first = m_view->firstShownPage();
+    for (const Bookmark &bookmark : std::as_const(ordered)) {
+        const int page = bookmarkPage(bookmark.id);
+        // Shown as text, so whatever it's called stays text.
+        auto *item = new QListWidgetItem(bookmark.label.isEmpty() ? tr("Page %1").arg(page - first + 1) : bookmark.label);
+        item->setData(Qt::UserRole, bookmark.id);
+        item->setFlags(item->flags() | Qt::ItemIsEditable);
+        item->setToolTip(tr("Page %1. Rename with F2, or delete with Delete.").arg(page - first + 1));
+        if (!pageIsShown(page))
+            item->setForeground(palette().color(QPalette::PlaceholderText)); // Outside the article shown.
+        m_bookmarkList->addItem(item);
+        if (bookmark.id == chosen)
+            m_bookmarkList->setCurrentItem(item);
+    }
+}
+
+void ReaderTab::addBookmark()
+{
+    if (!m_ready)
+        return;
+    Bookmark bookmark;
+    bookmark.publicationId = m_publicationId;
+    bookmark.contentHash = m_contentHash;
+    bookmark.format = m_format;
+    bookmark.page = m_view->topPage();
+    bookmark.y = m_reflowable ? 0 : m_view->topOffset() * m_view->pageSize(bookmark.page).height();
+    bookmark.label = tr("Page %1").arg(bookmark.page - m_view->firstShownPage() + 1);
+    try {
+        BookmarkRepository(m_session.database()).create(bookmark);
+    } catch (const std::exception &error) {
+        emit statusMessage(tr("The bookmark couldn't be kept: %1").arg(QString::fromUtf8(error.what())));
+        return;
+    }
+    m_bookmarks << bookmark;
+    m_bookmarkPages.insert(bookmark.id, bookmark.page);
+    // A reflowable page's place is asked for, and kept when it arrives. The one the reader has may be for the page
+    // before, since it asks for each page's as the view moves.
+    if (m_reflowable)
+        m_client->requestBookmark(bookmark.page);
+    refreshBookmarkList();
+    for (int row = 0; row < m_bookmarkList->count(); ++row) {
+        if (m_bookmarkList->item(row)->data(Qt::UserRole).toLongLong() == bookmark.id)
+            m_bookmarkList->setCurrentRow(row);
+    }
+    emit statusMessage(tr("Bookmarked. It's in the side panel, under Bookmarks."));
+}
+
+void ReaderTab::goToBookmark(qint64 id)
+{
+    for (const Bookmark &bookmark : std::as_const(m_bookmarks)) {
+        if (bookmark.id != id)
+            continue;
+        const int page = bookmarkPage(id);
+        if (page < 0)
+            return;
+        ensurePageShown(page);
+        m_view->goToPoint(page, bookmark.y);
+        m_view->setFocus();
+        return;
+    }
+}
+
+void ReaderTab::deleteChosenBookmark()
+{
+    QListWidgetItem *item = m_bookmarkList->currentItem();
+    if (!item)
+        return;
+    const qint64 id = item->data(Qt::UserRole).toLongLong();
+    try {
+        BookmarkRepository(m_session.database()).remove(id);
+    } catch (const std::exception &error) {
+        emit statusMessage(tr("The bookmark couldn't be deleted: %1").arg(QString::fromUtf8(error.what())));
+        return;
+    }
+    m_bookmarks.removeIf([id](const Bookmark &bookmark) { return bookmark.id == id; });
+    m_bookmarkPages.remove(id);
+    refreshBookmarkList();
 }
 
 void ReaderTab::connectClient()
@@ -620,6 +786,33 @@ void ReaderTab::connectClient()
     connect(m_client, &DocumentClient::bookmarkReady, this, [this](int page, const QString &bookmark) {
         m_bookmark = bookmark;
         m_bookmarkPage = page;
+        // A bookmark made before its page's place arrived gets it now.
+        for (Bookmark &kept : m_bookmarks) {
+            if (kept.place.isEmpty() && kept.page == page && m_reflowable && !bookmark.isEmpty()) {
+                kept.place = bookmark;
+                try {
+                    auto update = m_session.database().prepare("UPDATE bookmark SET place = ? WHERE id = ?");
+                    update->bind(1, bookmark);
+                    update->bind(2, kept.id);
+                    update->step();
+                } catch (const std::exception &) {
+                    // It keeps its page, which is near enough until the layout changes.
+                }
+            }
+        }
+    });
+    connect(m_client, &DocumentClient::placeFound, this, [this](qint64 token, int page) {
+        const qint64 ticket = -token;
+        if (ticket / kTokenRound != m_bookmarkRound || page < 0)
+            return;
+        const qint64 id = ticket % kTokenRound;
+        m_bookmarkPages.insert(id, page);
+        try {
+            BookmarkRepository(m_session.database()).setPage(id, page);
+        } catch (const std::exception &) {
+            // Only a hint for next time.
+        }
+        refreshBookmarkList();
     });
     connect(m_client, &DocumentClient::bookmarkResolved, this, [this](int page) {
         m_view->goToPage(page);
@@ -636,6 +829,7 @@ void ReaderTab::connectClient()
         m_client->requestOutline();
         updatePageBox();
         locateAnnotations();
+        locateBookmarks();
         if (!m_activeSearch.isEmpty()) {
             const QString text = m_activeSearch;
             m_activeSearch.clear();
@@ -1064,6 +1258,19 @@ void ReaderTab::showContentsPopup()
         entries << entry;
     }
     const int shown = m_view->pageCount() > 0 ? m_view->lastShownPage() - first + 1 : 0;
+    for (const Bookmark &bookmark : std::as_const(m_bookmarks)) {
+        const int at = bookmarkPage(bookmark.id);
+        if (at < 0 || !pageIsShown(at))
+            continue;
+        OutlineEntry entry;
+        entry.title = bookmark.label.isEmpty() ? tr("Page %1").arg(at - first + 1) : bookmark.label;
+        entry.parents = tr("Bookmarks");
+        entry.depth = 1;
+        entry.page = at;
+        entry.y = bookmark.y;
+        entry.pageLabel = QString::number(at - first + 1);
+        entries << entry;
+    }
     m_contentsPopup = new ContentsPopup(entries, current, shown, this);
     connect(m_contentsPopup, &ContentsPopup::entryChosen, this, [this](int to, double y) {
         ensurePageShown(to);
@@ -1099,6 +1306,7 @@ void ReaderTab::loadAnnotations()
         emit statusMessage(tr("The highlights couldn't be read: %1").arg(QString::fromUtf8(error.what())));
     }
     locateAnnotations();
+    loadBookmarks();
 }
 
 // Fixed pages have what they need. Text that moves is looked for afresh, in the background.
@@ -1762,6 +1970,7 @@ void ReaderTab::askToEditNote(qint64 id)
 void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
 {
     menu->addSeparator();
+    menu->addAction(tr("Bookmark this place"), this, &ReaderTab::addBookmark);
     if (m_view->hasSelection()) {
         QMenu *highlight = menu->addMenu(tr("Highlight"));
         const QStringList names = colourNames();

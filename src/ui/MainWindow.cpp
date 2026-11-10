@@ -1037,6 +1037,10 @@ void MainWindow::buildMenus()
         if (ReaderTab *reader = activeReader())
             reader->rotateBy(-90);
     });
+    view->addAction(tr("Add &bookmark"), QKeySequence(Qt::CTRL | Qt::Key_B), this, [this] {
+        if (ReaderTab *reader = activeReader())
+            reader->addBookmark();
+    });
     m_fullScreen = view->addAction(tr("&Full screen"));
     m_fullScreen->setShortcut(QKeySequence(Qt::Key_F11));
     m_fullScreen->setCheckable(true);

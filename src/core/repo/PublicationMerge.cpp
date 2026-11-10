@@ -86,6 +86,7 @@ void mergePublications(Database &db, qint64 keepId, qint64 otherId, const QStrin
     move("INSERT OR IGNORE INTO collection_publication (collection_id, publication_id, added_at) "
          "SELECT collection_id, ?1, added_at FROM collection_publication WHERE publication_id = ?2");
     move("UPDATE annotation SET publication_id = ?1 WHERE publication_id = ?2");
+    move("UPDATE bookmark SET publication_id = ?1 WHERE publication_id = ?2");
     move("UPDATE metadata_provenance SET publication_id = ?1 WHERE publication_id = ?2");
     move("UPDATE publication SET parent_id = ?1 WHERE parent_id = ?2");
 
@@ -139,6 +140,12 @@ qint64 separateFormat(Database &db, qint64 publicationId, const QString &format)
     files.link(publicationId, staying.first().id, true);
 
     reading.moveFormat(publicationId, newId, format);
+    // Bookmarks belong to a format's contents, so they go with it.
+    auto bookmarks = db.prepare("UPDATE bookmark SET publication_id = ?1 WHERE publication_id = ?2 AND format = ?3");
+    bookmarks->bind(1, newId);
+    bookmarks->bind(2, publicationId);
+    bookmarks->bind(3, format);
+    bookmarks->step();
     publications.recordProvenance(newId, {QStringLiteral("separated"), QStringLiteral("manual"), std::nullopt, QString(), format, 0});
     transaction.commit();
     return newId;

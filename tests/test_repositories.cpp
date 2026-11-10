@@ -4,6 +4,7 @@
 #include "core/query/LibraryQuery.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/FileRepository.h"
+#include "core/repo/BookmarkRepository.h"
 #include "core/repo/CollectionRepository.h"
 #include "core/repo/PublicationMerge.h"
 #include "core/repo/PublicationRepository.h"
@@ -974,8 +975,24 @@ private slots:
         ReadingStateRepository reading(*m_db);
         reading.setPlaceFor(keep, QStringLiteral("pdf"), QJsonObject{{QStringLiteral("page"), 12}}, 5);
         reading.setPlaceFor(other, QStringLiteral("epub"), QJsonObject{{QStringLiteral("page"), 30}}, 9);
+        BookmarkRepository bookmarks(*m_db);
+        Bookmark inPdf;
+        inPdf.publicationId = keep;
+        inPdf.contentHash = QStringLiteral("made-up-pdf");
+        inPdf.format = QStringLiteral("pdf");
+        inPdf.page = 4;
+        inPdf.label = QStringLiteral("Made-up place");
+        bookmarks.create(inPdf);
+        Bookmark inEpub = inPdf;
+        inEpub.uuid.clear();
+        inEpub.publicationId = other;
+        inEpub.contentHash = QStringLiteral("made-up-epub");
+        inEpub.format = QStringLiteral("epub");
+        inEpub.place = QStringLiteral("made-up place in the text");
+        bookmarks.create(inEpub);
 
         mergePublications(*m_db, keep, other, QStringLiteral("manual"));
+        QCOMPARE(bookmarks.forPublication(keep).size(), 2);
 
         QVERIFY(!m_publications->get(other).has_value());
         const Publication merged = *m_publications->get(keep);
@@ -1003,6 +1020,15 @@ private slots:
         QVERIFY(m_publications->get(separated)->uuid != merged.uuid);
         QCOMPARE(m_tags->tagsFor(separated).size(), 2);
         QCOMPARE(reading.placeFor(separated, QStringLiteral("epub")).value(QStringLiteral("page")).toInt(), 30);
+        // Each bookmark stays with its format.
+        QCOMPARE(bookmarks.forPublication(keep).size(), 1);
+        QCOMPARE(bookmarks.forPublication(keep).first().format, QStringLiteral("pdf"));
+        QCOMPARE(bookmarks.forPublication(separated).size(), 1);
+        QCOMPARE(bookmarks.forContents(QStringLiteral("made-up-epub")).first().place, QStringLiteral("made-up place in the text"));
+        bookmarks.rename(inPdf.id, QStringLiteral("  Renamed   place "));
+        QCOMPARE(bookmarks.get(inPdf.id)->label, QStringLiteral("Renamed place"));
+        bookmarks.remove(inPdf.id);
+        QVERIFY(!bookmarks.get(inPdf.id));
         QVERIFY(reading.placeFor(keep, QStringLiteral("epub")).isEmpty());
 
         // It can't be separated from its last format.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/repo/AnnotationRepository.h"
+#include "core/repo/BookmarkRepository.h"
 #include "ui/ContentsPopup.h"
 #include "ui/DocumentClient.h"
 #include "ui/PageView.h"
@@ -104,6 +105,13 @@ public:
     void changeFontSize(double change);
     // Turns the pages clockwise by this much, kept with the place. Only fixed pages can be turned.
     void rotateBy(int degrees);
+
+    // Keeps the place at the top of the view as a bookmark, named after its page.
+    void addBookmark();
+    void goToBookmark(qint64 id);
+    QListWidget *bookmarkList() const { return m_bookmarkList; }
+    // The page each bookmark is on now, by id. A reflowable document's are found again after each change of layout.
+    int bookmarkPage(qint64 id) const;
     void setSidePanelVisible(bool visible);
     // Full screen: leaves only the pages, and puts the toolbar and side panel back as they were afterwards.
     void setChromeHidden(bool hidden);
@@ -183,6 +191,10 @@ private:
     void updateZoomBox();
     void restorePlace();
     QImage turned(const QImage &picture) const; // A picture of part of a page, turned as the pages are.
+    void loadBookmarks();
+    void locateBookmarks();
+    void refreshBookmarkList();
+    void deleteChosenBookmark();
     void onOutline(const QList<papertrail::ui::ReaderOutlineItem> &items);
     void onSearchHits(int page, const QList<QRectF> &rects);
     void updateSearchStatus();
@@ -290,6 +302,10 @@ private:
 
     QSplitter *m_splitter = nullptr;
     QTabWidget *m_side = nullptr;
+    QListWidget *m_bookmarkList = nullptr;
+    QList<core::Bookmark> m_bookmarks;
+    QHash<qint64, int> m_bookmarkPages; // Where each was found, for a reflowable document.
+    qint64 m_bookmarkRound = 0;
     bool m_chromeHidden = false;
     bool m_sideShownBeforeHiding = false;
     QTreeWidget *m_contents = nullptr;

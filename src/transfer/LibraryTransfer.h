@@ -33,6 +33,7 @@ struct ExportReport {
     qint64 tags = 0;
     qint64 collections = 0;
     qint64 annotations = 0;
+    qint64 bookmarks = 0;
     qint64 summaries = 0;
     qint64 removed = 0;
     bool cancelled = false;
@@ -53,6 +54,7 @@ struct Bundle {
     QJsonArray collections;
     QJsonArray savedSearches;
     QJsonArray annotations;
+    QJsonArray bookmarks; // From 1.2.0 on. An export from before has none.
     QJsonArray readingStates;
     QJsonArray provenance;
     QJsonArray summaries;
@@ -73,7 +75,7 @@ enum class ImportMode {
 struct ImportParts {
     bool details = true;      // Publications, their read status, ratings, notes, summaries and history.
     bool tags = true;         // Tags, collections and saved searches.
-    bool annotations = true;  // Highlights and notes in documents.
+    bool annotations = true;  // Highlights and notes in documents, and bookmarks.
     bool readingPlaces = true;
     bool settings = true;
 };
@@ -96,6 +98,7 @@ struct ImportReport {
     qint64 collectionsAdded = 0;
     qint64 annotationsAdded = 0;
     qint64 annotationsUpdated = 0;
+    qint64 bookmarksAdded = 0;
     qint64 summariesAdded = 0;
     qint64 readingPlaces = 0;
     qint64 removedAdded = 0; // Files to keep out, as they were removed on the other computer.

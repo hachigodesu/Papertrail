@@ -398,6 +398,24 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
         });
     report.annotations = annotationArray.size();
 
+    const QJsonArray bookmarkArray = rows(
+        db,
+        "SELECT b.uuid, p.uuid, b.content_hash, b.format, b.page, b.y, b.place, b.label, b.created_at, b.updated_at "
+        "FROM bookmark b JOIN publication p ON p.id = b.publication_id WHERE " PAPERTRAIL_IN_LIBRARY("p") " ORDER BY b.id",
+        [](Statement &s) {
+            return QJsonObject{{QStringLiteral("uuid"), s.textAt(0)},
+                               {QStringLiteral("publication"), s.textAt(1)},
+                               {QStringLiteral("contentHash"), textOrNull(s, 2)},
+                               {QStringLiteral("format"), s.textAt(3)},
+                               {QStringLiteral("page"), s.intAt(4)},
+                               {QStringLiteral("y"), s.doubleAt(5)},
+                               {QStringLiteral("place"), textOrNull(s, 6)},
+                               {QStringLiteral("label"), s.textAt(7)},
+                               {QStringLiteral("createdAt"), double(s.int64At(8))},
+                               {QStringLiteral("updatedAt"), double(s.int64At(9))}};
+        });
+    report.bookmarks = bookmarkArray.size();
+
     const QJsonArray readingArray = rows(
         db,
         "SELECT p.uuid, r.location, r.zoom, r.last_opened FROM reading_state r JOIN publication p ON p.id = r.publication_id "
@@ -467,6 +485,7 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
                      {QStringLiteral("tags"), double(report.tags)},
                      {QStringLiteral("collections"), double(report.collections)},
                      {QStringLiteral("annotations"), double(report.annotations)},
+                     {QStringLiteral("bookmarks"), double(report.bookmarks)},
                      {QStringLiteral("summaries"), double(report.summaries)}}}};
 
     const auto json = [](const QJsonValue &value) {
@@ -480,6 +499,7 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
     zip.add(QStringLiteral("collections.json"), json(collectionArray));
     zip.add(QStringLiteral("saved_searches.json"), json(savedSearchArray));
     zip.add(QStringLiteral("annotations.json"), json(annotationArray));
+    zip.add(QStringLiteral("bookmarks.json"), json(bookmarkArray));
     zip.add(QStringLiteral("reading.json"), json(readingArray));
     zip.add(QStringLiteral("provenance.json"), json(provenanceArray));
     zip.add(QStringLiteral("summaries.json"), json(summaryArray));
@@ -550,6 +570,9 @@ std::optional<Bundle> readBundle(const QByteArray &data, QString *error)
         || !array(QStringLiteral("summaries.json"), bundle.summaries)
         || !array(QStringLiteral("removed.json"), bundle.removed))
         return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
+    // Later parts, which an earlier export doesn't have.
+    if (zip.contains(QStringLiteral("bookmarks.json")) && !array(QStringLiteral("bookmarks.json"), bundle.bookmarks))
+        return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
     if (zip.contains(QStringLiteral("settings.json"))) {
         const std::optional<QByteArray> part = zip.read(QStringLiteral("settings.json"));
         if (!part)
@@ -594,8 +617,10 @@ public:
             importCollections();
             importSavedSearches();
         }
-        if (m_options.parts.annotations)
+        if (m_options.parts.annotations) {
             importAnnotations();
+            importBookmarks();
+        }
         if (m_options.parts.readingPlaces)
             importReadingPlaces();
         if (m_options.parts.details) {
@@ -1096,6 +1121,57 @@ private:
         }
     }
 
+    // ---- Bookmarks, matched by uuid like highlights, and the later change wins.
+    void importBookmarks()
+    {
+        auto existing = m_db.prepare("SELECT id, updated_at FROM bookmark WHERE uuid = ?");
+        auto insert = m_db.prepare("INSERT INTO bookmark (uuid, publication_id, content_hash, format, page, y, place, label, "
+                                   "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        auto update = m_db.prepare("UPDATE bookmark SET label = ?, page = ?, y = ?, place = ?, updated_at = ? WHERE id = ?");
+        for (const QJsonValue &value : m_bundle.bookmarks) {
+            const QJsonObject b = value.toObject();
+            const QString uuid = b.value(QStringLiteral("uuid")).toString();
+            const std::optional<qint64> publication = localPublication(b.value(QStringLiteral("publication")).toString());
+            if (uuid.isEmpty() || !publication)
+                continue;
+            const qint64 updatedAt = int64Value(b.value(QStringLiteral("updatedAt")));
+            const QString label = b.value(QStringLiteral("label")).toString().left(500);
+            const int page = qMax(0, b.value(QStringLiteral("page")).toInt());
+            const double y = qMax(0.0, b.value(QStringLiteral("y")).toDouble());
+            existing->bind(1, uuid);
+            if (existing->step()) {
+                const qint64 id = existing->int64At(0);
+                const qint64 localUpdated = existing->int64At(1);
+                existing->reset();
+                if (updatedAt > localUpdated) {
+                    update->bind(1, label);
+                    update->bind(2, page);
+                    update->bind(3, y);
+                    update->bind(4, textValue(b.value(QStringLiteral("place"))));
+                    update->bind(5, updatedAt);
+                    update->bind(6, id);
+                    update->step();
+                    update->reset();
+                }
+                continue;
+            }
+            existing->reset();
+            insert->bind(1, uuid);
+            insert->bind(2, *publication);
+            insert->bind(3, textValue(b.value(QStringLiteral("contentHash"))));
+            insert->bind(4, b.value(QStringLiteral("format")).toString());
+            insert->bind(5, page);
+            insert->bind(6, y);
+            insert->bind(7, textValue(b.value(QStringLiteral("place"))));
+            insert->bind(8, label);
+            insert->bind(9, int64Value(b.value(QStringLiteral("createdAt"))));
+            insert->bind(10, updatedAt);
+            insert->step();
+            insert->reset();
+            ++m_report.bookmarksAdded;
+        }
+    }
+
     // ---- Reading places
     void importReadingPlaces()
     {
@@ -1252,6 +1328,7 @@ void clearLibrary(Database &db)
     db.exec("DELETE FROM saved_search");
     db.exec("DELETE FROM publication_summary");
     db.exec("DELETE FROM annotation");
+    db.exec("DELETE FROM bookmark");
     db.exec("DELETE FROM reading_state");
     db.exec("DELETE FROM metadata_provenance");
     db.exec("DELETE FROM publication_tag");

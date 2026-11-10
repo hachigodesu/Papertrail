@@ -132,6 +132,8 @@ public:
 
     void requestBookmark(int page);
     void requestPageForBookmark(const QString &bookmark);
+    // Which page a kept place is on now, answered by placeFound with the same token, without going there.
+    void requestPlacePage(qint64 token, const QString &place);
 
     // Looks through every page in the background, starting from `fromPage`, and wrapping round.
     void startSearch(const QString &text, int fromPage);
@@ -166,6 +168,7 @@ signals:
     void located(qint64 token, int part, int page, const QList<QRectF> &rects);
     void bookmarkReady(int page, const QString &bookmark);
     void bookmarkResolved(int page);
+    void placeFound(qint64 token, int page); // -1 if it couldn't be found.
     void searchHits(int page, const QList<QRectF> &rects);
     void searchProgress(int pagesDone, int pageCount);
     void searchFinished();

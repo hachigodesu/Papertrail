@@ -219,6 +219,10 @@ private slots:
         QCOMPARE(to.text("SELECT name FROM collection"), QStringLiteral("Made-Up Project"));
         QCOMPARE(to.scalar("SELECT count(*) FROM collection_publication"), qint64(2));
         QCOMPARE(to.text("SELECT note FROM annotation"), QStringLiteral("A made-up note"));
+        // Bookmarks too, on the same contents and page.
+        QCOMPARE(to.text("SELECT label FROM bookmark"), QStringLiteral("A made-up bookmark"));
+        QCOMPARE(to.scalar("SELECT page FROM bookmark"), qint64(2));
+        QCOMPARE(to.text("SELECT content_hash FROM bookmark"), to.text("SELECT content_hash FROM annotation"));
         // An area drawn over a page comes as one, since its place is carried as it is.
         QVERIFY(AnnotationRepository(*to.db).get(to.scalar("SELECT id FROM annotation"))->isArea());
         QCOMPARE(to.text("SELECT location FROM reading_state"), QStringLiteral("{\"pdf\":{\"page\":3}}"));
@@ -259,12 +263,14 @@ private slots:
         QCOMPARE(again.unchanged, publications);
         QCOMPARE(again.tagsAdded, qint64(0));
         QCOMPARE(again.annotationsAdded, qint64(0));
+        QCOMPARE(again.bookmarksAdded, qint64(0));
         QCOMPARE(to.count(), publications);
         QCOMPARE(to.scalar("SELECT count(*) FROM tag"), tags);
         QCOMPARE(to.scalar("SELECT count(*) FROM publication_tag"), links);
         QCOMPARE(to.scalar("SELECT count(*) FROM metadata_provenance"), history);
         QCOMPARE(to.scalar("SELECT count(*) FROM collection"), qint64(1));
         QCOMPARE(to.scalar("SELECT count(*) FROM annotation"), qint64(1));
+        QCOMPARE(to.scalar("SELECT count(*) FROM bookmark"), qint64(1));
         QCOMPARE(to.scalar("SELECT count(*) FROM saved_search"), qint64(1));
 
         // And back again: the original library knows them all.
@@ -614,6 +620,26 @@ private slots:
         QCOMPARE(to.scalar("SELECT count(*) FROM publication WHERE coalesce(parent_id, id) NOT IN (SELECT publication_id FROM publication_file)"),
                  qint64(0));
         QCOMPARE(to.scalar("SELECT count(*) FROM annotation"), qint64(1));
+        QVERIFY(bundle->bookmarks.isEmpty()); // From before bookmarks.
+        QCOMPARE(to.scalar("SELECT count(*) FROM bookmark"), qint64(0));
+    }
+
+    void anExportWithBookmarksStillImports()
+    {
+        // Made once by 1.2.0, the first with bookmarks, and kept for the same reason.
+        QString error;
+        const std::optional<Bundle> bundle
+            = readBundleFile(QStringLiteral(PAPERTRAIL_TEST_FIXTURES "/transfer/library-v1-bookmarks.papertrail"), &error);
+        QVERIFY2(bundle, qPrintable(error));
+        QCOMPARE(bundle->version, 1);
+        QCOMPARE(bundle->bookmarks.size(), 1);
+        Library to;
+        for (qsizetype i = 0; i < kSamples.size(); ++i)
+            to.put(kSamples.at(i), QStringLiteral("Anywhere/%1").arg(i) + u'.' + QFileInfo(kSamples.at(i)).suffix());
+        const ImportReport report = importBundle(*to.db, *bundle, {});
+        QCOMPARE(report.bookmarksAdded, qint64(1));
+        to.scan();
+        QCOMPARE(to.text("SELECT label FROM bookmark"), QStringLiteral("A made-up bookmark"));
     }
 
     // Writes the fixture above, when asked. Only run by hand, when the format changes in a new version.
@@ -674,6 +700,12 @@ private:
         annotation->bind(1, volume);
         annotation->bind(2, volumeHash);
         annotation->step();
+        auto bookmark = db.prepare("INSERT INTO bookmark (uuid, publication_id, content_hash, format, page, y, label, created_at, "
+                                   "updated_at) VALUES ('66666666-0000-0000-0000-000000000001', ?, ?, 'pdf', 2, 140.5, "
+                                   "'A made-up bookmark', 1, 1)");
+        bookmark->bind(1, volume);
+        bookmark->bind(2, volumeHash);
+        bookmark->step();
         auto place = db.prepare("INSERT INTO reading_state (publication_id, location, zoom, last_opened) VALUES (?, '{\"pdf\":{\"page\":3}}', 1.5, 5)");
         place->bind(1, volume);
         place->step();

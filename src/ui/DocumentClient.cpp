@@ -369,7 +369,9 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
                      ok ? rectsFromJson(reply.value(QStringLiteral("rects"))) : QList<QRectF>());
         break;
     case Kind::Find:
-        if (ok)
+        if (request.token != 0)
+            emit placeFound(request.token, ok ? reply.value(QStringLiteral("page")).toInt(-1) : -1);
+        else if (ok)
             emit bookmarkResolved(reply.value(QStringLiteral("page")).toInt());
         break;
     case Kind::Search:
@@ -675,6 +677,16 @@ void DocumentClient::requestPageForBookmark(const QString &bookmark)
     request.kind = Kind::Find;
     request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("find")}, {QStringLiteral("bookmark"), bookmark}};
     m_urgent << request;
+    pump();
+}
+
+void DocumentClient::requestPlacePage(qint64 token, const QString &place)
+{
+    Request request;
+    request.kind = Kind::Find;
+    request.token = token;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("find")}, {QStringLiteral("bookmark"), place}};
+    m_background << request;
     pump();
 }
 
