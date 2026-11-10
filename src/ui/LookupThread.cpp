@@ -48,6 +48,18 @@ void LookupThread::findRelated(qint64 publicationId, bool refresh)
     }
 }
 
+void LookupThread::setKey(const QString &provider, const QString &key)
+{
+    QMutexLocker lock(&m_keysLock);
+    m_keys.insert(provider, key);
+}
+
+QString LookupThread::keyFor(const QString &provider) const
+{
+    QMutexLocker lock(&m_keysLock);
+    return m_keys.value(provider);
+}
+
 void LookupThread::stopLookups()
 {
     m_kickWaiting = false;
@@ -73,6 +85,10 @@ void LookupThread::run()
     connect(&engine, &LookupEngine::publicationChanged, this, &LookupThread::publicationChanged);
     connect(&engine, &LookupEngine::reviewChanged, this, &LookupThread::reviewChanged);
     connect(&engine, &LookupEngine::problem, this, &LookupThread::problem);
+    connect(&engine, &LookupEngine::keyRefused, this, [this](const QString &provider) {
+        setKey(provider, QString());
+        emit keyRefused(provider);
+    });
     NoticeChecker notices(*db, *transport);
     notices.setProviderUrls(m_paths.providerUrls);
     if (m_paths.noticeCheckIntervalMs >= 0)
@@ -109,6 +125,10 @@ void LookupThread::run()
     related.setProviderUrls(m_paths.providerUrls);
     connect(&related, &RelatedFinder::found, this, &LookupThread::relatedFound);
     connect(&related, &RelatedFinder::failed, this, &LookupThread::relatedFailed);
+    connect(&related, &RelatedFinder::keyRefused, this, [this] {
+        setKey(kOpenAlex, QString());
+        emit keyRefused(kOpenAlex);
+    });
     const auto findRelated = [this, &related, &db](qint64 publicationId, bool refresh) {
         try {
             core::SettingsStore settings(*db);
@@ -118,6 +138,7 @@ void LookupThread::run()
                 return;
             }
             related.setContactEmail(settings.value(QStringLiteral("metadata.crossref_email")).toString());
+            related.setOpenAlexKey(keyFor(kOpenAlex));
         } catch (const std::exception &error) {
             emit relatedFailed(publicationId, int(RelatedProblem::Network), QString::fromUtf8(error.what()));
             return;
@@ -143,6 +164,7 @@ void LookupThread::run()
         } catch (const std::exception &) {
             engine.setContactEmail(QString());
         }
+        engine.setKey(kOpenAlex, keyFor(kOpenAlex));
         m_busy = true;
         emit busyChanged(true);
         engine.start();

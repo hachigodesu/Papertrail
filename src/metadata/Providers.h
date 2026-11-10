@@ -7,6 +7,7 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
+#include <QPair>
 #include <QString>
 #include <QUrl>
 
@@ -39,6 +40,10 @@ extern const QString kOpenLibrary;
 // Not online sources, but changes from them can be undone in the same way: a reference manager's export.
 extern const QString kBibTeXImport;
 extern const QString kRisImport;
+
+// The headers that carry a key of the user's own to `provider`, or none if it takes none or `key` is empty. Keys only
+// ever go in headers, never in an address, so they can't reach a cache, a log or a message.
+QList<QPair<QByteArray, QByteArray>> keyHeaders(const QString &provider, const QString &key);
 
 // Where each source is, so that tests can point them at a local server.
 struct ProviderUrls {

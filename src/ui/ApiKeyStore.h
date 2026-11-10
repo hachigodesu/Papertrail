@@ -8,8 +8,8 @@
 
 namespace papertrail::ui {
 
-// Where the Claude API key is kept. It's never in the database or the settings, because exports include every
-// setting, and it's never written to a log.
+// Where a key of the user's own is kept, such as the Claude API key or an OpenAlex key. It's never in the database or
+// the settings, because exports include every setting, and it's never written to a log.
 class ApiKeyStore : public QObject {
     Q_OBJECT
 
@@ -36,8 +36,12 @@ private:
     QString m_key;
 };
 
-// The operating system's credential store. If there isn't one, as on a Linux system with no secret service, the
-// key is held in memory for this session instead, and whoever's saving it is told.
-std::unique_ptr<ApiKeyStore> createSystemKeyStore(QObject *parent = nullptr);
+// The names keys are kept under in the credential store.
+extern const QString kClaudeKeyEntry;
+extern const QString kOpenAlexKeyEntry;
+
+// The operating system's credential store, holding the key named `entry`. If there isn't one, as on a Linux system
+// with no secret service, the key is held in memory for this session instead, and whoever's saving it is told.
+std::unique_ptr<ApiKeyStore> createSystemKeyStore(const QString &entry, QObject *parent = nullptr);
 
 } // namespace papertrail::ui

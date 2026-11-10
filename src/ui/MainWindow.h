@@ -402,6 +402,7 @@ private:
     QWidget *m_libraryPage = nullptr; // Always the first tab.
     ArticleCoverThread *m_articleCovers = nullptr;
     std::unique_ptr<ApiKeyStore> m_keys;
+    std::unique_ptr<ApiKeyStore> m_openAlexKeys;
     std::unique_ptr<metadata::Transport> m_summaryTransport;
     QCheckBox *m_searchInside = nullptr;
     QAction *m_indexContents = nullptr;

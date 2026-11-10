@@ -1,5 +1,7 @@
 #include "ui/OnlineLookupDialog.h"
 
+#include "ui/KeyField.h"
+
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -71,6 +73,9 @@ OnlineLookupDialog::OnlineLookupDialog(const QString &heading, const QString &mo
         column->addWidget(m_notices);
         addText(tr("Sends the DOIs in your library to Crossref, about once a month each, to find retractions, "
                    "corrections and expressions of concern published since. Only when lookups are online."), true);
+
+        m_keys = new QVBoxLayout;
+        column->addLayout(m_keys);
     }
 
     column->addStretch();
@@ -80,6 +85,32 @@ OnlineLookupDialog::OnlineLookupDialog(const QString &heading, const QString &mo
     column->addWidget(buttons);
 
     setMode(mode);
+}
+
+void OnlineLookupDialog::addKey(const QString &label, const QString &explanation, ApiKeyStore &keys,
+                                const std::function<void(const QString &)> &changed)
+{
+    if (!m_keys)
+        return;
+    if (m_keys->count() == 0) {
+        m_keys->addSpacing(6);
+        auto *heading = new QLabel(tr("Keys of your own"), this);
+        QFont bold = heading->font();
+        bold.setBold(true);
+        heading->setFont(bold);
+        m_keys->addWidget(heading);
+    }
+    auto *form = new QFormLayout;
+    form->addRow(label, new KeyField(keys, label, changed, this));
+    m_keys->addLayout(form);
+    auto *text = new QLabel(explanation, this);
+    text->setTextFormat(Qt::PlainText);
+    text->setWordWrap(true);
+    QPalette palette = text->palette();
+    palette.setColor(QPalette::WindowText, palette.color(QPalette::PlaceholderText));
+    text->setPalette(palette);
+    m_keys->addWidget(text);
+    adjustSize();
 }
 
 QString OnlineLookupDialog::mode() const

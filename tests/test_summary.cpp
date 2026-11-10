@@ -1543,9 +1543,10 @@ private slots:
         m_session.reset();
         auto fake = m_fake;
         paths.transportFactory = [fake] { return std::make_unique<FakeTransport>(fake); };
-        paths.keyStoreFactory = [] {
+        paths.keyStoreFactory = [](const QString &entry) {
             auto keys = std::make_unique<MemoryKeyStore>();
-            keys->write(kKey, [](bool) {});
+            if (entry == kClaudeKeyEntry)
+                keys->write(kKey, [](bool) {});
             return std::unique_ptr<ApiKeyStore>(std::move(keys));
         };
         m_session = std::make_unique<LibrarySession>(paths);

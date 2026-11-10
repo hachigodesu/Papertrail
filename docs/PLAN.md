@@ -443,8 +443,8 @@ OCR for scanned documents, Zotero/Mendeley/BibTeX import, full CSL citation styl
 - **1.0.1:** the reader's Notes panel shows a highlight's words and its note apart.
 - **1.0.2:** saved searches, a Settings window with a theme separate from page colours and the reader's defaults, `in:` searches and **Show its articles** in page order, pictures left alone on dark pages, a red bar on retracted publications' covers, number-only contents entries left out, and highlighting by right-click only.
 - **1.1.0:** Smart Jump (Ctrl+click a reference for a preview of what it points at, even without links), contents searched at Ctrl+G, two documents side by side, areas of a page as highlights, case law as a type cited in the Bluebook's or OSCOLA's form, with summaries as case briefs, BibTeX and RIS import, new retractions pointed out, and the release workflow taking its packages from CI.
-- **1.3.0:** the words of scanned documents recognised with Tesseract, in the background and as they're read, with English included and 26 more languages fetched when chosen, and an old paper whose own text is poor recognised again in full when asked.
 - **1.2.0:** related papers from OpenAlex, added without a file if wanted; Smart Jump from a table of contents, and to a section's or appendix's heading by way of the contents however far away, passing over contents pages and running heads; bookmarks; full screen; pages turned a quarter at a time; forward history; sorting by rating and last opened, a rating filter, recently opened, and Rating, Last opened and Progress columns; and Show its articles by the issue itself.
+- **1.3.0:** the words of scanned documents recognised with Tesseract, in the background and as they're read, with English included and 26 more languages fetched when chosen, and an old paper whose own text is poor recognised again in full when asked.
 
 Considered and declined: **publication types of the user's own,** and removing the built-in ones, because citations, exports and article splitting depend on the fixed types.
 
@@ -463,3 +463,42 @@ Candidates for 1.4.0 and after. Sizes are rough.
 - **Translations** of the window: the text already goes through `tr()`, so what's missing is the translation files and choosing a language. Medium, plus translators.
 - **Keeping two computers in step** through a shared folder, built on the library export. Medium to large.
 - **Flathub and winget,** so Papertrail installs from the usual stores. Medium, mostly packaging and review.
+
+Gathered on 11 November 2026 from calibre, Zotero, KOReader, Sioyek, JabRef and others, keeping to the rules: nothing changes the user's files, and nothing goes online unless chosen. A suggested 1.4.0 is the first four of "The library" and "Getting things in and out" together: the Zotero import, every highlight in one place, fields of the user's own and checking the library. Read aloud and pinned figures would suit a release about reading after that.
+
+#### Reading
+
+- **Read aloud** from the page being read, with Qt's text-to-speech, marking each sentence as it's read. Built on the worker's text lines, so recognised scans work too. Check Qt TextToSpeech's backends on each platform, and in the Flatpak. Like calibre's viewer and KOReader. Medium.
+- **Pinned figures:** an area, or a Smart Jump target, kept floating beside the page while the text about it is read. Like Sioyek's portals. Medium.
+- **A reading ruler** that dims all but the current line or paragraph, moved with the keys. Like Sioyek. Small.
+- **Looking up a selection:** first in the library (other papers that mention it), and if chosen, on Wikipedia or in a dictionary, only with lookups online. Like calibre's lookup panel. Small.
+- **Asking Claude about a selection or area:** explaining an equation, translating a paragraph, defining a term, each request confirmed and costed as summaries are. Medium.
+- **A table to a spreadsheet:** an area over a table copied as CSV, from the character boxes the worker already has. Like Tabula. Medium.
+
+#### The library
+
+- **Fields of the user's own** (text, number, yes or no, date, or one of a list), shown, sorted, searched, saved in searches and exported. Like calibre's custom columns. Medium, with a migration. Not to be confused with publication types of the user's own, which were declined.
+- **Search and replace across many publications:** a field changed in many at once, with or without patterns, previewed first, undoable through provenance. Like calibre's bulk editing and JabRef's cleanups (page ranges, months, DOI forms). Small to medium.
+- **Checking the library:** missing and unreadable files, publications waiting for files, files in no publication and identifiers shared by two, with a fix offered for each. Like calibre's Check library. Small.
+- **Every highlight in one place:** all highlights and notes across the library, filtered by colour, collection or tag, each opening where it is. Like calibre's annotations browser. Medium.
+- **Reading time** per document and per day, kept only on this computer, building on reading at a glance. Like KOReader's statistics. Medium.
+- **Switching libraries from the window,** with a list of recent ones, since `--library` already works. Like calibre. Small.
+
+#### Getting things in and out
+
+- **Importing a Zotero, Mendeley or calibre library:** their databases read without changing them, with collections, tags, notes, highlights and links to the files. Zotero first. Probably the biggest draw for people switching. Medium each.
+- **Saving copies to a folder,** named by a pattern such as `{author} {year} - {title}`. Copies only, never moving or renaming the originals. Like calibre's Save to disk. Small.
+- **A PDF copy** of an EPUB, DjVu or Kindle book at a chosen page size, made by the worker, for printing or other tools. Like calibre's conversion. Small to medium.
+- **To and from an e-reader:** a selection copied to a Kobo, Kindle or KOReader device, and KOReader's highlights read back from its own files beside the books. Like calibre and KOReader. Medium to large.
+- **Highlights to Anki** as flashcards. Like Readwise. Small.
+
+#### Research
+
+- **Following journals:** new articles in chosen journals from Crossref by ISSN, in a section of their own and added without a file. Only the ISSN is sent. Like Zotero's feeds and calibre's news. Medium.
+- **A map of what cites what** in the library, from related papers' cached lists. Like Connected Papers. Medium.
+- **Comparing two versions,** such as a preprint and the published paper, side by side with the changed paragraphs marked. Medium.
+- **Journal abbreviations** for styles that want them, such as IEEE, from a list whose licence fits AGPL. Like JabRef's. Small to medium.
+
+#### Left for now
+
+- **Plugins** and **a web server** for reading from a phone, as calibre has: both large, and both new ways in that would need their own security review.

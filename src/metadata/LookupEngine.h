@@ -36,6 +36,8 @@ public:
 
     void setProviderUrls(const ProviderUrls &urls) { m_urls = urls; }
     void setContactEmail(const QString &email) { m_email = email; }
+    // A key of the user's own for `provider`, such as OpenAlex, sent in a header with each request to it. Empty for none.
+    void setKey(const QString &provider, const QString &key) { m_keys.insert(provider, key); }
     void setRetryDelays(int firstMs, int longestMs);
 
     // Starts working through the queue. Doing this again while it's running changes nothing.
@@ -58,6 +60,9 @@ signals:
     // Can't reach a source right now. It'll try again by itself.
     void problem(const QString &message);
 
+    // `provider` didn't accept the user's key, so it's being asked without one until the key is set again.
+    void keyRefused(const QString &provider);
+
 private:
     enum class Ask { CrossrefDoi, OpenAlexDoi, Arxiv, OpenLibrary, CrossrefTitle, OpenAlexTitle };
 
@@ -76,6 +81,7 @@ private:
     core::LookupRepository m_lookups;
     ProviderUrls m_urls;
     QString m_email;
+    QHash<QString, QString> m_keys;
 
     bool m_running = false;
     bool m_stopping = false;

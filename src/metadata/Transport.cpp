@@ -39,6 +39,19 @@ void Transport::send(const HttpRequest &, const Callback &callback)
     callback(reply);
 }
 
+void getWithHeaders(Transport &transport, const QUrl &url, const QList<QPair<QByteArray, QByteArray>> &headers,
+                    const Transport::Callback &callback)
+{
+    if (headers.isEmpty()) {
+        transport.get(url, callback);
+        return;
+    }
+    HttpRequest request;
+    request.url = url;
+    request.headers = headers;
+    transport.send(request, callback);
+}
+
 void Transport::download(const DownloadRequest &, const std::function<void(const QString &)> &done)
 {
     done(QStringLiteral("this can't fetch files"));
@@ -150,7 +163,8 @@ void NetworkTransport::send(const HttpRequest &http, const Callback &callback)
             if (reply->error() != QNetworkReply::NoError && result.status == 0)
                 result.error = reply->errorString();
         }
-        result.retryAfterSeconds = secondsToWait(reply->rawHeader("Retry-After"));
+        result.retryAfterSeconds = qMax(secondsToWait(reply->rawHeader("Retry-After")), secondsToWait(reply->rawHeader("X-RateLimit-Reset")));
+        result.rateLimitPerSecond = reply->rawHeader("X-Rate-Limit-Limit").toInt();
         reply->deleteLater();
         callback(result);
     });

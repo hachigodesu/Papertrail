@@ -253,7 +253,13 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
                 if (check && box.clickedButton() == check)
                     showSuggestedFiles();
             });
-    m_keys = session.paths().keyStoreFactory ? session.paths().keyStoreFactory() : createSystemKeyStore();
+    const auto keyStore = [&session](const QString &entry) {
+        return session.paths().keyStoreFactory ? session.paths().keyStoreFactory(entry) : createSystemKeyStore(entry);
+    };
+    m_keys = keyStore(kClaudeKeyEntry);
+    m_openAlexKeys = keyStore(kOpenAlexKeyEntry);
+    // Held only in memory by the lookups, from the credential store, which may answer later.
+    m_openAlexKeys->read([this](const QString &key) { m_lookup->setKey(metadata::kOpenAlex, key); });
     m_summaryTransport = session.paths().transportFactory ? session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
     m_batches = new summary::SummaryBatches(session.database(), *m_summaryTransport, session.paths().providerUrls.anthropic, this);
     connect(m_batches, &summary::SummaryBatches::submitted, this, [this](int count) {
@@ -1205,6 +1211,10 @@ void MainWindow::connectImport()
     }
     connect(m_lookup, &LookupThread::problem, this,
             [this](const QString &message) { statusBar()->showMessage(tr("%1 Trying again shortly.").arg(message), 15000); });
+    connect(m_lookup, &LookupThread::keyRefused, this, [this](const QString &provider) {
+        statusBar()->showMessage(tr("%1 didn't accept your key, so it's being asked without one. Check the key in Settings > "
+                                    "Online lookups.").arg(metadata::providerLabel(provider)), 20000);
+    });
     connect(m_import, &ImportThread::failed, this, [this](const QString &message) {
         statusBar()->showMessage(tr("Import problem: %1").arg(message), 15000);
     });
@@ -2987,6 +2997,11 @@ void MainWindow::showLookupSettings()
     guarded(tr("Reading settings"), [&] { notices = m_session.settings().value(QStringLiteral("metadata.check_notices")).toBool(); });
     OnlineLookupDialog dialog(QString(), lookupMode(), email, true, this);
     dialog.setCheckNotices(notices);
+    dialog.addKey(tr("OpenAlex key"),
+                  tr("A free key from openalex.org gives your lookups and related papers OpenAlex's allowance for you alone, "
+                     "rather than the smaller one shared by everyone on the same internet address. It's kept in this "
+                     "computer's credential store, sent only to OpenAlex, and never in Papertrail's database, settings or exports."),
+                  *m_openAlexKeys, [this](const QString &key) { m_lookup->setKey(metadata::kOpenAlex, key); });
     if (dialog.exec() == QDialog::Accepted) {
         guarded(tr("Saving settings"),
                 [&] { m_session.settings().setValue(QStringLiteral("metadata.check_notices"), dialog.checkNotices()); });

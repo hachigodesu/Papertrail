@@ -244,8 +244,16 @@ void LookupEngine::fetch(const QString &provider, const QString &pace, const QUr
     m_nextAllowed[pace] = now + wait + intervalMsFor(pace);
     m_requestInFlight = true;
     QTimer::singleShot(int(wait), this, [this, provider, pace, url, key, then] {
-        m_transport.get(withContact(provider, url), [this, provider, pace, key, then](const TransportReply &reply) {
+        const auto headers = keyHeaders(provider, m_keys.value(provider));
+        getWithHeaders(m_transport, withContact(provider, url), headers, [this, provider, pace, url, key, then, keyed = !headers.isEmpty()](const TransportReply &reply) {
             m_requestInFlight = false;
+            if (keyed && (reply.status == 401 || reply.status == 403)) {
+                // A key that's wrong, or not yet activated. The source still answers without one, so it's asked again.
+                m_keys.remove(provider);
+                emit keyRefused(provider);
+                fetch(provider, pace, url, then);
+                return;
+            }
             if (reply.rateLimitPerSecond > 0)
                 m_reportedRates[pace] = reply.rateLimitPerSecond;
             if (!reply.error.isEmpty()) {

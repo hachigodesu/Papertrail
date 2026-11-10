@@ -15,6 +15,7 @@
 #include "ui/RelatedPapersDialog.h"
 #include "metadata/Providers.h"
 #include "metadata/Transport.h"
+#include "ui/ApiKeyStore.h"
 #include "ui/Delegates.h"
 #include "ui/DetailsPanel.h"
 #include "ui/FilterSidebar.h"
@@ -78,7 +79,9 @@ QString sample(const QString &name)
 struct FakeState {
     QMutex mutex;
     QList<QPair<QString, TransportReply>> answers; // First whose text is in the URL.
+    QList<QPair<QString, TransportReply>> keyedAnswers; // The same, for requests carrying a key, looked at first.
     QStringList asked;
+    QList<QByteArray> headers; // Each request's headers, as "Name: value" lines, in the same order as `asked`.
     QList<qint64> times;
     QList<TransportReply> oneOff; // Used first, then the list above.
 
@@ -101,7 +104,19 @@ class FakeTransport : public Transport {
 public:
     explicit FakeTransport(std::shared_ptr<FakeState> state) : m_state(std::move(state)) {}
 
-    void get(const QUrl &url, const Callback &callback) override
+    void get(const QUrl &url, const Callback &callback) override { answer(url, {}, callback); }
+
+    // Only GETs with headers come this way in these tests.
+    void send(const HttpRequest &request, const Callback &callback) override
+    {
+        QByteArray headers;
+        for (const auto &header : request.headers)
+            headers += header.first + ": " + header.second + "\n";
+        answer(request.url, headers, callback);
+    }
+
+private:
+    void answer(const QUrl &url, const QByteArray &headers, const Callback &callback)
     {
         TransportReply reply;
         reply.status = 404;
@@ -109,14 +124,25 @@ public:
             QMutexLocker lock(&m_state->mutex);
             const QString text = url.toString(QUrl::FullyEncoded);
             m_state->asked << text;
+            m_state->headers << headers;
             m_state->times << QDateTime::currentMSecsSinceEpoch();
             if (!m_state->oneOff.isEmpty()) {
                 reply = m_state->oneOff.takeFirst();
             } else {
-                for (const auto &answer : m_state->answers) {
-                    if (text.contains(answer.first)) {
-                        reply = answer.second;
-                        break;
+                bool found = false;
+                if (headers.contains("Authorization")) {
+                    for (const auto &answer : m_state->keyedAnswers) {
+                        if (text.contains(answer.first)) {
+                            reply = answer.second;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                for (qsizetype i = 0; !found && i < m_state->answers.size(); ++i) {
+                    if (text.contains(m_state->answers.at(i).first)) {
+                        reply = m_state->answers.at(i).second;
+                        found = true;
                     }
                 }
             }
@@ -124,7 +150,6 @@ public:
         QTimer::singleShot(0, [callback, reply] { callback(reply); });
     }
 
-private:
     std::shared_ptr<FakeState> m_state;
 };
 
@@ -810,6 +835,118 @@ private slots:
             const bool asksForIt = url.contains(QStringLiteral("crossref")) || url.contains(QStringLiteral("openalex"));
             QCOMPARE(url.contains(QStringLiteral("mailto=someone%40example.org")), asksForIt);
         }
+    }
+
+    void anOpenAlexKeyGoesOnlyToOpenAlexInAHeader()
+    {
+        Publication p;
+        p.title = QStringLiteral("Sampling Made Simple");
+        p.doi = QStringLiteral("10.1000/a");
+        p.arxivId = QStringLiteral("2101.00001");
+        const qint64 id = m_publications->create(p);
+        m_fake->answer(QStringLiteral("api.openalex.org"), fixture("openalex_work.json"));
+
+        const QString key = QStringLiteral("madeUpKey123");
+        m_engine->setKey(kOpenAlex, key);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        run();
+
+        bool openAlexAsked = false;
+        for (qsizetype i = 0; i < m_fake->asked.size(); ++i) {
+            const QString &url = m_fake->asked.at(i);
+            QVERIFY2(!url.contains(key), qPrintable(url));
+            const bool openAlex = url.contains(QStringLiteral("openalex"));
+            openAlexAsked = openAlexAsked || openAlex;
+            QCOMPARE(m_fake->headers.at(i).contains("Authorization: Bearer " + key.toLatin1()), openAlex);
+        }
+        QVERIFY(openAlexAsked);
+
+        // Nothing keeps it: not the answers kept, nor the database at all.
+        auto cached = m_db->prepare("SELECT count(*) FROM lookup_cache WHERE key LIKE ?");
+        cached->bind(1, QStringLiteral("%%1%").arg(key));
+        QVERIFY(cached->step());
+        QCOMPARE(cached->int64At(0), 0);
+        cached.reset();
+        auto checkpoint = m_db->prepare("PRAGMA wal_checkpoint(TRUNCATE)");
+        checkpoint->step();
+        checkpoint.reset();
+        QFile file(m_dir->filePath(QStringLiteral("library.db")));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QVERIFY(!file.readAll().contains(key.toLatin1()));
+    }
+
+    void aKeyOpenAlexRefusesIsDroppedAndItsAskedWithout()
+    {
+        Publication p;
+        p.title = QStringLiteral("A Made-Up Study of Bridges");
+        p.doi = QStringLiteral("10.1000/made.up");
+        const qint64 id = m_publications->create(p);
+        TransportReply refusal;
+        refusal.status = 403;
+        refusal.body = "{\"error\":\"key_not_activated\"}";
+        m_fake->keyedAnswers << qMakePair(QStringLiteral("api.openalex.org"), refusal);
+        m_fake->answer(QStringLiteral("api.openalex.org"), fixture("openalex_work.json"));
+
+        QSignalSpy refused(m_engine.get(), &LookupEngine::keyRefused);
+        m_engine->setKey(kOpenAlex, QStringLiteral("notActivated"));
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        run();
+
+        QCOMPARE(refused.size(), 1);
+        QCOMPARE(refused.first().first().toString(), kOpenAlex);
+        // Asked once with it, then again without, and never with it after.
+        int keyed = 0;
+        int plain = 0;
+        for (qsizetype i = 0; i < m_fake->asked.size(); ++i) {
+            if (!m_fake->asked.at(i).contains(QStringLiteral("openalex")))
+                continue;
+            if (m_fake->headers.at(i).isEmpty())
+                ++plain;
+            else
+                ++keyed;
+        }
+        QCOMPARE(keyed, 1);
+        QVERIFY(plain >= 1);
+    }
+
+    void relatedPapersSendTheKeyInAHeaderAndCarryOnWithoutOneRefused()
+    {
+        const qint64 paper = addPublication(QStringLiteral("Made Up Study"), QStringLiteral("10.1000/made.up"), false);
+        m_fake->answer(QStringLiteral("filter="), "{\"meta\":{\"count\":0},\"results\":[]}");
+        m_fake->answer(QStringLiteral("/works/doi"), "{\"id\":\"https://openalex.org/W100\",\"cited_by_count\":0,\"referenced_works\":[]}");
+
+        RelatedFinder finder(*m_db, *m_transport);
+        finder.setOpenAlexKey(QStringLiteral("madeUpKey123"));
+        QSignalSpy found(&finder, &RelatedFinder::found);
+        QSignalSpy refused(&finder, &RelatedFinder::keyRefused);
+        finder.find(paper, false);
+        QTRY_VERIFY_WITH_TIMEOUT(!found.isEmpty(), kWaitMs);
+        QVERIFY(refused.isEmpty());
+        QVERIFY(!m_fake->asked.isEmpty());
+        for (qsizetype i = 0; i < m_fake->asked.size(); ++i) {
+            QVERIFY(!m_fake->asked.at(i).contains(QStringLiteral("madeUpKey123")));
+            QVERIFY(m_fake->headers.at(i).contains("Authorization: Bearer madeUpKey123"));
+        }
+
+        m_fake->asked.clear();
+        m_fake->headers.clear();
+        TransportReply refusal;
+        refusal.status = 401;
+        m_fake->keyedAnswers << qMakePair(QStringLiteral("api.openalex.org"), refusal);
+        finder.find(paper, true);
+        QTRY_VERIFY_WITH_TIMEOUT(found.size() == 2, kWaitMs);
+        QCOMPARE(refused.size(), 1);
+        QVERIFY(m_fake->headers.first().contains("Authorization"));
+        for (qsizetype i = 1; i < m_fake->headers.size(); ++i)
+            QVERIFY(m_fake->headers.at(i).isEmpty());
+    }
+
+    void aKeyThatCouldBreakAHeaderIsntSent()
+    {
+        QCOMPARE(keyHeaders(kOpenAlex, QStringLiteral("abc123")).size(), 1);
+        QVERIFY(keyHeaders(kOpenAlex, QStringLiteral("abc\r\nX-Other: 1")).isEmpty());
+        QVERIFY(keyHeaders(kOpenAlex, QStringLiteral("  ")).isEmpty());
+        QVERIFY(keyHeaders(kCrossref, QStringLiteral("abc123")).isEmpty());
     }
 
     void requestsAreSpacedOut()
@@ -1702,6 +1839,24 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(m_window->reviewOffer() == nullptr, kWaitMs);
     }
 
+    void theWindowsOpenAlexKeyReachesItsLookups()
+    {
+        m_fake->answer(QStringLiteral("api.openalex.org"), fixture("openalex_work.json"));
+        prepareSession(ProviderUrls{}, m_fake, QStringLiteral("windowKey42"));
+        m_window->setLookupMode(QStringLiteral("online_review"), QString());
+        m_window->lookUp({addSessionPublication(QStringLiteral("Made Up Study"), QStringLiteral("10.1000/made.up"))});
+        QTRY_VERIFY_WITH_TIMEOUT(m_fake->count() >= 2 && !m_window->lookupThread()->isBusy(), kWaitMs);
+        QMutexLocker lock(&m_fake->mutex);
+        bool keyed = false;
+        for (qsizetype i = 0; i < m_fake->asked.size(); ++i) {
+            QVERIFY(!m_fake->asked.at(i).contains(QStringLiteral("windowKey42")));
+            const bool openAlex = m_fake->asked.at(i).contains(QStringLiteral("openalex"));
+            QCOMPARE(m_fake->headers.at(i).contains("Bearer windowKey42"), openAlex);
+            keyed = keyed || openAlex;
+        }
+        QVERIFY(keyed);
+    }
+
     void choosingLaterLeavesItAloneUntilThereIsMore()
     {
         m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
@@ -1888,7 +2043,7 @@ private:
         return folder;
     }
 
-    void prepareSession(const ProviderUrls &urls, const std::shared_ptr<FakeState> &fake)
+    void prepareSession(const ProviderUrls &urls, const std::shared_ptr<FakeState> &fake, const QString &openAlexKey = QString())
     {
         LibraryPaths paths;
         paths.database = m_dir->filePath(QStringLiteral("window.db"));
@@ -1898,6 +2053,13 @@ private:
         paths.providerUrls = urls;
         if (fake)
             paths.transportFactory = [fake] { return std::make_unique<FakeTransport>(fake); };
+        // Keys only ever in memory here, never the computer's own credential store.
+        paths.keyStoreFactory = [openAlexKey](const QString &entry) {
+            auto keys = std::make_unique<MemoryKeyStore>();
+            if (entry == kOpenAlexKeyEntry && !openAlexKey.isEmpty())
+                keys->write(openAlexKey, [](bool) {});
+            return std::unique_ptr<ApiKeyStore>(std::move(keys));
+        };
         m_session = std::make_unique<LibrarySession>(paths);
         m_session->settings().setValue(QStringLiteral("library.rescan_on_startup"), false);
         m_window = std::make_unique<MainWindow>(*m_session);

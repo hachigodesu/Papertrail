@@ -223,7 +223,8 @@ void RelatedPapersDialog::onFailed(qint64 publicationId, int problem, const QStr
         break;
     case RelatedProblem::RateLimited:
         m_status->setText(tr("OpenAlex's free daily allowance has been used up for now. Try again later. Your other lookups "
-                             "aren't affected."));
+                             "aren't affected. A free OpenAlex key of your own, in Settings > Online lookups, gives you a "
+                             "larger allowance."));
         break;
     case RelatedProblem::Offline:
         m_status->setText(tr("Lookups are offline, so nothing is asked online. Choose a lookup mode in Settings to find "

@@ -261,9 +261,18 @@ void RelatedFinder::ask(const QUrl &url, const std::function<void(const Transpor
         asked.setQuery(query);
     }
     const quint64 generation = m_generation;
-    m_transport.get(asked, [this, generation, then](const TransportReply &reply) {
-        if (generation == m_generation)
-            then(reply);
+    const auto headers = keyHeaders(kOpenAlex, m_key);
+    getWithHeaders(m_transport, asked, headers, [this, generation, url, then, keyed = !headers.isEmpty()](const TransportReply &reply) {
+        if (generation != m_generation)
+            return;
+        if (keyed && (reply.status == 401 || reply.status == 403)) {
+            // A key that's wrong, or not yet activated. OpenAlex still answers without one.
+            m_key.clear();
+            emit keyRefused();
+            ask(url, then);
+            return;
+        }
+        then(reply);
     });
 }
 

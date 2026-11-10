@@ -69,6 +69,8 @@ add_library(papertrail_ui STATIC
     TransferDialogs.h
     ApiKeyStore.cpp
     ApiKeyStore.h
+    KeyField.cpp
+    KeyField.h
     SummaryDialog.cpp
     SummaryDialog.h
     VolumeDialogs.cpp

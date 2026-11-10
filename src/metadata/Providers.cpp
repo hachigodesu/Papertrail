@@ -24,6 +24,18 @@ const QString kOpenLibrary = QStringLiteral("openlibrary");
 const QString kBibTeXImport = QStringLiteral("bibtex");
 const QString kRisImport = QStringLiteral("ris");
 
+QList<QPair<QByteArray, QByteArray>> keyHeaders(const QString &provider, const QString &key)
+{
+    const QString trimmed = key.trimmed();
+    // A key is only ever letters, digits and a few marks, so nothing in one can break out of its header.
+    static const QRegularExpression plain(QStringLiteral("^[A-Za-z0-9_.~+/=-]{1,200}$"));
+    if (trimmed.isEmpty() || !plain.match(trimmed).hasMatch())
+        return {};
+    if (provider == kOpenAlex)
+        return {{QByteArrayLiteral("Authorization"), QByteArrayLiteral("Bearer ") + trimmed.toLatin1()}};
+    return {};
+}
+
 namespace {
 
 // Crossref's and OpenAlex's text can hold markup, such as <i> in a title, or JATS in an abstract.

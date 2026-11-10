@@ -41,8 +41,8 @@ struct LibraryPaths {
     metadata::ProviderUrls providerUrls;
     std::function<std::unique_ptr<metadata::Transport>()> transportFactory;
 
-    // Where the Claude API key is kept. Only tests change this.
-    std::function<std::unique_ptr<ApiKeyStore>()> keyStoreFactory;
+    // Where keys of the user's own are kept, by their entry's name, such as kClaudeKeyEntry. Only tests change this.
+    std::function<std::unique_ptr<ApiKeyStore>(const QString &entry)> keyStoreFactory;
 
     // The user's own library, using the standard folders for this platform.
     static LibraryPaths standard();

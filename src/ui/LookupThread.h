@@ -3,6 +3,8 @@
 #include "metadata/LookupEngine.h"
 #include "ui/LibrarySession.h"
 
+#include <QHash>
+#include <QMutex>
 #include <QString>
 #include <QThread>
 
@@ -33,12 +35,18 @@ public:
     // or relatedFailed says how it went.
     void findRelated(qint64 publicationId, bool refresh);
 
+    // A key of the user's own for an online source, such as metadata::kOpenAlex, held only in memory and used from the
+    // next request on. Empty for none. Safe to call from any thread.
+    void setKey(const QString &provider, const QString &key);
+
 signals:
     void progress(qint64 done, qint64 remaining, const QString &source);
     void publicationChanged(qint64 publicationId);
     void reviewChanged();
     void lookupsFinished(const papertrail::metadata::LookupSummary &summary);
     void problem(const QString &message);
+    // `provider` didn't accept the user's key. It's asked without one until the key is set again.
+    void keyRefused(const QString &provider);
     void busyChanged(bool busy);
     void noticesChanged(const QList<qint64> &publicationIds);
     void noticesChecked(int checked, int newWarnings);
@@ -55,7 +63,11 @@ protected:
     void run() override;
 
 private:
+    QString keyFor(const QString &provider) const;
+
     LibraryPaths m_paths;
+    mutable QMutex m_keysLock;
+    QHash<QString, QString> m_keys;
     std::atomic_bool m_kickWaiting = false;
     std::atomic_bool m_ready = false;
     std::atomic_bool m_busy = false;

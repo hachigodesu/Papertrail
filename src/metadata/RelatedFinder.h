@@ -73,6 +73,8 @@ public:
 
     void setProviderUrls(const ProviderUrls &urls) { m_urls = urls; }
     void setContactEmail(const QString &email) { m_email = email; }
+    // The user's own OpenAlex key, sent in a header. Empty for none.
+    void setOpenAlexKey(const QString &key) { m_key = key; }
 
     // Uses what's kept if it's recent and for the same DOI, unless `refresh`. A newer request replaces one under way.
     void find(qint64 publicationId, bool refresh);
@@ -84,6 +86,8 @@ signals:
     void found(qint64 publicationId);
     // `problem` is a RelatedProblem. `detail` is what went wrong, for a network or database failure.
     void failed(qint64 publicationId, int problem, const QString &detail);
+    // OpenAlex didn't accept the user's key, so it's being asked without one until the key is set again.
+    void keyRefused();
 
 private:
     void ask(const QUrl &url, const std::function<void(const TransportReply &)> &then);
@@ -96,6 +100,7 @@ private:
     Transport &m_transport;
     ProviderUrls m_urls;
     QString m_email;
+    QString m_key;
     quint64 m_generation = 0;
 
     // The publication under way.

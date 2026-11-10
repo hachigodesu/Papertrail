@@ -20,8 +20,8 @@ struct TransportReply {
     int rateLimitPerSecond = 0; // What the source says its current limit is, if it says.
 };
 
-// For requests with headers of their own, which at the moment means article summaries. These don't follow redirects,
-// because a redirect would carry their headers somewhere else.
+// For requests with headers of their own, such as article summaries, or a lookup carrying a key of the user's own.
+// These don't follow redirects, because a redirect would carry their headers somewhere else.
 struct HttpRequest {
     QUrl url;
     QByteArray method = "GET";
@@ -68,5 +68,9 @@ public:
 private:
     QNetworkAccessManager *m_network;
 };
+
+// A GET with these headers, through send() so it never follows a redirect, or an ordinary get() without any.
+void getWithHeaders(Transport &transport, const QUrl &url, const QList<QPair<QByteArray, QByteArray>> &headers,
+                    const Transport::Callback &callback);
 
 } // namespace papertrail::metadata
