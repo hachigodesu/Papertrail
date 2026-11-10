@@ -16,3 +16,6 @@
 
 # Test documents must never be altered: hashes depend on their exact bytes
 tests/samples/** binary
+
+# Models for recognising text are used exactly as published
+*.traineddata binary
