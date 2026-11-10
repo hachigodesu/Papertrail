@@ -176,6 +176,44 @@ private slots:
         QVERIFY(!entryHasYear(QStringLiteral("Lane, T. (2020a) Another study."), QStringLiteral("2020")));
         QVERIFY(!entryHasYear(QStringLiteral("Lane, T. pages 12020."), QStringLiteral("2020")));
     }
+
+    void contentsEntriesAndTheHeadingsTheyLeadTo()
+    {
+        const std::optional<ContentsEntry> dotted = contentsEntry(QStringLiteral("2.1 Made-Up Variance ........ 9"));
+        QVERIFY(dotted);
+        QCOMPARE(dotted->title, QStringLiteral("2.1 Made-Up Variance"));
+        QCOMPARE(dotted->page, 9);
+        const std::optional<ContentsEntry> spaced = contentsEntry(QStringLiteral("Appendix E:  Made-Up Tables      171"));
+        QVERIFY(spaced);
+        QCOMPARE(spaced->title, QStringLiteral("Appendix E:  Made-Up Tables"));
+        QCOMPARE(spaced->page, 171);
+        const std::optional<ContentsEntry> roman = contentsEntry(QStringLiteral("Acknowledgements xiii"));
+        QVERIFY(roman && roman->roman);
+        QCOMPARE(roman->page, 13);
+        QCOMPARE(roman->pageLabel, QStringLiteral("xiii"));
+        QVERIFY(!contentsEntry(QStringLiteral("Part II")));
+        QVERIFY(!contentsEntry(QStringLiteral("171")));
+        QVERIFY(!contentsEntry(QStringLiteral("Just some words")));
+
+        QVERIFY(isContentsHeading(QStringLiteral("Contents")));
+        QVERIFY(isContentsHeading(QStringLiteral("TABLE OF CONTENTS")));
+        QVERIFY(isContentsHeading(QStringLiteral("List of Figures")));
+        QVERIFY(!isContentsHeading(QStringLiteral("The contents of the made-up box")));
+
+        // However it's punctuated, numbered on its own line, or wrapped.
+        QVERIFY(headingMatchesEntry(QStringLiteral("Appendix E Made-Up Tables"), *spaced));
+        QVERIFY(headingMatchesEntry(QStringLiteral("APPENDIX E: MADE-UP TABLES"), *spaced));
+        QVERIFY(headingMatchesEntry(QStringLiteral("Made-Up Tables"), *spaced));
+        QVERIFY(headingMatchesEntry(QStringLiteral("2.1  Made-up variance"), *dotted));
+        QVERIFY(!headingMatchesEntry(QStringLiteral("2.2 Made-Up Covariance"), *dotted));
+        QVERIFY(!headingMatchesEntry(QStringLiteral("Appendix E"), *spaced));
+        const ContentsEntry longTitle{QStringLiteral("3 A Very Long Made-Up Chapter Title That Wraps"), QStringLiteral("40"), 40, false};
+        QVERIFY(headingMatchesEntry(QStringLiteral("3 A Very Long Made-Up Chapter"), longTitle));
+        QVERIFY(!headingMatchesEntry(QStringLiteral("3 A Very"), longTitle));
+        // A short title alone isn't enough to go on.
+        const ContentsEntry index{QStringLiteral("Index"), QStringLiteral("173"), 173, false};
+        QVERIFY(headingMatchesEntry(QStringLiteral("Index"), index));
+    }
 };
 
 QTEST_GUILESS_MAIN(ReferencesTest)

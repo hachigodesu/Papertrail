@@ -14,6 +14,7 @@
 #include <QPointF>
 #include <QRectF>
 #include <QRegularExpression>
+#include <QSet>
 #include <QThread>
 
 #include <algorithm>
@@ -169,6 +170,76 @@ bool standsApart(const QList<engine::TextLine> &lines, int index)
     return true;
 }
 
+// The lines on the same row as this one, left to right, as a contents entry's title and page number often are when
+// they're set apart.
+struct Row {
+    QString text;
+    QList<int> lines;
+    bool numberApart = false; // It ends with a number set well apart from the rest, or led to by dots.
+};
+
+Row rowOf(const QList<engine::TextLine> &lines, int index)
+{
+    const QRectF line = lines.at(index).rect;
+    QList<int> members;
+    for (int i = 0; i < lines.size(); ++i) {
+        const QRectF other = lines.at(i).rect;
+        const double overlap = qMin(line.bottom(), other.bottom()) - qMax(line.top(), other.top());
+        if (overlap > qMin(line.height(), other.height()) * 0.5)
+            members << i;
+    }
+    std::sort(members.begin(), members.end(), [&](int a, int b) { return lines.at(a).rect.left() < lines.at(b).rect.left(); });
+
+    Row row;
+    row.lines = members;
+    const double height = qMax(line.height(), 4.0);
+    for (int m = 0; m < members.size(); ++m) {
+        const engine::TextLine &piece = lines.at(members.at(m));
+        if (m > 0) {
+            row.text += u' ';
+            // A number on its own, well to the right of the title.
+            const double gap = piece.rect.left() - lines.at(members.at(m - 1)).rect.right();
+            if (m == members.size() - 1 && gap > height * 2)
+                row.numberApart = true;
+        }
+        row.text += piece.text;
+    }
+    // Or within one line: the space before its last word, which is wide where the number's set at the right.
+    const engine::TextLine &last = lines.at(members.last());
+    const QString text = last.text;
+    qsizetype end = text.size();
+    while (end > 0 && text.at(end - 1).isSpace())
+        --end;
+    qsizetype start = end;
+    while (start > 0 && !text.at(start - 1).isSpace())
+        --start;
+    qsizetype before = start;
+    while (before > 0 && text.at(before - 1).isSpace())
+        --before;
+    if (before > 0 && start < last.chars.size() && before - 1 < last.chars.size()
+        && last.chars.at(start).left() - last.chars.at(before - 1).right() > height * 2)
+        row.numberApart = true;
+    static const QRegularExpression leaders(QStringLiteral("(?:\\.\\s*){4,}\\S+\\s*$|…\\s*\\S+\\s*$"));
+    if (leaders.match(row.text).hasMatch())
+        row.numberApart = true;
+    return row;
+}
+
+// Whether a line is one of a contents page's entries, or like one, such as an entry in a list of figures.
+bool isEntryRow(const QList<engine::TextLine> &lines, int index)
+{
+    const Row row = rowOf(lines, index);
+    return row.numberApart && core::contentsEntry(row.text).has_value();
+}
+
+// Whether a line sits in a page's top or bottom margin, where running heads and page numbers are, and isn't set larger.
+bool inMargin(const engine::TextLine &line, double pageHeight, double body)
+{
+    if (pageHeight <= 0 || line.size > body + 0.5)
+        return false;
+    return line.rect.bottom() < pageHeight * 0.075 || line.rect.top() > pageHeight * 0.93;
+}
+
 class Host {
 public:
     Host(engine::Engine &engine, FILE *out) : m_engine(engine), m_out(out) {}
@@ -278,6 +349,7 @@ private:
     {
         const qint64 mark = m_document->bookmarkForPage(page(request));
         m_lines.clear();
+        m_contentsPages.clear();
         applyLayout(request);
         describe(reply);
         reply.insert(QStringLiteral("page"), m_document->pageForBookmark(mark));
@@ -535,6 +607,176 @@ private:
         reply.insert(QStringLiteral("text"), selection.text);
     }
 
+    // Whether a page is a table of contents, or a list of figures or tables: headed as one, or mostly entries ending
+    // with their page numbers, set at the right or led to by dots.
+    bool isContentsPage(int number)
+    {
+        if (const auto known = m_contentsPages.constFind(number); known != m_contentsPages.cend())
+            return *known;
+        const QList<engine::TextLine> &lines = linesOn(number);
+        bool contents = false;
+        int entries = 0;
+        int rows = 0;
+        QSet<int> seen;
+        for (int i = 0; i < lines.size() && !contents; ++i) {
+            if (core::isContentsHeading(lines.at(i).text) && i < 6)
+                contents = true;
+            if (seen.contains(i))
+                continue;
+            const Row row = rowOf(lines, i);
+            for (const int member : row.lines)
+                seen.insert(member);
+            ++rows;
+            if (row.numberApart && core::contentsEntry(row.text))
+                ++entries;
+        }
+        contents = contents || (entries >= 4 && entries * 10 >= rows * 4);
+        m_contentsPages.insert(number, contents);
+        return contents;
+    }
+
+    // Goes from an entry in a table of contents to the heading it names, as a link would: the line most set apart as a
+    // heading that matches the entry, nearest the page it gives. Printed pages are usually behind the file's, by the
+    // pages before them, so it looks from there on first. Returns false if the line isn't an entry, or its heading
+    // isn't found.
+    bool jumpFromContents(int number, int clicked, int first, int last, QJsonObject &reply)
+    {
+        const QList<engine::TextLine> &here = linesOn(number);
+        const Row row = rowOf(here, clicked);
+        const std::optional<core::ContentsEntry> entry = core::contentsEntry(row.text);
+        if (!entry || !(row.numberApart && isContentsPage(number)))
+            return false;
+        const std::optional<HeadingFound> heading = headingFor(*entry, number, first, last);
+        if (!heading)
+            return false;
+        replyWithHeading(*heading, entry->title.simplified().left(80), reply);
+        return true;
+    }
+
+    struct HeadingFound {
+        int page = -1;
+        QRectF rect; // The heading's line, in points.
+    };
+
+    // The heading a contents entry names: where the document's own outline says, if it has the same title, or else
+    // the line most set apart as a heading that matches it, nearest the page the entry gives. Printed pages are usually
+    // behind the file's, by the pages before them, so it looks from there on first. `contentsPage` is skipped.
+    std::optional<HeadingFound> headingFor(const core::ContentsEntry &entry, int contentsPage, int first, int last)
+    {
+        for (const engine::OutlineItem &item : m_document->outline()) {
+            if (item.page < first || item.page > last || !core::headingMatchesEntry(item.title, entry))
+                continue;
+            // The line there, if it can be found, or else the place itself.
+            const QList<engine::TextLine> &lines = linesOn(item.page);
+            for (const engine::TextLine &line : lines) {
+                if (core::headingMatchesEntry(line.text, entry) && qAbs(line.rect.top() - item.y) < 60)
+                    return HeadingFound{item.page, line.rect};
+            }
+            const double width = m_document->pageSize(item.page).width();
+            return HeadingFound{item.page, QRectF(width * 0.08, item.y, width * 0.84, 14)};
+        }
+
+        // From the printed page on, then everything else after the contents, then before them.
+        const int number = contentsPage;
+        constexpr int kAhead = 120;
+        constexpr int kFarthest = 400;
+        const int printed = qBound(first, first + entry.page - 1, last);
+        QList<int> pages;
+        QSet<int> listed;
+        const auto add = [&](int at) {
+            if (at >= first && at <= last && at != number && !listed.contains(at) && pages.size() < kFarthest) {
+                listed.insert(at);
+                pages << at;
+            }
+        };
+        for (int at = qMax(printed, number + 1); at <= printed + kAhead; ++at)
+            add(at);
+        for (int at = number + 1; at <= last; ++at)
+            add(at);
+        for (int at = number - 1; at >= first; --at)
+            add(at);
+
+        int bestPage = -1;
+        int bestLine = -1;
+        int best = 0;
+        for (qsizetype p = 0; p < pages.size(); ++p) {
+            const int at = pages.at(p);
+            if (isContentsPage(at))
+                continue;
+            const QList<engine::TextLine> &lines = linesOn(at);
+            const double body = bodySize(lines);
+            const double pageHeight = m_document->pageSize(at).height();
+            for (int i = 0; i < lines.size(); ++i) {
+                const engine::TextLine &line = lines.at(i);
+                if (!core::headingMatchesEntry(line.text, entry) || inMargin(line, pageHeight, body) || isEntryRow(lines, i))
+                    continue;
+                // Only a heading counts, not the same words in a sentence.
+                int points = 0;
+                if (line.bold)
+                    points += 2;
+                if (line.size > body + 0.5)
+                    points += 2;
+                if (standsApart(lines, i))
+                    points += 1;
+                if (points > best) {
+                    best = points;
+                    bestPage = at;
+                    bestLine = i;
+                }
+            }
+            // Set apart in more than one way, near where it's expected: that's it.
+            if (best >= 3 && p < kAhead)
+                break;
+        }
+        if (bestPage < 0)
+            return std::nullopt;
+        return HeadingFound{bestPage, linesOn(bestPage).at(bestLine).rect};
+    }
+
+    void replyWithHeading(const HeadingFound &heading, const QString &label, QJsonObject &reply)
+    {
+        const QSizeF size = m_document->pageSize(heading.page);
+        const QRectF region = QRectF(size.width() * 0.04, heading.rect.top() - 4, size.width() * 0.92, size.height() * 0.22)
+                                  .intersected(QRectF(QPointF(0, 0), size));
+        reply.insert(QStringLiteral("label"), label);
+        reply.insert(QStringLiteral("kind"), int(core::TextReference::Kind::Section));
+        reply.insert(QStringLiteral("found"), true);
+        reply.insert(QStringLiteral("page"), heading.page);
+        reply.insert(QStringLiteral("rect"), rectToJson(heading.rect));
+        reply.insert(QStringLiteral("region"), rectToJson(region));
+    }
+
+    // The entry in the document's contents for a section or appendix, such as "2.1 Variance" for "Section 2.1" or
+    // "Appendix E: Statistical Tables" for "Appendix E". The contents are looked for near the start.
+    std::optional<std::pair<core::ContentsEntry, int>> contentsEntryFor(const core::TextReference &reference, int first, int last)
+    {
+        constexpr int kContentsWithin = 40;
+        const QString number = reference.number.toLower();
+        const QString named = (reference.word + u' ' + reference.number).toLower();
+        for (int at = first; at <= qMin(last, first + kContentsWithin); ++at) {
+            if (!isContentsPage(at))
+                continue;
+            const QList<engine::TextLine> &lines = linesOn(at);
+            for (int i = 0; i < lines.size(); ++i) {
+                const Row row = rowOf(lines, i);
+                if (row.lines.value(0) != i || !row.numberApart)
+                    continue;
+                const std::optional<core::ContentsEntry> entry = core::contentsEntry(row.text);
+                if (!entry)
+                    continue;
+                // Its label, then a space or punctuation: "2.1 Variance" for 2.1, but not "2.10 Variance".
+                QString title = entry->title.toLower().simplified();
+                title.replace(QRegularExpression(QStringLiteral("[:.)]")), QStringLiteral(" "));
+                title = title.simplified() + u' ';
+                const bool labelled = title.startsWith(named + u' ')
+                                      || (reference.kind == core::TextReference::Kind::Section && title.startsWith(number + u' '));
+                if (labelled)
+                    return std::make_pair(*entry, at);
+            }
+        }
+        return std::nullopt;
+    }
+
     // Where a reference in the text points, such as "Figure 3" to its caption or "[12]" to its entry in the
     // references, for a document whose links don't say. `first` and `last` limit it to the pages shown, so an article
     // in an issue finds its own references.
@@ -574,6 +816,10 @@ private:
                 offset = i;
             }
         }
+        // An entry in a table of contents goes to the heading it names, which the file may not link to.
+        if (jumpFromContents(number, clicked, first, last, reply))
+            return;
+
         QString text = line.text;
         if (clicked > 0) {
             const QString before = here.at(clicked - 1).text + u' ';
@@ -610,6 +856,9 @@ private:
                                      const std::function<int(const QList<engine::TextLine> &, int, double)> &score) {
             int best = least - 1;
             for (const int at : pages) {
+                // A table of contents, or a list of figures or tables, names everything but is none of it.
+                if (isContentsPage(at))
+                    continue;
                 const QList<engine::TextLine> &lines = linesOn(at);
                 const double body = bodySize(lines);
                 for (int i = 0; i < lines.size(); ++i) {
@@ -708,6 +957,7 @@ private:
             // A caption or heading has space above it, or is set in bold or another size, unlike a sentence that wraps
             // onto a new line. A heading is short.
             const bool heading = found->kind == Kind::Section || found->kind == Kind::Appendix;
+            const double pageHeight = m_document->pageSize(number).height();
             const auto caption = [&](const core::TextReference &wanted) {
                 return [&, wanted](const QList<engine::TextLine> &lines, int i, double body) {
                     const engine::TextLine &line = lines.at(i);
@@ -719,7 +969,10 @@ private:
                                                   && letter.captured(1) == wanted.number && line.text.trimmed().size() < 80;
                     if (!core::isTargetLine(wanted, line.text) && !appendixByLetter)
                         return -1;
-                    if (leaders.match(line.text).hasMatch())
+                    if (leaders.match(line.text).hasMatch() || isEntryRow(lines, i))
+                        return -1;
+                    // A running head repeats a chapter's or section's title at the top of its pages.
+                    if (heading && inMargin(line, pageHeight, body))
                         return -1;
                     int points = 0;
                     if (standsApart(lines, i))
@@ -735,6 +988,14 @@ private:
                     return points;
                 };
             };
+            if (heading) {
+                if (const auto entry = contentsEntryFor(*found, first, last)) {
+                    if (const std::optional<HeadingFound> fromContents = headingFor(entry->first, entry->second, first, last)) {
+                        replyWithHeading(*fromContents, found->label(), reply);
+                        return;
+                    }
+                }
+            }
             if (!lookForBest(outward, 2, caption(*found))) {
                 // "Figure 3b" is often captioned as part of "Figure 3".
                 static const QRegularExpression lettered(QStringLiteral("^(\\d+(?:\\.\\d+)*)[a-z]$"));
@@ -832,6 +1093,7 @@ private:
     QString m_path;
     std::unique_ptr<engine::Document> m_document;
     QHash<int, QList<engine::TextLine>> m_lines;
+    QHash<int, bool> m_contentsPages;
 };
 
 } // namespace

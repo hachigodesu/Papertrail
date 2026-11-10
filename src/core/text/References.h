@@ -47,4 +47,25 @@ bool startsAuthorEntry(const QString &line, const QString &surname);
 // Whether an entry's text has this year, such as "2020" or, if it's lettered, "2020a".
 bool entryHasYear(const QString &entry, const QString &year);
 
+// An entry in a table of contents, or a list of figures or tables, such as "2.1 Variance ........ 9" or
+// "Appendix E: Statistical Tables   171": what it's called, and the page it gives, as printed.
+struct ContentsEntry {
+    QString title;     // Such as "2.1 Variance" or "Appendix E: Statistical Tables".
+    QString pageLabel; // Such as "9" or "xiii".
+    int page = 0;      // The printed page as a number, counting from 1, roman or not.
+    bool roman = false;
+};
+
+// The entry a line of contents is, if it ends with a page number after its title. Whether the number is far enough
+// from the title for it to be an entry is for whoever knows where its characters are.
+std::optional<ContentsEntry> contentsEntry(const QString &line);
+
+// Whether a line is the heading of a table of contents, or a list of figures or tables.
+bool isContentsHeading(const QString &line);
+
+// Whether a line is the heading a contents entry leads to, ignoring case, accents, punctuation and spacing: "2.1
+// Variance" for "2.1  Variance", or the title alone, "Variance", where the heading's number is on a line of its own.
+// A heading that wraps matches with its first line, if that's most of it.
+bool headingMatchesEntry(const QString &line, const ContentsEntry &entry);
+
 } // namespace papertrail::core

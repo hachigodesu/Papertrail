@@ -2,6 +2,7 @@
 
 #include "core/model/Identifiers.h"
 
+#include <QHash>
 #include <QRegularExpression>
 
 namespace papertrail::core {
@@ -240,6 +241,92 @@ bool endsWithEquationNumber(const QString &line, const QString &number)
 {
     const QRegularExpression ending(QStringLiteral("\\(\\s*%1\\s*\\)\\s*$").arg(QRegularExpression::escape(number)));
     return ending.match(line).hasMatch();
+}
+
+namespace {
+
+// Letters and digits only, folded, one space apart, for comparing headings however they're set.
+QString headingKey(const QString &text)
+{
+    QString key = foldedText(text);
+    for (QChar &c : key) {
+        if (!c.isLetterOrNumber())
+            c = u' ';
+    }
+    return key.simplified();
+}
+
+int romanValue(const QString &text)
+{
+    static const QHash<QChar, int> values = {{u'i', 1}, {u'v', 5}, {u'x', 10}, {u'l', 50}, {u'c', 100}, {u'd', 500}, {u'm', 1000}};
+    int total = 0;
+    const QString lower = text.toLower();
+    for (qsizetype i = 0; i < lower.size(); ++i) {
+        const int value = values.value(lower.at(i));
+        if (value == 0)
+            return 0;
+        const int next = i + 1 < lower.size() ? values.value(lower.at(i + 1)) : 0;
+        total += value < next ? -value : value;
+    }
+    return total;
+}
+
+} // namespace
+
+std::optional<ContentsEntry> contentsEntry(const QString &line)
+{
+    // A title with a letter in it, then dots or space, then the page, in arabic or roman numerals.
+    static const QRegularExpression entry(
+        QStringLiteral("^\\s*(.*?\\p{L}.*?)[\\s.·…_]*\\s(\\d{1,4}|[ivxlcdm]{1,7}|[IVXLCDM]{1,7})\\s*$"));
+    const QRegularExpressionMatch match = entry.match(line);
+    if (!match.hasMatch())
+        return std::nullopt;
+    ContentsEntry found;
+    found.title = match.captured(1).trimmed();
+    // Dots leading to the number, however they're spaced.
+    while (!found.title.isEmpty() && (found.title.endsWith(u'.') || found.title.endsWith(u' ') || found.title.endsWith(QChar(0x2026))))
+        found.title.chop(1);
+    found.pageLabel = match.captured(2);
+    if (found.pageLabel.at(0).isDigit()) {
+        found.page = found.pageLabel.toInt();
+    } else {
+        found.roman = true;
+        found.page = romanValue(found.pageLabel);
+    }
+    // "Part II" or "Chapter IV" is a heading's own numeral, not its page.
+    static const QRegularExpression numeralWord(QStringLiteral("(?i)\\b(?:part|chapter|book|volume|vol\\.?|section|appendix)$"));
+    if (found.page <= 0 || headingKey(found.title).isEmpty() || (found.roman && numeralWord.match(found.title).hasMatch()))
+        return std::nullopt;
+    return found;
+}
+
+bool isContentsHeading(const QString &line)
+{
+    static const QRegularExpression heading(QStringLiteral(
+        "^\\s*(?i:(?:table of )?contents(?: \\(?continued\\)?)?|brief contents|detailed contents|list of (?:figures|tables|illustrations)"
+        "|table des mati[eè]res|sommaire|inhalt|inhaltsverzeichnis|[ií]ndice)\\s*$"));
+    return heading.match(line).hasMatch();
+}
+
+bool headingMatchesEntry(const QString &line, const ContentsEntry &entry)
+{
+    const QString heading = headingKey(line);
+    const QString whole = headingKey(entry.title);
+    if (heading.isEmpty() || whole.isEmpty())
+        return false;
+    if (heading == whole)
+        return true;
+    // The title without its number or label, such as "Variance" from "2.1 Variance" or "Statistical Tables" from
+    // "Appendix E: Statistical Tables", where the heading sets those apart. Only for a title of some length, since
+    // a word like "Index" is everywhere.
+    static const QRegularExpression label(QStringLiteral(
+        "^(?:(?:chapter|part|section|appendix|annex|book|lecture|unit)\\s+)?(?:\\d+(?:\\.\\d+)*|[A-Z]|[IVXLC]+)\\b[.:)]?\\s*"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QString bare = headingKey(QString(entry.title).remove(label));
+    if (bare.size() >= 6 && heading == bare)
+        return true;
+    // A long heading that wraps, matched by its first line.
+    return heading.size() >= 12 && heading.size() * 10 >= whole.size() * 6 && whole.startsWith(heading + u' ');
 }
 
 bool isReferencesHeading(const QString &line)

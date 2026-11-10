@@ -419,6 +419,51 @@ private slots:
         QCOMPARE(figure.page, 1);
     }
 
+    void aContentsEntryLeadsToItsHeadingAndAMentionSkipsTheContents()
+    {
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy hits(&client, &DocumentClient::searchHits);
+        QSignalSpy finished(&client, &DocumentClient::searchFinished);
+        QSignalSpy found(&client, &DocumentClient::referenceReady);
+        client.open(sample(QStringLiteral("smart_jump_contents.pdf")), {});
+        QVERIFY(opened.wait(kWaitMs));
+
+        // Ctrl+click on the first place these words are, from page `from` on.
+        const auto clickOn = [&](const QString &words, int from) {
+            hits.clear();
+            finished.clear();
+            client.startSearch(words, from);
+            if (!finished.wait(kWaitMs) || hits.isEmpty())
+                return ReaderReference{};
+            const int page = hits.first().at(0).toInt();
+            const QRectF first = hits.first().at(1).value<QList<QRectF>>().first();
+            found.clear();
+            client.requestReference(page, first.center(), 0, 165);
+            return found.wait(kWaitMs) ? found.first().first().value<ReaderReference>() : ReaderReference{};
+        };
+
+        // The contents give page numbers set at the right, with no dots and no links. Each entry leads to its heading:
+        // a section, a chapter, and an appendix, whether the title or its number is clicked.
+        const ReaderReference section = clickOn(QStringLiteral("Bending Made-Up"), 0);
+        QVERIFY(section.found);
+        QCOMPARE(section.page, 3);
+        QVERIFY(section.label.contains(QStringLiteral("Bending Made-Up Beams")));
+        QVERIFY(section.rect.top() > 100); // The section's heading, not the chapter's at the top of the page.
+        QCOMPARE(clickOn(QStringLiteral("Made-Up Beginnings"), 0).page, 2);
+        QCOMPARE(clickOn(QStringLiteral("Made-Up Tables"), 0).page, 164);
+        QCOMPARE(clickOn(QStringLiteral("Index"), 0).page, 165);
+
+        // "Appendix E." starting a line in a paragraph, and the contents entry for it, aren't the appendix: its heading
+        // is, which the contents say is further away than Smart Jump would otherwise look.
+        const ReaderReference appendix = clickOn(QStringLiteral("Appendix E. The"), 1);
+        QVERIFY(appendix.found);
+        QCOMPARE(appendix.page, 164);
+        const ReaderReference mention = clickOn(QStringLiteral("Section 2.1"), 1);
+        QVERIFY(mention.found);
+        QCOMPARE(mention.page, 3);
+    }
+
     void selectsTextBetweenTwoPoints()
     {
         DocumentClient client(worker());
