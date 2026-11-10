@@ -217,6 +217,8 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Light, dark and sepia pages,** with pictures left in their own colours on dark pages, and larger or smaller text for EPUB and other reflowable books. **File > Settings...** sets what documents open with.
 - **Links** within a document, and to the web.
 
+- **Scanned documents** have their words recognised, in the background and as you read them, so they can be searched, selected and highlighted too. English comes with Papertrail, and other languages can be fetched in **File > Settings...**.
+
 ### Highlights and notes
 
 - **Highlight or underline** in four colours, and add notes to what you've selected, by right-clicking it.
@@ -277,7 +279,7 @@ To move your library to another computer, use **File > Export library...** rathe
 ## Your files and your privacy
 
 - **Your documents are never changed.** Highlights, notes and details are kept in Papertrail's own library.
-- **Papertrail stays offline until you choose otherwise.** If you turn lookups on, it sends a document's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library, DOIs to Crossref to check for retractions, and a DOI to OpenAlex when you ask for a publication's related papers. It never sends your files, notes or tags. An email address goes to Crossref and OpenAlex only if you enter one, which they ask for to contact heavy users.
+- **Papertrail stays offline until you choose otherwise.** If you turn lookups on, it sends a document's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library, DOIs to Crossref to check for retractions, a DOI to OpenAlex when you ask for a publication's related papers, and, when you choose a language for recognising scanned text, asks GitHub for that language's file. It never sends your files, notes or tags. An email address goes to Crossref and OpenAlex only if you enter one, which they ask for to contact heavy users.
 - **Summaries are sent to Anthropic only when you ask,** using your own API key. You're shown what will be sent and an estimated cost first. It sends identifying details such as the DOI and title, and Claude looks for the paper online. Your file is only sent if you choose that, with a confirmation of its own. The key is kept in your system's credential store, never in the library or its exports.
 - **Exports aren't encrypted.** A `.papertrail` file holds your notes and settings, so keep it as private as they are.
 - **There's no telemetry,** and nothing is sent anywhere else.

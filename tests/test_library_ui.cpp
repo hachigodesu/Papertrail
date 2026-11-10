@@ -48,6 +48,7 @@
 #include <QPushButton>
 #include <QLineEdit>
 #include <QListView>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QSignalSpy>
@@ -2160,6 +2161,63 @@ private slots:
 
         QCOMPARE(themeFromSetting(QStringLiteral("nonsense")), Theme::System);
         QCOMPARE(settingFor(Theme::Dark), QStringLiteral("dark"));
+    }
+
+    void scannedDocumentsCanBeTurnedOffAndTheirLanguagesChosen()
+    {
+        if (!canRecogniseText())
+            QSKIP("This build can't recognise text");
+        // A session with a folder for language models, which the others don't have.
+        LibraryPaths paths = m_session->paths();
+        paths.tessdataDirectory = m_dir->filePath(QStringLiteral("tessdata"));
+        m_session.reset();
+        m_session = std::make_unique<LibrarySession>(paths);
+        openWindow();
+        int changed = 0;
+        QStringList asked;
+        SettingsActions actions;
+        actions.recognitionChanged = [&] { ++changed; };
+        // Fetching is the window's, after asking: here it says it couldn't.
+        actions.getLanguage = [&](const QString &code, std::function<void(bool)> done) {
+            asked << code;
+            done(false);
+        };
+        SettingsDialog dialog(*m_session, actions, m_window.get());
+        QVERIFY(dialog.recogniseBox());
+        QVERIFY(dialog.recogniseBox()->isChecked()); // On unless turned off.
+        dialog.recogniseBox()->setChecked(false);
+        QVERIFY(!m_session->settings().value(QStringLiteral("ocr.enabled")).toBool());
+        QCOMPARE(changed, 1);
+
+        // English is there and chosen. A language that isn't here is asked for, and stays unchosen if it doesn't come.
+        QListWidget *list = dialog.languageList();
+        QListWidgetItem *english = nullptr;
+        QListWidgetItem *french = nullptr;
+        for (int row = 0; row < list->count(); ++row) {
+            if (list->item(row)->data(Qt::UserRole).toString() == QStringLiteral("eng"))
+                english = list->item(row);
+            if (list->item(row)->data(Qt::UserRole).toString() == QStringLiteral("fra"))
+                french = list->item(row);
+        }
+        QVERIFY(english && french);
+        QCOMPARE(english->checkState(), Qt::Checked);
+        QVERIFY(french->text().contains(QStringLiteral("MB")));
+        french->setCheckState(Qt::Checked);
+        QCOMPARE(asked, QStringList{QStringLiteral("fra")});
+        QCOMPARE(french->checkState(), Qt::Unchecked);
+        QCOMPARE(m_session->settings().value(QStringLiteral("ocr.languages")).toString(), QStringLiteral("eng"));
+
+        // One that's here is simply chosen, and English stays if everything's unchosen.
+        QDir().mkpath(m_session->paths().tessdataDirectory);
+        QFile model(QDir(m_session->paths().tessdataDirectory).filePath(QStringLiteral("fra.traineddata")));
+        QVERIFY(model.open(QIODevice::WriteOnly));
+        model.write("made-up");
+        model.close();
+        french->setCheckState(Qt::Checked);
+        QCOMPARE(m_session->settings().value(QStringLiteral("ocr.languages")).toString(), QStringLiteral("eng+fra"));
+        english->setCheckState(Qt::Unchecked);
+        french->setCheckState(Qt::Unchecked);
+        QCOMPARE(m_session->settings().value(QStringLiteral("ocr.languages")).toString(), QStringLiteral("eng"));
     }
 
     void theEditorSuggestsWhatsAlreadyInTheLibrary()

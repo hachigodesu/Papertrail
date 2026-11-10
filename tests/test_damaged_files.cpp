@@ -143,6 +143,42 @@ private slots:
         QCOMPARE(good.result.pageCount.value_or(0), 1);
     }
 
+    // Recognising the words of a damaged scan, which renders whatever's left of its page for Tesseract.
+    void recognitionCarriesOnWhateverTheFileIs()
+    {
+#ifndef PAPERTRAIL_TEST_OCR
+        QSKIP("This build can't recognise text");
+#else
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        import::WorkerClient worker(QStringLiteral(PAPERTRAIL_WORKER_PATH));
+        QRandomGenerator random(m_seed);
+        QFile file(QStringLiteral(PAPERTRAIL_TEST_SAMPLES "/scanned_text.pdf"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        int tried = 0, recognised = 0;
+        for (const Damaged &copy : damage(QStringLiteral("scanned_text.pdf"), file.readAll(), random, m_rounds)) {
+            const QString path = dir.filePath(QStringLiteral("damaged-%1.pdf").arg(tried));
+            QFile out(path);
+            QVERIFY(out.open(QIODevice::WriteOnly));
+            out.write(copy.bytes);
+            out.close();
+            const auto result = worker.recognise(path, QString(), dir.filePath(QStringLiteral("ocr-%1").arg(tried)),
+                                                 QStringLiteral(PAPERTRAIL_TEST_TESSDATA), QStringLiteral("eng"), 0, 2, false,
+                                                 kInspectTimeoutMs * 4);
+            QVERIFY2(result.failure != import::WorkerFailure::TimedOut, qPrintable(copy.name));
+            recognised += result.pages;
+            ++tried;
+        }
+        qInfo("Recognition: %d damaged scans, %d pages recognised", tried, recognised);
+        // And afterwards, the worker still recognises a good one.
+        const auto good = worker.recognise(QStringLiteral(PAPERTRAIL_TEST_SAMPLES "/scanned_text.pdf"), QString(),
+                                           dir.filePath(QStringLiteral("good")), QStringLiteral(PAPERTRAIL_TEST_TESSDATA),
+                                           QStringLiteral("eng"), 0, 1, false, kInspectTimeoutMs * 4);
+        QCOMPARE(good.failure, import::WorkerFailure::None);
+        QCOMPARE(good.pages, 1);
+#endif
+    }
+
     void theReaderCarriesOnWhateverTheFileIs()
     {
         QTemporaryDir dir;

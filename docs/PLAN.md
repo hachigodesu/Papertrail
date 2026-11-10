@@ -443,17 +443,18 @@ OCR for scanned documents, Zotero/Mendeley/BibTeX import, full CSL citation styl
 - **1.0.1:** the reader's Notes panel shows a highlight's words and its note apart.
 - **1.0.2:** saved searches, a Settings window with a theme separate from page colours and the reader's defaults, `in:` searches and **Show its articles** in page order, pictures left alone on dark pages, a red bar on retracted publications' covers, number-only contents entries left out, and highlighting by right-click only.
 - **1.1.0:** Smart Jump (Ctrl+click a reference for a preview of what it points at, even without links), contents searched at Ctrl+G, two documents side by side, areas of a page as highlights, case law as a type cited in the Bluebook's or OSCOLA's form, with summaries as case briefs, BibTeX and RIS import, new retractions pointed out, and the release workflow taking its packages from CI.
+- **1.3.0:** the words of scanned documents recognised with Tesseract, in the background and as they're read, with English included and 26 more languages fetched when chosen.
 - **1.2.0:** related papers from OpenAlex, added without a file if wanted; Smart Jump from a table of contents, and to a section's or appendix's heading by way of the contents however far away, passing over contents pages and running heads; bookmarks; full screen; pages turned a quarter at a time; forward history; sorting by rating and last opened, a rating filter, recently opened, and Rating, Last opened and Progress columns; and Show its articles by the issue itself.
 
 Considered and declined: **publication types of the user's own,** and removing the built-in ones, because citations, exports and article splitting depend on the fixed types.
 
 ### Ideas to explore later
 
-Candidates for 1.3.0 and after. Sizes are rough. OCR is planned for 1.3.0.
+Candidates for 1.4.0 and after. Sizes are rough.
 
 - **Open-access copies:** PDFs fetched through Unpaywall for publications with no file, saved to a folder the user chooses. Unpaywall requires an email address with each request, so it would only work once one is entered.
 - **Sentence-case titles** where a citation style asks for them, such as APA. Risky with names and acronyms.
-- **OCR** for scanned documents, so they can be searched and highlighted. Large.
+- **Recognising mixed documents in the background:** only wholly scanned files are recognised in the background now, and pages of others as they're read. Small.
 - **Full CSL styles** alongside the four hand-written ones. Large, as there's no mature CSL processor in C++.
 - **A browser connector** for adding what's open in the browser. Large.
 - **An OpenAlex API key,** kept like the Claude key, for its own $1 a day rather than the $0.10 a day shared by everyone on the same address without one. Small.

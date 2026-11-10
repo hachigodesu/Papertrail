@@ -134,3 +134,14 @@ What its tests can't vouch for. The packages are on the release's page.
 
 - **Upgrading:** opening a library from 1.1.0 adds bookmarks and related papers to it, after a backup in its `backups` folder. 1.1.0 can't open it afterwards.
 - **Exporting** a library with bookmarks and importing it on another computer brings them.
+
+## For 1.3.0
+
+What its tests can't vouch for. The packages are on the release's page.
+
+- **A real scanned book or paper,** in PDF and in DjVu: after indexing, the status bar says it's recognising scanned text, page by page, and Stop stops it. Closing and opening Papertrail carries on where it stopped. Afterwards, a search with **Inside documents** finds words from it, and the **No text** filter still lists it.
+- **Reading a scanned page** that hasn't been recognised yet: within a few seconds the status bar says its text was recognised, and then it can be searched with Ctrl+F, selected, copied, highlighted, and Ctrl+clicked for Smart Jump. Its highlights are still there next time.
+- **A document that's partly scanned,** with some pages of text: only the scanned pages are recognised, as they're read.
+- **Settings > Scanned documents:** turning it off stops it, and on again carries on. Choosing a language that isn't here asks before fetching it, says how large it is, and the language is ticked once it's arrived. With lookups offline it says it can't. Choosing another language recognises scanned documents again with it.
+- **How busy the computer is** while a large scanned book is recognised: the window stays responsive, and other programs aren't slowed much.
+- **Packages:** the installer, the portable zip, the AppImage and the Flatpak each recognise a scanned page, and their self-test says so. The licences folder has Tesseract's, Leptonica's and the English model's.
