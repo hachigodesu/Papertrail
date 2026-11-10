@@ -1,5 +1,9 @@
 #include "ui/SettingsDialog.h"
 
+#include "ui/Speaker.h"
+
+#include <QSlider>
+
 #include "core/settings/SettingsStore.h"
 #include "metadata/OcrLanguages.h"
 #include "ui/LibrarySession.h"
@@ -126,6 +130,35 @@ SettingsDialog::SettingsDialog(LibrarySession &session, const SettingsActions &a
     libraryButtons->addStretch(1);
     libraryLayout->addLayout(libraryButtons);
     layout->addWidget(library);
+
+    // Only where this copy can read aloud.
+    if (canReadAloud()) {
+        auto *aloud = new QGroupBox(tr("Reading aloud"), this);
+        auto *aloudForm = new QFormLayout(aloud);
+        m_voice = new QComboBox(aloud);
+        m_voice->setAccessibleName(tr("Voice"));
+        m_voice->addItem(tr("The usual voice"), QString());
+        QString chosen;
+        double rate = 0;
+        try {
+            chosen = m_session.settings().value(QStringLiteral("reader.voice")).toString();
+            rate = m_session.settings().value(QStringLiteral("reader.speech_rate")).toDouble();
+        } catch (const std::exception &) {
+        }
+        for (const QString &voice : availableVoices())
+            m_voice->addItem(voice, voice);
+        m_voice->setCurrentIndex(qMax(0, m_voice->findData(chosen)));
+        connect(m_voice, &QComboBox::activated, this, [this] { save(QStringLiteral("reader.voice"), m_voice->currentData().toString()); });
+        aloudForm->addRow(tr("Voice:"), m_voice);
+        m_speechRate = new QSlider(Qt::Horizontal, aloud);
+        m_speechRate->setRange(-10, 10);
+        m_speechRate->setValue(int(qRound(rate * 10)));
+        m_speechRate->setAccessibleName(tr("Speed"));
+        m_speechRate->setToolTip(tr("Slower to the left, faster to the right. From the next sentence read."));
+        connect(m_speechRate, &QSlider::valueChanged, this, [this](int value) { save(QStringLiteral("reader.speech_rate"), value / 10.0); });
+        aloudForm->addRow(tr("Speed:"), m_speechRate);
+        layout->addWidget(aloud);
+    }
 
     // Only where this copy can recognise text at all.
     if (canRecogniseText()) {

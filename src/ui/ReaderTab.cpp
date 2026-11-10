@@ -1,6 +1,7 @@
 #include "ui/ReaderTab.h"
 
 #include "ui/HighlightsWindow.h"
+#include "ui/Speaker.h"
 
 #include "core/repo/ReadingStateRepository.h"
 #include "core/repo/VolumeArticles.h"
@@ -366,6 +367,7 @@ ReaderTab::ReaderTab(LibrarySession &session, qint64 publicationId, qint64 fileI
 
 ReaderTab::~ReaderTab()
 {
+    stopReadingAloud();
     saveState();
 }
 
@@ -394,6 +396,16 @@ void ReaderTab::buildToolbar()
         setSidePanelVisible(!m_side->isVisible());
     });
     m_toolbar->addWidget(m_sideToggle);
+
+    // Only while reading aloud.
+    m_readPause = button(tr("Pause"), tr("Pause or carry on reading aloud"), [this] { pauseOrResumeReadingAloud(); });
+    m_readPause->setObjectName(QStringLiteral("readPause"));
+    m_readPauseAction = m_toolbar->addWidget(m_readPause);
+    m_readPauseAction->setVisible(false);
+    auto *readStop = button(tr("Stop"), tr("Stop reading aloud"), [this] { stopReadingAloud(); });
+    readStop->setObjectName(QStringLiteral("readStop"));
+    m_readStopAction = m_toolbar->addWidget(readStop);
+    m_readStopAction->setVisible(false);
 
     // An article can be read on its own, or in the whole of what it's part of.
     m_wholeFile = button(m_wholeFileLabel, tr("Show the rest of the file this article is in, or only this article"),
@@ -840,6 +852,7 @@ void ReaderTab::connectClient()
     connect(m_client, &DocumentClient::linesReady, this, &ReaderTab::onLines);
     connect(m_client, &DocumentClient::layoutChanged, this, [this](int pageCount, int page) {
         m_layoutPending = false;
+        stopReadingAloud(); // Its sentences were the old layout's.
         m_pageLines.clear();
         m_linesAsked.clear();
         if (m_rulerShown) {
@@ -923,7 +936,9 @@ void ReaderTab::connectClient()
     connect(m_view, &PageView::externalLinkActivated, this, &ReaderTab::followExternalLink);
     // The ruler goes before anything else Escape is for, such as leaving full screen.
     connect(m_view, &PageView::escapeUnused, this, [this] {
-        if (m_rulerShown)
+        if (m_reading)
+            stopReadingAloud();
+        else if (m_rulerShown)
             setRulerShown(false);
         else
             emit escapeUnused();
@@ -2151,6 +2166,10 @@ void ReaderTab::onLines(int page, const QList<ReaderTextLine> &lines)
     if (m_layoutPending)
         return;
     m_pageLines.insert(page, lines);
+    if (m_reading && m_readingWaiting && page == m_readingPage) {
+        m_readingWaiting = false;
+        readPage(page, m_readingFrom);
+    }
     if (!m_rulerShown || page != m_rulerPage || (m_rulerWaiting == 0 && !m_rulerWaitingPoint))
         return;
     const QList<RulerStop> stops = rulerStops(page);
@@ -2248,6 +2267,177 @@ void ReaderTab::rulerToPoint(int page, const QPointF &point)
     }
     if (best >= 0)
         placeRuler(page, best);
+}
+
+bool ReaderTab::isReadingPaused() const
+{
+    return m_reading && m_speaker && m_speaker->isPaused();
+}
+
+void ReaderTab::startReadingAloud()
+{
+    if (!m_speaker) {
+        const LibraryPaths &paths = m_session.paths();
+        QString voice;
+        double rate = 0;
+        try {
+            voice = m_session.settings().value(QStringLiteral("reader.voice")).toString();
+            rate = m_session.settings().value(QStringLiteral("reader.speech_rate")).toDouble();
+        } catch (const std::exception &) {
+        }
+        m_speaker = paths.speakerFactory ? paths.speakerFactory() : createSystemSpeaker(voice);
+        if (!m_speaker) {
+            emit statusMessage(tr("This copy of Papertrail can't read aloud."));
+            return;
+        }
+        m_speaker->setRate(rate);
+        connect(m_speaker.get(), &Speaker::sentenceStarted, this, &ReaderTab::onSentenceStarted);
+        connect(m_speaker.get(), &Speaker::finished, this, &ReaderTab::onReadingFinished);
+        connect(m_speaker.get(), &Speaker::problem, this, [this](const QString &message) {
+            emit statusMessage(tr("Reading aloud stopped: %1").arg(message));
+            stopReadingAloud();
+        });
+    }
+    stopReadingAloud();
+
+    // From the selection, else the ruler, else the top of the page being read.
+    int page = m_view->currentPage();
+    double from = 0;
+    if (const auto start = m_view->selectionStart()) {
+        page = start->first;
+        from = start->second.top();
+    } else if (m_rulerShown && m_view->hasRuler()) {
+        page = m_view->rulerPage();
+        from = m_view->rulerRect().top();
+    }
+    m_reading = true;
+    m_readingPage = page;
+    m_readingFrom = from;
+    m_followReading = true;
+    m_readPauseAction->setVisible(true);
+    m_readStopAction->setVisible(true);
+    m_readPause->setText(tr("Pause"));
+    emit readingAloudChanged(true);
+    if (m_pageLines.contains(page)) {
+        readPage(page, from);
+    } else {
+        m_readingWaiting = true;
+        askForLines(page);
+    }
+}
+
+void ReaderTab::readPage(int page, double fromY)
+{
+    QList<core::SentenceLine> lines;
+    for (const ReaderTextLine &line : m_pageLines.value(page))
+        lines << core::SentenceLine{line.text, line.chars, line.paragraph, line.margin};
+    const QList<core::Sentence> sentences = core::sentencesOf(lines);
+    // From the first sentence that reaches down to where it's to start.
+    int first = 0;
+    while (first < sentences.size()) {
+        const QList<QRectF> &rects = sentences.at(first).rects;
+        if (!rects.isEmpty() && rects.last().bottom() > fromY + 1)
+            break;
+        ++first;
+    }
+    m_readingPage = page;
+    m_readingFirst = first;
+    m_readingSentences = sentences.mid(first);
+    m_readingIndex = -1;
+    // The page after is likely next.
+    if (page + 1 <= m_view->lastShownPage())
+        askForLines(page + 1);
+    if (m_readingSentences.isEmpty()) {
+        onReadingFinished(); // Nothing to read here: on to the next.
+        return;
+    }
+    QStringList texts;
+    for (const core::Sentence &sentence : std::as_const(m_readingSentences))
+        texts << sentence.text;
+    m_speaker->say(texts);
+}
+
+void ReaderTab::onSentenceStarted(int index)
+{
+    if (!m_reading || index < 0 || index >= m_readingSentences.size())
+        return;
+    // Following along, unless the user has scrolled away from what was being read.
+    if (m_readingIndex >= 0 && m_view->spokenPage() >= 0) {
+        const QList<QRectF> &before = m_readingSentences.value(index - 1).rects;
+        if (!before.isEmpty() && !m_view->isShowing(m_readingPage, before.first()))
+            m_followReading = false;
+        else if (!before.isEmpty())
+            m_followReading = true;
+    }
+    m_readingIndex = m_readingFirst + index;
+    const core::Sentence &sentence = m_readingSentences.at(index);
+    m_view->setSpoken(m_readingPage, sentence.rects);
+    if (sentence.rects.isEmpty())
+        return;
+    QRectF all = sentence.rects.first();
+    for (const QRectF &rect : sentence.rects)
+        all = all.united(rect);
+    if (m_rulerShown) {
+        rulerToPoint(m_readingPage, sentence.rects.first().center()); // Which scrolls to it too.
+        if (!m_followReading)
+            return;
+    }
+    if (m_followReading)
+        m_view->scrollToShow(m_readingPage, all);
+}
+
+void ReaderTab::onReadingFinished()
+{
+    if (!m_reading)
+        return;
+    const int next = m_readingPage + 1;
+    if (next > m_view->lastShownPage()) {
+        stopReadingAloud();
+        emit statusMessage(tr("Read to the end."));
+        return;
+    }
+    m_readingPage = next;
+    m_readingFrom = 0;
+    if (m_pageLines.contains(next)) {
+        readPage(next, 0);
+    } else {
+        m_readingWaiting = true;
+        askForLines(next);
+    }
+}
+
+void ReaderTab::pauseOrResumeReadingAloud()
+{
+    if (!m_reading) {
+        startReadingAloud();
+        return;
+    }
+    if (m_speaker->isPaused()) {
+        m_speaker->resume();
+        m_readPause->setText(tr("Pause"));
+    } else {
+        m_speaker->pause();
+        m_readPause->setText(tr("Carry on"));
+    }
+}
+
+void ReaderTab::stopReadingAloud()
+{
+    if (m_speaker)
+        m_speaker->stop();
+    const bool was = m_reading;
+    m_reading = false;
+    m_readingWaiting = false;
+    m_readingSentences.clear();
+    m_readingIndex = -1;
+    if (m_view)
+        m_view->clearSpoken();
+    if (m_readPauseAction) {
+        m_readPauseAction->setVisible(false);
+        m_readStopAction->setVisible(false);
+    }
+    if (was)
+        emit readingAloudChanged(false);
 }
 
 void ReaderTab::rereadRecognisedWords()

@@ -226,6 +226,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Mark an area,** such as a figure or an equation, with Shift and a drag. It's kept and listed like a highlight, with a picture of it, and can be copied as a picture.
 - **They survive** restarts, moving or renaming the file, and text size changes in EPUBs. They're kept in Papertrail's library, never in your files.
 - **The Notes panel** lists a document's highlights and notes, and goes to each. Choose several at once to change their colour, copy, export or delete them together.
+- **Reading aloud** (**View > Read aloud**, Ctrl+Shift+Space) from the selection, the ruler or the top of the page, marking each sentence as it's read and going on through the pages, with your computer's voices, or on Linux a voice that comes with Papertrail. Scanned pages are read once their text is recognised.
 - **A reading ruler** (**View > Reading ruler**, Ctrl+L) dims everything but the line or paragraph you're reading, moved with Up and Down or a click, on to the next page, and passing over running heads and page numbers.
 - **Every highlight and note in your library** in a window of its own, under **View > Highlights and notes...**, that stays open while you read: searched, or chosen by colour, kind, collection, tag or publication, edited there, and exported as Markdown. **Show its highlights** in the library's right-click menu shows one publication's.
 - **Export to Markdown,** with each quote and note under its page.

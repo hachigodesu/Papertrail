@@ -390,6 +390,8 @@ private:
     QAction *m_goTo = nullptr;
     QAction *m_fullScreen = nullptr;
     QAction *m_ruler = nullptr;
+    QAction *m_readAloud = nullptr;
+    QAction *m_stopReading = nullptr;
     void updateRulerAction();
     QToolBar *m_libraryBar = nullptr;
     std::unique_ptr<metadata::Transport> m_downloads; // For language models, made when first needed.

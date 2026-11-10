@@ -39,11 +39,13 @@ if [ -d "$stage/install/share/papertrail/tessdata" ]; then
     cp -r "$stage/install/share/papertrail/tessdata" "$app/tessdata"
 fi
 
-# Qt's libraries and plugins. The compiler's own DLLs are found below, with everything else.
+# Qt's libraries and plugins. The compiler's own DLLs are found below, with everything else. Reading aloud uses
+# Windows' own voices, which play by themselves, so Qt Multimedia's FFmpeg plugin, and FFmpeg, stay out.
 windeployqt6 --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime \
-    --skip-plugin-types generic,networkinformation,sqldrivers "$app/papertrail.exe"
+    --skip-plugin-types generic,networkinformation,sqldrivers,multimedia "$app/papertrail.exe"
 windeployqt6 --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime \
-    --skip-plugin-types generic,networkinformation,sqldrivers "$app/papertrail-worker.exe"
+    --skip-plugin-types generic,networkinformation,sqldrivers,multimedia "$app/papertrail-worker.exe"
+[ -f "$app/texttospeech/qtexttospeech_sapi.dll" ] || { echo "FAILED: Windows' voices can't be used" >&2; exit 1; }
 
 # Every DLL anything here needs from MSYS2, and what those need, until nothing new turns up.
 while :; do
@@ -114,7 +116,7 @@ fi
 # Windows' own editors want CRLF line endings, and the installer shows this one.
 sed 's/$/\r/' "$app/licenses/LICENSE" > "$app/licenses/LICENSE.txt"
 rm "$app/licenses/LICENSE"
-for required in libmupdf qt6-base djvulibre libmobi qtkeychain tesseract-ocr leptonica tessdata; do
+for required in libmupdf qt6-base qt6-speech djvulibre libmobi qtkeychain tesseract-ocr leptonica tessdata; do
     [ -d "$app/licenses/$required" ] || { echo "FAILED: the licence of $required is missing" >&2; exit 1; }
 done
 

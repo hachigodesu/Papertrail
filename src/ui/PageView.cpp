@@ -696,6 +696,45 @@ void PageView::scrollToShow(int page, const QRectF &rect)
         bar->setValue(bar->value() + int(shown.bottom() - (bottom - margin)));
 }
 
+bool PageView::isShowing(int page, const QRectF &rect) const
+{
+    const QRectF pageArea = m_pageRects.value(page);
+    if (pageArea.isNull())
+        return false;
+    const QRectF visible(contentX(), contentY(), viewport()->width(), viewport()->height());
+    return visible.intersects(pageToContent(page).mapRect(rect));
+}
+
+void PageView::setSpoken(int page, const QList<QRectF> &rects)
+{
+    m_spokenPage = page;
+    m_spokenRects = rects;
+    viewport()->update();
+}
+
+void PageView::clearSpoken()
+{
+    m_spokenPage = -1;
+    m_spokenRects.clear();
+    viewport()->update();
+}
+
+std::optional<std::pair<int, QRectF>> PageView::selectionStart() const
+{
+    std::optional<std::pair<int, QRectF>> first;
+    for (auto it = m_selected.cbegin(); it != m_selected.cend(); ++it) {
+        if (it->rects.isEmpty() || (first && first->first <= it.key()))
+            continue;
+        QRectF top = it->rects.first();
+        for (const QRectF &rect : it->rects) {
+            if (rect.top() < top.top() - 1 || (qAbs(rect.top() - top.top()) <= 1 && rect.left() < top.left()))
+                top = rect;
+        }
+        first = std::make_pair(it.key(), top);
+    }
+    return first;
+}
+
 void PageView::setSelection(int page, const QList<QRectF> &rects, const QString &text)
 {
     m_selected.insert(page, Selected{rects, text});
@@ -997,6 +1036,12 @@ void PageView::drawUnturnedPage(QPainter &painter, int page, const QRectF &targe
         painter.setPen(pen);
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(area);
+    }
+
+    // The sentence being read aloud, in a colour of its own.
+    if (page == m_spokenPage) {
+        for (const QRectF &rect : std::as_const(m_spokenRects))
+            painter.fillRect(toTarget(rect.adjusted(-1, -1, 1, 1)), QColor(90, 170, 255, 85));
     }
 
     // The reading ruler dims all but its part of its page, after everything else, so it turns with the page.

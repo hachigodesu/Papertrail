@@ -7,6 +7,7 @@
 
 #include <functional>
 
+class QSlider;
 class QAction;
 class QCheckBox;
 class QComboBox;
@@ -60,6 +61,8 @@ private:
     QComboBox *m_pageLayout = nullptr;
     QComboBox *m_pageColours = nullptr;
     QComboBox *m_ruler = nullptr;
+    QComboBox *m_voice = nullptr;
+    QSlider *m_speechRate = nullptr;
     QDoubleSpinBox *m_textSize = nullptr;
     QCheckBox *m_recognise = nullptr;
     QListWidget *m_languages = nullptr;

@@ -20,6 +20,7 @@
 namespace papertrail::ui {
 
 class ApiKeyStore;
+class Speaker;
 
 struct LibraryPaths {
     QString database;
@@ -40,6 +41,9 @@ struct LibraryPaths {
     // Where online sources are, and what reaches them. Only tests change these.
     metadata::ProviderUrls providerUrls;
     std::function<std::unique_ptr<metadata::Transport>()> transportFactory;
+
+    // What reads aloud. Only tests change this, with one that only pretends.
+    std::function<std::unique_ptr<Speaker>()> speakerFactory;
 
     // Where keys of the user's own are kept, by their entry's name, such as kClaudeKeyEntry. Only tests change this.
     std::function<std::unique_ptr<ApiKeyStore>(const QString &entry)> keyStoreFactory;

@@ -5,6 +5,7 @@
 #include "core/repo/PublicationRepository.h"
 #include "import/WorkerClient.h"
 #include "ui/LibrarySession.h"
+#include "ui/Speaker.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -94,6 +95,17 @@ bool runSelfTest(const QString &reportPath)
                                   && texts.pages.first().contains(QStringLiteral("beam"), Qt::CaseInsensitive);
                 report.check(read, QStringLiteral("a scanned page's text can be recognised"),
                              recognised.error.isEmpty() ? QStringLiteral("%1 words").arg(recognised.words) : recognised.error);
+            }
+
+            // Reading aloud, with a voice that comes with it or the system's, made into sound without playing it.
+#ifdef PAPERTRAIL_PACKAGE
+            report.check(ui::canReadAloud(), QStringLiteral("this package can read aloud"),
+                         ui::canReadAloud() ? QString() : QStringLiteral("it was built without speech"));
+#endif
+            if (ui::canReadAloud()) {
+                QString detail;
+                const QString problem = ui::checkSpeech(&detail);
+                report.check(problem.isEmpty(), QStringLiteral("a sentence can be read aloud"), problem.isEmpty() ? detail : problem);
             }
 
             ui::LibrarySession session(paths);

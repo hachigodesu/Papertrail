@@ -126,6 +126,15 @@ public:
     QRectF rulerRect() const { return m_rulerRect; }
     // Scrolls only as far as needed for this part of a page to be in view, keeping it a little from the edge.
     void scrollToShow(int page, const QRectF &rect);
+    // Whether this part of a page is in view now.
+    bool isShowing(int page, const QRectF &rect) const;
+
+    // The sentence being read aloud, marked on its page.
+    void setSpoken(int page, const QList<QRectF> &rects);
+    void clearSpoken();
+    int spokenPage() const { return m_spokenPage; }
+    // Where the selection starts: its first page and the first of its boxes there.
+    std::optional<std::pair<int, QRectF>> selectionStart() const;
 
     void setSelection(int page, const QList<QRectF> &rects, const QString &text);
     void clearSelection();
@@ -284,6 +293,8 @@ private:
     int m_currentHitPage = -1;
     int m_rulerPage = -1;
     QRectF m_rulerRect;
+    int m_spokenPage = -1;
+    QList<QRectF> m_spokenRects;
     QRectF m_currentHitRect;
 
     QHash<int, Selected> m_selected;

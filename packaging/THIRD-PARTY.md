@@ -6,7 +6,8 @@ Packages of Papertrail include other free software. Each package includes the li
 
 | Software | Used for | Licence | Source |
 |---|---|---|---|
-| Qt 6 | The window, networking and images | LGPL-3.0-only | https://www.qt.io/download-open-source |
+| Qt 6 | The window, networking, images and reading aloud | LGPL-3.0-only | https://www.qt.io/download-open-source |
+| Flite | The voice for reading aloud, in Linux packages. Windows uses its own | BSD-style (Carnegie Mellon University) | https://github.com/festvox/flite |
 | MuPDF | Reading PDF, EPUB, XPS, CBZ, FB2 and MOBI | AGPL-3.0-or-later | https://mupdf.com |
 | DjVuLibre | Reading DjVu | GPL-2.0-or-later | https://djvu.sourceforge.net |
 | libmobi | Reading Kindle KF8 books | LGPL-3.0-or-later | https://github.com/bfabiszewski/libmobi |
@@ -18,6 +19,6 @@ Packages of Papertrail include other free software. Each package includes the li
 | Tesseract's English model (tessdata_fast 4.1.0) | Recognising English. Other languages are fetched when chosen, from the same collection | Apache-2.0 | https://github.com/tesseract-ocr/tessdata_fast |
 | OpenSSL | Secure connections for online lookups and summaries, in Linux packages. Windows uses its own | Apache-2.0 | https://www.openssl.org |
 
-MuPDF, Qt and Tesseract bring in others, such as FreeType, HarfBuzz, libjpeg-turbo, OpenJPEG, jbig2dec, Gumbo, libpng, ICU, Brotli, libarchive, libcurl and the GCC OpenMP runtime, whose licences are included the same way.
+MuPDF, Qt and Tesseract bring in others, such as FreeType, HarfBuzz, libjpeg-turbo, OpenJPEG, jbig2dec, Gumbo, libpng, ICU, Brotli, libarchive, libcurl, the GCC OpenMP runtime and, in Linux packages, the FFmpeg that Qt Multimedia plays speech through, whose licences are included the same way.
 
 Qt is used under the LGPL, so you may replace the Qt libraries in a package with your own build of the same version. DjVuLibre is used under GPL version 3, as its "or later" allows, which section 13 of the GNU GPL and AGPL lets be combined with Papertrail.

@@ -29,7 +29,8 @@ cmake --build "$work/build"
 DESTDIR="$work/AppDir" cmake --install "$work/build"
 # Tesseract and Leptonica, for recognising scanned text, come from the distro and are bundled below. Their licences
 # go with them.
-for doc in /usr/share/doc/libtesseract*/copyright /usr/share/doc/liblept*/copyright; do
+# So does flite, the voice for reading aloud.
+for doc in /usr/share/doc/libtesseract*/copyright /usr/share/doc/liblept*/copyright /usr/share/doc/libflite*/copyright; do
     [ -f "$doc" ] && install -Dm644 "$doc" "$work/AppDir/usr/share/licenses/$(basename "$(dirname "$doc")")/copyright"
 done
 
@@ -61,6 +62,13 @@ linuxdeploy-x86_64.AppImage \
 
 if [ ! -e "$work/AppDir/usr/lib/libcom_err.so.2" ]; then
     echo "FAILED: the AppImage has no libcom_err" >&2
+    exit 1
+fi
+
+# Reading aloud needs the flite engine, which Qt's own build hasn't got: see build-qt-flite.sh. Its voice is linked
+# into Papertrail itself, so it's bundled with it.
+if ! [ -f "$work/AppDir/usr/plugins/texttospeech/libqtexttospeech_flite.so" ]; then
+    echo "FAILED: the AppImage has no flite engine for reading aloud" >&2
     exit 1
 fi
 

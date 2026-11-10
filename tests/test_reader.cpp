@@ -14,6 +14,7 @@
 #include "ui/PublicationListModel.h"
 #include "ui/ReaderPair.h"
 #include "ui/ReaderTab.h"
+#include "ui/Speaker.h"
 #include "ui/Theme.h"
 
 #include <QApplication>
@@ -57,6 +58,42 @@ QString sample(const QString &name)
 {
     return QDir(QStringLiteral(PAPERTRAIL_TEST_SAMPLES)).filePath(name);
 }
+
+// Reads aloud only in pretence, a sentence at a time as a test asks, so no test makes a sound.
+class FakeSpeaker : public Speaker {
+public:
+    void say(const QStringList &sentences) override
+    {
+        said = sentences;
+        next = 0;
+        QTimer::singleShot(0, this, [this] { emit sentenceStarted(next); });
+    }
+    void pause() override { paused = true; }
+    void resume() override { paused = false; }
+    void stop() override
+    {
+        said.clear();
+        ++stops;
+    }
+    bool isPaused() const override { return paused; }
+    void setRate(double) override {}
+
+    // The sentence being said is done: the next starts, or all are.
+    void finishSentence()
+    {
+        if (said.isEmpty())
+            return;
+        if (++next < said.size())
+            emit sentenceStarted(next);
+        else
+            emit finished();
+    }
+
+    QStringList said;
+    int next = 0;
+    int stops = 0;
+    bool paused = false;
+};
 
 QByteArray hashOf(const QString &path)
 {
@@ -351,6 +388,93 @@ private slots:
         const QString after = reader->rulerStops(reader->rulerPage()).value(reader->rulerIndex()).text;
         QVERIFY2(after.contains(before.left(20).simplified()) || before.contains(after.left(20).simplified()),
                  qPrintable(before + QStringLiteral(" / ") + after));
+    }
+
+    void sentencesAreReadAloudAndMarkedOnThroughThePages()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reading_ruler.pdf"));
+        QVERIFY(reader && reader->isReady());
+        PageView *view = reader->pageView();
+        view->setFocus();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+
+        // From the top of the page, with nothing chosen.
+        reader->startReadingAloud();
+        QVERIFY(m_speaker);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_speaker->said.isEmpty(), kWaitMs);
+        QVERIFY(reader->isReadingAloud());
+        QCOMPARE(m_speaker->said.first(), QStringLiteral("The first paragraph of a made-up page begins here and carries on over a "
+                                                         "second line of words that mean nothing, and ends on a third."));
+        // The running head isn't read, and each paragraph's sentences are their own.
+        QCOMPARE(m_speaker->said.size(), 3);
+        QTRY_COMPARE_WITH_TIMEOUT(view->spokenPage(), 0, kWaitMs);
+        QCOMPARE(reader->readingSentence(), 0);
+
+        m_speaker->finishSentence();
+        QCOMPARE(reader->readingSentence(), 1);
+        QVERIFY(m_speaker->said.at(1).startsWith(QStringLiteral("A second paragraph")));
+        // On to the next page when they're all said.
+        m_speaker->finishSentence();
+        m_speaker->finishSentence();
+        QTRY_COMPARE_WITH_TIMEOUT(reader->readingPage(), 1, kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_speaker->said.isEmpty() && m_speaker->said.first().startsWith(QStringLiteral("The second page")),
+                                 kWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(view->spokenPage(), 1, kWaitMs);
+        // And it stops at the end.
+        m_speaker->finishSentence();
+        QTRY_VERIFY_WITH_TIMEOUT(!reader->isReadingAloud(), kWaitMs);
+        QCOMPARE(view->spokenPage(), -1);
+    }
+
+    void readingAloudStartsAtTheRulerAndEscapeStopsIt()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reading_ruler.pdf"));
+        QVERIFY(reader && reader->isReady());
+        PageView *view = reader->pageView();
+        view->setFocus();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+        reader->setRulerShown(true);
+        QTRY_VERIFY_WITH_TIMEOUT(view->hasRuler(), kWaitMs);
+        for (int i = 0; i < 3; ++i)
+            QTest::keyClick(view, Qt::Key_Down);
+        QCOMPARE(reader->rulerIndex(), 3); // "A second paragraph".
+
+        // The View menu's way, through the window.
+        QAction *readAloud = nullptr;
+        for (QAction *action : m_window->findChildren<QAction *>()) {
+            if (action->text().remove(u'&') == QStringLiteral("Read aloud"))
+                readAloud = action;
+        }
+        QVERIFY(readAloud && readAloud->isEnabled());
+        readAloud->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(m_speaker && !m_speaker->said.isEmpty(), kWaitMs);
+        QVERIFY(m_speaker->said.first().startsWith(QStringLiteral("A second paragraph")));
+        QCOMPARE(m_speaker->said.size(), 2);
+        // The ruler follows what's read.
+        m_speaker->finishSentence();
+        QCOMPARE(reader->rulerIndex(), 5);
+
+        // Again pauses, and again carries on.
+        readAloud->trigger();
+        QVERIFY(m_speaker->paused);
+        readAloud->trigger();
+        QVERIFY(!m_speaker->paused);
+
+        // Escape stops reading before it puts the ruler away.
+        QTest::keyClick(view, Qt::Key_Escape);
+        QVERIFY(!reader->isReadingAloud());
+        QVERIFY(reader->isRulerShown());
+        QCOMPARE(view->spokenPage(), -1);
+        QTest::keyClick(view, Qt::Key_Escape);
+        QVERIFY(!reader->isRulerShown());
+
+        // Closing the document stops it too.
+        reader->startReadingAloud();
+        QTRY_VERIFY_WITH_TIMEOUT(reader->isReadingAloud() && !m_speaker->said.isEmpty(), kWaitMs);
+        const int stops = m_speaker->stops;
+        QPointer<FakeSpeaker> speaker = m_speaker;
+        m_window->closeDocumentTab(m_window->documentTabs()->indexOf(reader));
+        QTRY_VERIFY_WITH_TIMEOUT(!speaker || speaker->stops > stops, kWaitMs);
     }
 
     void readsLinesAndPartsOfAPage()
@@ -2106,6 +2230,11 @@ private:
             paths.cacheDirectory = m_dir->filePath(QStringLiteral("cache"));
             paths.workerPath = worker();
             paths.settleMs = 0;
+            paths.speakerFactory = [this] {
+                auto speaker = std::make_unique<FakeSpeaker>();
+                m_speaker = speaker.get();
+                return std::unique_ptr<Speaker>(std::move(speaker));
+            };
             m_session = std::make_unique<LibrarySession>(paths);
             m_session->settings().setValue(QStringLiteral("library.rescan_on_startup"), false);
         }
@@ -2166,6 +2295,7 @@ private:
         return reader;
     }
 
+    QPointer<FakeSpeaker> m_speaker;
     std::unique_ptr<QTemporaryDir> m_dir;
     std::unique_ptr<QTimer> m_boxWatcher;
     QStringList m_unexpectedBoxes;

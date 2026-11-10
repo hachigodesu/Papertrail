@@ -28,6 +28,7 @@ papertrail_core_test(test_search_parser)
 papertrail_core_test(test_references)
 papertrail_core_test(test_library_query)
 papertrail_core_test(test_library_check)
+papertrail_core_test(test_sentences)
 
 papertrail_core_test(test_extractors papertrail_import)
 papertrail_core_test(test_import papertrail_import)

@@ -41,6 +41,12 @@ add_compile_definitions(PAPERTRAIL_SOURCE_URL="${PAPERTRAIL_SOURCE_URL}")
 install(FILES LICENSE packaging/THIRD-PARTY.md DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/papertrail)
 # Declared before anything uses it, since a first configure has nothing in its cache yet.
 option(PAPERTRAIL_WITH_OCR "Recognise text in scanned pages with Tesseract" ON)
+# Reading documents aloud with Qt's text-to-speech, and on Linux the flite voice that comes with Papertrail.
+option(PAPERTRAIL_WITH_SPEECH "Read documents aloud with Qt TextToSpeech" ON)
+if(PAPERTRAIL_WITH_SPEECH)
+    # Here, since every program linking the static papertrail_ui needs to see these targets.
+    find_package(Qt6 ${PAPERTRAIL_QT_MINIMUM} REQUIRED COMPONENTS TextToSpeech Multimedia)
+endif()
 # A package to give out, whose self-test fails if anything optional, such as recognising text, isn't in it.
 option(PAPERTRAIL_PACKAGE "Build a package, whose self-test requires every optional feature" OFF)
 

@@ -96,6 +96,9 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("reader.page_colours"), QStringLiteral("light"), K::Value,
          {QStringLiteral("light"), QStringLiteral("dark"), QStringLiteral("sepia")}},
         {QStringLiteral("reader.font_size"), 12.0, K::Value, {}},
+        // Reading aloud, with a voice of this computer's.
+        {QStringLiteral("reader.voice"), QStringLiteral(""), K::ThisComputer, {}},
+        {QStringLiteral("reader.speech_rate"), 0.0, K::ThisComputer, {}},
         // What the reading ruler marks.
         {QStringLiteral("reader.ruler"), QStringLiteral("line"), K::Value, {QStringLiteral("line"), QStringLiteral("paragraph")}},
         {QStringLiteral("citation.style"), QStringLiteral("harvard"), K::Value,

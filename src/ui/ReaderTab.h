@@ -16,6 +16,9 @@
 #include <QSet>
 #include <QWidget>
 
+#include "core/text/Sentences.h"
+
+#include <memory>
 #include <optional>
 
 class QListWidget;
@@ -103,6 +106,17 @@ public:
     void setRulerShown(bool shown);
     bool isRulerShown() const { return m_rulerShown; }
     void moveRuler(int step);
+
+    // Reading aloud, from the start of the selection, else the ruler's line, else the top of the page being read, a
+    // sentence at a time, marking each, and on through the pages shown.
+    void startReadingAloud();
+    void pauseOrResumeReadingAloud();
+    void stopReadingAloud();
+    bool isReadingAloud() const { return m_reading; }
+    bool isReadingPaused() const;
+    // Where it's got to, for tests: the page, and which sentence of those on it.
+    int readingPage() const { return m_reading ? m_readingPage : -1; }
+    int readingSentence() const { return m_readingIndex; }
     // Where it is, for tests: the page, and which line or paragraph of it.
     int rulerPage() const { return m_rulerPage; }
     int rulerIndex() const { return m_rulerIndex; }
@@ -190,6 +204,7 @@ signals:
     // The user asked to open this file with something else, because it can't be shown here.
     void openElsewhereRequested(const QString &path);
     void rulerShownChanged(bool shown);
+    void readingAloudChanged(bool reading);
 
     // Reports what's happening with this tab's search and problems, for the window's status bar.
     void statusMessage(const QString &message);
@@ -372,6 +387,22 @@ private:
     int m_rulerWaiting = 0;
     std::optional<QPointF> m_rulerWaitingPoint;
     QString m_rulerText; // Where it was, to find again after a new layout.
+
+    void readPage(int page, double fromY);
+    void onSentenceStarted(int index);
+    void onReadingFinished();
+    std::unique_ptr<class Speaker> m_speaker;
+    bool m_reading = false;
+    int m_readingPage = -1;
+    double m_readingFrom = 0;    // Where on the page to start, in points from its top.
+    bool m_readingWaiting = false; // For the page's lines.
+    QList<core::Sentence> m_readingSentences; // From where it started on the page.
+    int m_readingFirst = 0;       // How many of the page's sentences came before those.
+    int m_readingIndex = -1;      // Of the page's sentences.
+    bool m_followReading = true;  // Until the user scrolls away from it.
+    QAction *m_readPauseAction = nullptr;
+    QAction *m_readStopAction = nullptr;
+    class QToolButton *m_readPause = nullptr;
     std::function<void(const QUrl &)> m_openLink;
 
     QList<Hit> m_hits;

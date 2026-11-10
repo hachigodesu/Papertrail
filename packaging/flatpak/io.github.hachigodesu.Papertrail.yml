@@ -26,6 +26,8 @@ finish-args:
   - --filesystem=host:ro
   # The Claude API key is kept in the desktop's keyring.
   - --talk-name=org.freedesktop.secrets
+  # Reading aloud.
+  - --socket=pulseaudio
 
 cleanup:
   - /include
@@ -110,6 +112,35 @@ modules:
     cleanup:
       - /bin
       - /share/tessdata
+
+  # Reading aloud. The runtime's Qt TextToSpeech has no engine with a voice, so flite, and Qt's engine for it, are
+  # built here. Papertrail registers flite's voice itself, since Qt's engine only looks for voices in the runtime.
+  - name: flite
+    buildsystem: autotools
+    no-parallel-make: true
+    config-opts:
+      - --enable-shared
+      - --with-audio=none
+    sources:
+      - type: archive
+        url: https://github.com/festvox/flite/archive/refs/tags/v2.2.tar.gz
+        sha256: ab1555fe5adc3f99f1d4a1a0eb1596d329fd6d74f1464a0097c81f53c0cf9e5c
+    post-install:
+      - install -Dm644 COPYING /app/share/licenses/flite/COPYING
+    cleanup:
+      - /bin
+
+  - name: qtspeech
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DQT_BUILD_EXAMPLES=OFF
+      - -DQT_BUILD_TESTS=OFF
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.11/6.11.3/submodules/qtspeech-everywhere-src-6.11.3.tar.xz
+        sha256: cfadb37721f20c2dc85926a1edbf6c165d9162ea38ccdb6cbc4466109a21578c
 
   - name: papertrail
     buildsystem: cmake-ninja

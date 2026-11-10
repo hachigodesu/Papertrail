@@ -22,6 +22,7 @@
 #include "ui/LibraryFoldersDialog.h"
 #include "ui/LibrarySession.h"
 #include "ui/LibraryCheckDialog.h"
+#include "ui/Speaker.h"
 #include "ui/LookupThread.h"
 #include "ui/OnlineLookupDialog.h"
 #include "core/repo/VolumeArticles.h"
@@ -1052,6 +1053,34 @@ void MainWindow::buildMenus()
         if (ReaderTab *reader = activeReader())
             reader->addBookmark();
     });
+    m_readAloud = view->addAction(tr("Read &aloud"));
+    m_readAloud->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Space));
+    m_readAloud->setEnabled(false);
+    m_readAloud->setToolTip(canReadAloud() ? tr("Reads from the selection, the ruler's line or the top of the page, marking each "
+                                                "sentence. Again to pause, and Escape stops.")
+                                           : tr("This copy of Papertrail can't read aloud."));
+    connect(m_readAloud, &QAction::triggered, this, [this] {
+        ReaderTab *reader = activeReader();
+        if (!reader)
+            return;
+        // Only one document reads at a time.
+        for (int i = 0; i < m_documentTabs->count(); ++i) {
+            for (ReaderTab *other : readersIn(m_documentTabs->widget(i))) {
+                if (other != reader)
+                    other->stopReadingAloud();
+            }
+        }
+        if (reader->isReadingAloud())
+            reader->pauseOrResumeReadingAloud();
+        else
+            reader->startReadingAloud();
+    });
+    addAction(m_readAloud); // In full screen too.
+    m_stopReading = view->addAction(tr("Stop reading aloud"), this, [this] {
+        if (ReaderTab *reader = activeReader())
+            reader->stopReadingAloud();
+    });
+    m_stopReading->setEnabled(false);
     m_ruler = view->addAction(tr("Reading &ruler"));
     m_ruler->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
     m_ruler->setCheckable(true);
@@ -2031,6 +2060,7 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
             kickIndexing();
         });
         connect(reader, &ReaderTab::rulerShownChanged, this, &MainWindow::updateRulerAction);
+        connect(reader, &ReaderTab::readingAloudChanged, this, &MainWindow::updateRulerAction);
         connect(reader, &ReaderTab::escapeUnused, this, [this] {
             if (isFullScreenReading())
                 m_fullScreen->setChecked(false);
@@ -2272,6 +2302,10 @@ void MainWindow::updateRulerAction()
     ReaderTab *reader = activeReader();
     m_ruler->setEnabled(reader != nullptr);
     m_ruler->setChecked(reader && reader->isRulerShown());
+    if (m_readAloud) {
+        m_readAloud->setEnabled(reader != nullptr && canReadAloud());
+        m_stopReading->setEnabled(reader && reader->isReadingAloud());
+    }
 }
 
 HighlightsWindow *MainWindow::highlightsWindow() const
