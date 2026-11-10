@@ -1147,6 +1147,9 @@ private slots:
         QCOMPARE(popup->list()->topLevelItem(2)->text(1), QStringLiteral("4"));
 
         // Typing narrows it down, and Enter goes there, which Back comes back from.
+        // For looking at by eye, if asked for.
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty())
+            popup->grab().save(QDir(pictures).filePath(QStringLiteral("contents-popup.png")));
         QTest::keyClicks(popup->searchBox(), QStringLiteral("two"));
         QCOMPARE(popup->list()->topLevelItemCount(), 1);
         QCOMPARE(popup->list()->currentItem()->text(0), QStringLiteral("Chapter Two"));
@@ -1261,6 +1264,8 @@ private slots:
         QVERIFY(!preview->pictureLabel()->pixmap().isNull());
         QVERIFY(preview->pictureLabel()->pixmap().deviceIndependentSize().width() > 200);
         QCOMPARE(view->topPage(), 0); // Only a look, so far.
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty())
+            preview->grab().save(QDir(pictures).filePath(QStringLiteral("reference-preview.png")));
 
         // Going there can be come back from.
         QTest::keyClick(preview, Qt::Key_Return);
@@ -1453,6 +1458,10 @@ private slots:
         QVERIFY(left->isInPair() && right->isInPair());
         QVERIFY(left->closeSideButton()->isVisibleTo(left));
         QCOMPARE(m_window->readersIn(pair).size(), 2);
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {
+            QTest::qWait(1000);
+            m_window->grab().save(QDir(pictures).filePath(QStringLiteral("side-by-side.png")));
+        }
 
         // Shortcuts go to the side being read, which is the one last used.
         QCOMPARE(m_window->activeReader(), right);

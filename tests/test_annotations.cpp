@@ -505,6 +505,13 @@ private slots:
         QCOMPARE(item->data(AnnotationDelegate::HeadingRole).toString(), QStringLiteral("Area on page %1").arg(page + 1));
         QVERIFY(item->data(AnnotationDelegate::QuoteRole).toString().isEmpty());
         QTRY_VERIFY_WITH_TIMEOUT(!item->data(AnnotationDelegate::PictureRole).value<QImage>().isNull(), kLongWaitMs);
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {
+            m_window->resize(1200, 800);
+            reader->setSidePanelVisible(true);
+            reader->findChild<QTabWidget *>()->setCurrentIndex(2);
+            QTest::qWait(1000);
+            m_window->grab().save(QDir(pictures).filePath(QStringLiteral("area.png")));
+        }
         QCOMPARE(reader->annotationsAsText({area.id}), QStringLiteral("Area on page %1").arg(page + 1));
         qint64 total = 0;
         QCOMPARE(annotations.everywhere(QStringLiteral("findme"), 10, &total).size(), 1);

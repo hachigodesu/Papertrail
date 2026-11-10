@@ -2156,6 +2156,17 @@ private slots:
         QVERIFY(!dialog.addUnmatchedBox()->isChecked());
         QVERIFY(!dialog.collectionBox()->isChecked());
         QVERIFY(!dialog.options().addUnmatched);
+        if (const QString pictures = qEnvironmentVariable("PAPERTRAIL_TEST_PICTURES"); !pictures.isEmpty()) {
+            dialog.grab().save(QDir(pictures).filePath(QStringLiteral("reference-import.png")));
+            Publication judgment;
+            judgment.type = PublicationType::CaseLaw;
+            judgment.title = QStringLiteral("Made-Up Holdings Ltd v Another Example Plc");
+            judgment.court = QStringLiteral("Court of Appeal (Civil Division)");
+            judgment.neutralCitation = QStringLiteral("[2021] EWCA Civ 1234");
+            MetadataEditor editor(judgment, m_window.get());
+            editor.show();
+            editor.grab().save(QDir(pictures).filePath(QStringLiteral("case-editor.png")));
+        }
 
         // Applying it backs the library up first, and only changes what matched.
         const qint64 backupsBefore = backups(m_session->paths().database).size();
