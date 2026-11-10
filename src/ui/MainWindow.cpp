@@ -8,6 +8,7 @@
 #include "core/repo/LookupRepository.h"
 #include "core/repo/NoticeRepository.h"
 #include "core/repo/PublicationMerge.h"
+#include "metadata/CaseLaw.h"
 #include "metadata/Matching.h"
 #include "ui/BulkChanges.h"
 #include "ui/CoverCache.h"
@@ -258,8 +259,12 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     };
     m_keys = keyStore(kClaudeKeyEntry);
     m_openAlexKeys = keyStore(kOpenAlexKeyEntry);
+    m_courtListenerKeys = keyStore(kCourtListenerKeyEntry);
+    m_canLiiKeys = keyStore(kCanLiiKeyEntry);
     // Held only in memory by the lookups, from the credential store, which may answer later.
     m_openAlexKeys->read([this](const QString &key) { m_lookup->setKey(metadata::kOpenAlex, key); });
+    m_courtListenerKeys->read([this](const QString &key) { m_lookup->setKey(metadata::kCourtListener, key); });
+    m_canLiiKeys->read([this](const QString &key) { m_lookup->setKey(metadata::kCanLii, key); });
     m_summaryTransport = session.paths().transportFactory ? session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
     m_batches = new summary::SummaryBatches(session.database(), *m_summaryTransport, session.paths().providerUrls.anthropic, this);
     connect(m_batches, &summary::SummaryBatches::submitted, this, [this](int count) {
@@ -3002,6 +3007,15 @@ void MainWindow::showLookupSettings()
                      "rather than the smaller one shared by everyone on the same internet address. It's kept in this "
                      "computer's credential store, sent only to OpenAlex, and never in Papertrail's database, settings or exports."),
                   *m_openAlexKeys, [this](const QString &key) { m_lookup->setKey(metadata::kOpenAlex, key); });
+    dialog.addKey(tr("CourtListener token"),
+                  tr("For details of US cases, from the Free Law Project's CourtListener, which needs a free account's token "
+                     "from courtlistener.com. Only a case's name, report citation and year are sent, and the token only to "
+                     "CourtListener."),
+                  *m_courtListenerKeys, [this](const QString &key) { m_lookup->setKey(metadata::kCourtListener, key); });
+    dialog.addKey(tr("CanLII key"),
+                  tr("For details of Canadian cases with a neutral citation, from CanLII, which gives keys on request at "
+                     "canlii.org. Only the citation is sent, and the key only to CanLII."),
+                  *m_canLiiKeys, [this](const QString &key) { m_lookup->setKey(metadata::kCanLii, key); });
     if (dialog.exec() == QDialog::Accepted) {
         guarded(tr("Saving settings"),
                 [&] { m_session.settings().setValue(QStringLiteral("metadata.check_notices"), dialog.checkNotices()); });
@@ -3023,7 +3037,7 @@ bool MainWindow::makeSureLookupModeIsChosen()
     return lookupMode() != QLatin1StringView("offline");
 }
 
-void MainWindow::lookUp(const QList<qint64> &ids)
+void MainWindow::lookUp(const QList<qint64> &ids, bool chosen)
 {
     const QString mode = lookupMode();
     if (mode == QLatin1StringView("offline") || ids.isEmpty())
@@ -3033,7 +3047,7 @@ void MainWindow::lookUp(const QList<qint64> &ids)
         Transaction transaction(m_session.database());
         for (const qint64 id : ids)
             lookups.resolveCandidates(id);
-        lookups.enqueue(ids, mode, true);
+        lookups.enqueue(ids, mode, true, chosen);
         transaction.commit();
         updateReviewButton();
         m_lookup->kick();
@@ -3059,7 +3073,7 @@ void MainWindow::askAndLookUpLibrary()
 void MainWindow::askAndLookUpSelected()
 {
     if (makeSureLookupModeIsChosen())
-        lookUp(selectedIds());
+        lookUp(selectedIds(), true);
 }
 
 ReviewTab *MainWindow::reviewTab() const

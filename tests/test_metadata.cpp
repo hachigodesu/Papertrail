@@ -15,6 +15,7 @@
 #include "ui/RelatedPapersDialog.h"
 #include "metadata/Providers.h"
 #include "metadata/Transport.h"
+#include "metadata/CaseLaw.h"
 #include "ui/ApiKeyStore.h"
 #include "ui/Delegates.h"
 #include "ui/DetailsPanel.h"
@@ -947,6 +948,267 @@ private slots:
         QVERIFY(keyHeaders(kOpenAlex, QStringLiteral("abc\r\nX-Other: 1")).isEmpty());
         QVERIFY(keyHeaders(kOpenAlex, QStringLiteral("  ")).isEmpty());
         QVERIFY(keyHeaders(kCrossref, QStringLiteral("abc123")).isEmpty());
+    }
+
+    // ---- Court cases
+
+    void caseSourcesAnswersAreRead()
+    {
+        const QList<FoundRecord> uk = parseFindCaseLaw(fixture("findcaselaw.atom"));
+        QCOMPARE(uk.size(), 2);
+        QCOMPARE(uk.at(0).publication.url, QString()); // Not a page of its own site.
+        const Publication &supreme = uk.at(1).publication;
+        QCOMPARE(supreme.title, QStringLiteral("Made-Up Holdings Ltd v Example Council"));
+        QCOMPARE(supreme.neutralCitation, QStringLiteral("[2021] UKSC 99"));
+        QCOMPARE(supreme.court, QStringLiteral("United Kingdom Supreme Court"));
+        QCOMPARE(supreme.jurisdiction, QStringLiteral("United Kingdom"));
+        QCOMPARE(supreme.year.value_or(0), 2021);
+        QCOMPARE(supreme.month.value_or(0), 3);
+        QCOMPARE(supreme.day.value_or(0), 4);
+        QCOMPARE(supreme.url, QStringLiteral("https://caselaw.nationalarchives.gov.uk/uksc/2021/99"));
+        QCOMPARE(supreme.caseCitationForm, QStringLiteral("uk"));
+        QCOMPARE(uk.at(0).publication.jurisdiction, QStringLiteral("England and Wales"));
+        QVERIFY(uk.at(1).type && *uk.at(1).type == PublicationType::CaseLaw);
+
+        const QList<FoundRecord> us = parseCourtListenerSearch(fixture("courtlistener_search.json"));
+        QCOMPARE(us.size(), 2);
+        const Publication &sample = us.at(0).publication;
+        QCOMPARE(sample.title, QStringLiteral("Sample v. Example County"));
+        // The official report, wherever it comes in the list.
+        QCOMPARE(sample.volume, QStringLiteral("999"));
+        QCOMPARE(sample.containerTitle, QStringLiteral("U.S."));
+        QCOMPARE(sample.pages, QStringLiteral("111"));
+        QCOMPARE(sample.court, QStringLiteral("U.S."));
+        QCOMPARE(sample.caseNumber, QStringLiteral("No. 19-9999"));
+        QCOMPARE(sample.url, QStringLiteral("https://www.courtlistener.com/opinion/1234/sample-v-example-county/"));
+        QCOMPARE(sample.caseCitationForm, QStringLiteral("us"));
+        QCOMPARE(us.at(1).publication.court, QStringLiteral("9th Cir."));
+        QCOMPARE(us.at(1).publication.url, QString()); // Another site's address isn't kept.
+
+        const QList<FoundRecord> eu = parseEurLex(fixture("eurlex_sparql.json"));
+        QCOMPARE(eu.size(), 1);
+        QCOMPARE(eu.first().publication.title, QStringLiteral("Made-Up Association v Example Authority"));
+        QCOMPARE(eu.first().publication.neutralCitation, QStringLiteral("ECLI:EU:C:2019:999"));
+        QCOMPARE(eu.first().publication.caseNumber, QStringLiteral("C-999/18"));
+        QCOMPARE(eu.first().publication.court, QStringLiteral("Court of Justice"));
+        QCOMPARE(eu.first().publication.day.value_or(0), 5);
+
+        const std::optional<FoundRecord> ca = parseCanLii(fixture("canlii_case.json"));
+        QVERIFY(ca);
+        QCOMPARE(ca->publication.neutralCitation, QStringLiteral("2022 SCC 99"));
+        QCOMPARE(ca->publication.court, QStringLiteral("Supreme Court of Canada"));
+        QCOMPARE(ca->publication.url, QStringLiteral("https://canlii.ca/t/zz999"));
+
+        // Nonsense is no answer.
+        QVERIFY(parseFindCaseLaw("<not xml").isEmpty());
+        QVERIFY(parseCourtListenerSearch("{\"results\": 5}").isEmpty());
+        QVERIFY(parseEurLex("[]").isEmpty());
+        QVERIFY(!parseCanLii("{\"title\": \"x\", \"citation\": \"not one\"}"));
+    }
+
+    void casesAreToldApartByJurisdiction()
+    {
+        Publication p;
+        p.type = PublicationType::CaseLaw;
+        p.neutralCitation = QStringLiteral("[2021] UKSC 99");
+        QCOMPARE(caseJurisdictionOf(p), CaseJurisdiction::UnitedKingdom);
+        p.neutralCitation = QStringLiteral("[2020] EWHC 4321 (Ch)");
+        QCOMPARE(caseJurisdictionOf(p), CaseJurisdiction::UnitedKingdom);
+        p.neutralCitation = QStringLiteral("[2019] CSIH 12");
+        p.caseCitationForm = QStringLiteral("uk");
+        QCOMPARE(caseJurisdictionOf(p), CaseJurisdiction::Unknown); // Scotland's courts aren't in Find Case Law.
+        p.neutralCitation = QStringLiteral("ECLI:EU:C:2019:999");
+        QCOMPARE(caseJurisdictionOf(p), CaseJurisdiction::EuropeanUnion);
+        p.neutralCitation = QStringLiteral("2022 SCC 99");
+        QCOMPARE(caseJurisdictionOf(p), CaseJurisdiction::Canada);
+
+        Publication us;
+        us.type = PublicationType::CaseLaw;
+        us.containerTitle = QStringLiteral("F.3d");
+        QCOMPARE(caseJurisdictionOf(us), CaseJurisdiction::UnitedStates);
+        Publication circuit;
+        circuit.court = QStringLiteral("9th Cir.");
+        QCOMPARE(caseJurisdictionOf(circuit), CaseJurisdiction::UnitedStates);
+        Publication eu;
+        eu.caseNumber = QStringLiteral("Case C-999/18");
+        QCOMPARE(caseJurisdictionOf(eu), CaseJurisdiction::EuropeanUnion);
+        QCOMPARE(celexForCaseNumber(eu.caseNumber), QStringLiteral("62018CJ0999"));
+        QCOMPARE(celexForCaseNumber(QStringLiteral("T-12/05")), QStringLiteral("62005TJ0012"));
+        Publication nowhere;
+        nowhere.jurisdiction = QStringLiteral("Australia");
+        nowhere.caseCitationForm = QStringLiteral("uk");
+        QCOMPARE(caseJurisdictionOf(nowhere), CaseJurisdiction::Unknown);
+        QCOMPARE(caseJurisdictionOf(Publication{}), CaseJurisdiction::Unknown);
+
+        QVERIFY(canLiiCaseFor(QStringLiteral("2022 SCC 99")));
+        QCOMPARE(canLiiCaseFor(QStringLiteral("2022 SCC 99"))->databaseId, QStringLiteral("csc-scc"));
+        QCOMPARE(canLiiCaseFor(QStringLiteral("2022 SCC 99"))->caseId, QStringLiteral("2022scc99"));
+        QVERIFY(!canLiiCaseFor(QStringLiteral("2022 XYZ 99")));
+    }
+
+    void caseNamesAreComparedAsCasesAre()
+    {
+        QVERIFY(caseNameSimilarity(QStringLiteral("Made-Up BV and others v Sample and others"), QStringLiteral("Made-Up v Sample")) >= 0.8);
+        QCOMPARE(caseNameSimilarity(QStringLiteral("R v Example"), QStringLiteral("Regina v. Example")), 1.0);
+        QCOMPARE(caseNameSimilarity(QStringLiteral("Sample v. Example County"), QStringLiteral("Sample vs Example County")), 1.0);
+        QVERIFY(caseNameSimilarity(QStringLiteral("Sample v Example County"), QStringLiteral("Other Party v Someone Else")) < 0.5);
+        // Sharing one party, or the Crown, isn't being the same case.
+        QVERIFY(caseNameSimilarity(QStringLiteral("Sample v Example"), QStringLiteral("Sample v Another Made Up Ltd")) < 0.5);
+        QVERIFY(caseNameSimilarity(QStringLiteral("R v Sample"), QStringLiteral("R v Example")) < 0.5);
+    }
+
+    void aHostileCaseNumberCantChangeWhatsAsked()
+    {
+        const ProviderUrls urls;
+        // Anything after the ECLI itself means it isn't trusted as one, and a case number only ever gives digits.
+        QVERIFY(eurLexQueryUrl(urls, QStringLiteral("ECLI:EU:C:2019:1\") } DELETE { ?s ?p ?o"), QString()).isEmpty());
+        QCOMPARE(celexForCaseNumber(QStringLiteral("C-1/19\") } DELETE")), QStringLiteral("62019CJ0001"));
+        const QString query = QUrlQuery(eurLexQueryUrl(urls, QString(), QStringLiteral("62019CJ0001"))).queryItemValue(QStringLiteral("query"), QUrl::FullyDecoded);
+        QVERIFY(query.contains(QStringLiteral("\"62019CJ0001\"")));
+        QVERIFY(!query.contains(QStringLiteral("DELETE")));
+        // CourtListener's search can't be broken out of either.
+        const QString q = QUrlQuery(courtListenerNameUrl(urls, QStringLiteral("Sample\") OR caseName:(\"x"), std::nullopt))
+                              .queryItemValue(QStringLiteral("q"), QUrl::FullyDecoded);
+        QCOMPARE(q.count(u'"'), 2);
+        QCOMPARE(q.count(u'('), 1);
+    }
+
+    void aCaseIsNeverSentToSourcesOfPapers()
+    {
+        m_fake->answer(QStringLiteral("api.crossref.org"), fixture("crossref_search.json"));
+        m_fake->answer(QStringLiteral("api.openalex.org"), fixture("openalex_search.json"));
+        Publication p;
+        p.type = PublicationType::CaseLaw;
+        p.title = QStringLiteral("Made Up Holdings Ltd v Example Council of Somewhere");
+        p.doi = QStringLiteral("10.1000/something.it.cites");
+        p.jurisdiction = QStringLiteral("Australia");
+        const qint64 id = m_publications->create(p);
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"), true, true);
+        run();
+        QCOMPARE(m_fake->count(), 0);
+        QCOMPARE(m_publications->get(id)->title, p.title);
+
+        // And a paper's details can never change a case, whatever's asked.
+        FoundRecord paper;
+        paper.provider = kCrossref;
+        paper.type = PublicationType::JournalArticle;
+        paper.publication.title = p.title;
+        paper.publication.containerTitle = QStringLiteral("A Made-Up Journal");
+        QVERIFY(plannedChanges(*m_publications->get(id), paper, {}).isEmpty());
+    }
+
+    void aUkCaseIsOnlyAskedOfFindCaseLawWhenChosen()
+    {
+        m_fake->answer(QStringLiteral("caselaw.nationalarchives.gov.uk"), fixture("findcaselaw.atom"));
+        Publication p;
+        p.type = PublicationType::CaseLaw;
+        p.title = QStringLiteral("Made-Up Holdings Ltd v Example Council");
+        p.neutralCitation = QStringLiteral("[2021] UKSC 99");
+        p.year = 2021;
+        const qint64 id = m_publications->create(p);
+
+        // Not on import, nor for the whole library.
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"), true);
+        run();
+        QCOMPARE(m_fake->count(), 0);
+
+        m_lookups->enqueue({id}, QStringLiteral("online_review"), true, true);
+        run();
+        QCOMPARE(m_fake->count(), 1);
+        QVERIFY2(m_fake->asked.first().contains(QStringLiteral("UKSC%2099")), qPrintable(m_fake->asked.first()));
+        QVERIFY(m_fake->asked.first().contains(QStringLiteral("order=relevance")));
+        const Publication after = *m_publications->get(id);
+        QCOMPARE(after.type, PublicationType::CaseLaw);
+        QCOMPARE(after.court, QStringLiteral("United Kingdom Supreme Court"));
+        QCOMPARE(after.jurisdiction, QStringLiteral("United Kingdom"));
+        QCOMPARE(after.month.value_or(0), 3);
+        QCOMPARE(after.url, QStringLiteral("https://caselaw.nationalarchives.gov.uk/uksc/2021/99"));
+        QCOMPARE(undoableSource(*m_db, id), kFindCaseLaw);
+        QVERIFY(undoLastLookup(*m_db, id) > 0);
+        QCOMPARE(m_publications->get(id)->court, QString());
+    }
+
+    void aUsCaseNeedsATokenAndIsFoundByItsReport()
+    {
+        m_fake->answer(QStringLiteral("www.courtlistener.com"), fixture("courtlistener_search.json"));
+        Publication p;
+        p.type = PublicationType::CaseLaw;
+        p.title = QStringLiteral("Sample v. Example County");
+        p.containerTitle = QStringLiteral("U.S.");
+        p.volume = QStringLiteral("999");
+        p.pages = QStringLiteral("111");
+        p.court = QStringLiteral("Set by hand");
+        const qint64 id = m_publications->create(p);
+        m_db->exec("INSERT INTO metadata_provenance (publication_id, field, source, new_value, recorded_at) "
+                   "SELECT id, 'court', 'manual', court, 1 FROM publication");
+
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"), true, true);
+        run();
+        QCOMPARE(m_fake->count(), 0); // No token, no CourtListener.
+
+        m_engine->setKey(kCourtListener, QStringLiteral("madeUpToken"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"), true, true);
+        run();
+        QCOMPARE(m_fake->count(), 1);
+        QVERIFY2(m_fake->asked.first().contains(QStringLiteral("citation")), qPrintable(m_fake->asked.first()));
+        QVERIFY(!m_fake->asked.first().contains(QStringLiteral("madeUpToken")));
+        QVERIFY(m_fake->headers.first().contains("Authorization: Token madeUpToken"));
+        const Publication after = *m_publications->get(id);
+        QCOMPARE(after.caseNumber, QStringLiteral("No. 19-9999"));
+        QCOMPARE(after.court, QStringLiteral("Set by hand"));
+        QCOMPARE(after.day.value_or(0), 14);
+        QVERIFY(!after.needsReview); // Its report matched, and its name agrees.
+    }
+
+    void anEuCaseIsFoundByItsCaseNumber()
+    {
+        m_fake->answer(QStringLiteral("publications.europa.eu"), fixture("eurlex_sparql.json"));
+        Publication p;
+        p.type = PublicationType::CaseLaw;
+        p.title = QStringLiteral("Made-Up Association v Example Authority");
+        p.caseNumber = QStringLiteral("Case C-999/18");
+        const qint64 id = m_publications->create(p);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        run();
+        QCOMPARE(m_fake->count(), 1);
+        QVERIFY(m_fake->asked.first().contains(QStringLiteral("62018CJ0999")));
+        const Publication after = *m_publications->get(id);
+        QCOMPARE(after.neutralCitation, QStringLiteral("ECLI:EU:C:2019:999"));
+        QCOMPARE(after.court, QStringLiteral("Court of Justice"));
+        QCOMPARE(after.jurisdiction, QStringLiteral("European Union"));
+        QCOMPARE(after.caseNumber, QStringLiteral("Case C-999/18")); // Already there, so left as it was.
+    }
+
+    void aCanadianCasesKeyStaysOutOfEverythingButItsRequest()
+    {
+        Publication p;
+        p.type = PublicationType::CaseLaw;
+        p.title = QStringLiteral("Sample v Example Corp");
+        p.neutralCitation = QStringLiteral("2022 SCC 99");
+        const qint64 id = m_publications->create(p);
+        m_engine->setKey(kCanLii, QStringLiteral("canKey1"));
+        // First the network fails, saying where it was going, as Qt's messages do.
+        TransportReply failure;
+        failure.error = QStringLiteral("Error transferring https://api.canlii.org/v1/caseBrowse/en/csc-scc/2022scc99/?api_key=canKey1");
+        m_fake->oneOff << failure;
+        m_fake->answer(QStringLiteral("api.canlii.org"), fixture("canlii_case.json"));
+        QSignalSpy problems(m_engine.get(), &LookupEngine::problem);
+        m_lookups->enqueue({id}, QStringLiteral("online_review"));
+        run();
+
+        QVERIFY(!problems.isEmpty());
+        for (const QList<QVariant> &problem : std::as_const(problems))
+            QVERIFY2(!problem.first().toString().contains(QStringLiteral("canKey1")), qPrintable(problem.first().toString()));
+        QVERIFY(m_fake->count() >= 2);
+        QVERIFY2(m_fake->asked.last().contains(QStringLiteral("/v1/caseBrowse/en/csc-scc/2022scc99/")), qPrintable(m_fake->asked.last()));
+        QVERIFY(m_fake->asked.last().contains(QStringLiteral("api_key=canKey1")));
+        QVERIFY(!m_fake->headers.last().isEmpty()); // Sent the way that never follows a redirect.
+        auto cached = m_db->prepare("SELECT count(*) FROM lookup_cache WHERE key LIKE '%canKey1%'");
+        QVERIFY(cached->step());
+        QCOMPARE(cached->int64At(0), 0);
+        cached.reset();
+        QCOMPARE(m_publications->get(id)->court, QStringLiteral("Supreme Court of Canada"));
     }
 
     void requestsAreSpacedOut()

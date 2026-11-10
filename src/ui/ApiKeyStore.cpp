@@ -6,6 +6,8 @@ namespace papertrail::ui {
 
 const QString kClaudeKeyEntry = QStringLiteral("claude-api-key");
 const QString kOpenAlexKeyEntry = QStringLiteral("openalex-api-key");
+const QString kCourtListenerKeyEntry = QStringLiteral("courtlistener-api-token");
+const QString kCanLiiKeyEntry = QStringLiteral("canlii-api-key");
 
 namespace {
 

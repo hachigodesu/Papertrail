@@ -14,7 +14,7 @@ constexpr qint64 kDayMs = 24 * 60 * 60 * 1000;
 
 } // namespace
 
-void LookupRepository::enqueue(const QList<qint64> &publicationIds, const QString &mode, bool fresh)
+void LookupRepository::enqueue(const QList<qint64> &publicationIds, const QString &mode, bool fresh, bool chosen)
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     Transaction transaction(m_db);
@@ -24,6 +24,8 @@ void LookupRepository::enqueue(const QList<qint64> &publicationIds, const QStrin
         QJsonObject payload{{QStringLiteral("publication"), id}, {QStringLiteral("mode"), mode}};
         if (fresh)
             payload.insert(QStringLiteral("fresh"), true);
+        if (chosen)
+            payload.insert(QStringLiteral("chosen"), true);
         insert->reset();
         insert->bind(1, QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
         insert->bind(2, now);
@@ -45,6 +47,7 @@ std::optional<LookupJob> LookupRepository::nextJob()
     job.publicationId = payload.value(QStringLiteral("publication")).toInteger();
     job.mode = payload.value(QStringLiteral("mode")).toString();
     job.fresh = payload.value(QStringLiteral("fresh")).toBool();
+    job.chosen = payload.value(QStringLiteral("chosen")).toBool();
     job.attempts = select->intAt(2);
     select.reset();
 

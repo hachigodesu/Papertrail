@@ -1,0 +1,17 @@
+{
+  "head": {"vars": ["ecli", "celex", "date", "title"]},
+  "results": {
+    "bindings": [
+      {
+        "ecli": {"type": "literal", "datatype": "http://www.w3.org/2001/XMLSchema#string", "value": "ECLI:EU:C:2019:999"},
+        "celex": {"type": "literal", "datatype": "http://www.w3.org/2001/XMLSchema#string", "value": "62018CJ0999"},
+        "date": {"type": "literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "2019-12-05"},
+        "title": {"type": "literal", "xml:lang": "en", "value": "Judgment of the Court (Grand Chamber), 5 December 2019.#Made-Up Association v Example Authority.#Request for a preliminary ruling from a made-up court.#Case C-999/18."}
+      },
+      {
+        "ecli": {"type": "literal", "datatype": "http://www.w3.org/2001/XMLSchema#string", "value": "ECLI:EU:C:2019:999"},
+        "celex": {"type": "literal", "datatype": "http://www.w3.org/2001/XMLSchema#string", "value": "62018CJ0999"}
+      }
+    ]
+  }
+}

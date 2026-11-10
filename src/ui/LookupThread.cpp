@@ -2,6 +2,7 @@
 
 #include "core/db/Database.h"
 #include "core/settings/SettingsStore.h"
+#include "metadata/CaseLaw.h"
 #include "metadata/NoticeChecker.h"
 #include "metadata/RelatedFinder.h"
 #include "metadata/Transport.h"
@@ -164,7 +165,8 @@ void LookupThread::run()
         } catch (const std::exception &) {
             engine.setContactEmail(QString());
         }
-        engine.setKey(kOpenAlex, keyFor(kOpenAlex));
+        for (const QString &provider : {kOpenAlex, kCourtListener, kCanLii})
+            engine.setKey(provider, keyFor(provider));
         m_busy = true;
         emit busyChanged(true);
         engine.start();

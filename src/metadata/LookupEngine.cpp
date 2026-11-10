@@ -3,10 +3,12 @@
 #include "core/db/Database.h"
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationRepository.h"
+#include "metadata/CaseLaw.h"
 #include "metadata/Matching.h"
 
 #include <QDateTime>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QTimer>
 #include <QUrlQuery>
 
@@ -34,6 +36,10 @@ constexpr int kCrossrefSearchMs = 1100; // Searches are limited to one a second.
 constexpr int kOpenAlexMs = 200;
 constexpr int kArxivMs = 3000; // They ask for one request every 3 seconds.
 constexpr int kOpenLibraryMs = 1000;
+constexpr int kFindCaseLawMs = 1000;    // It allows 1,000 requests in five minutes.
+constexpr int kCourtListenerMs = 12500; // A free token allows 5 a minute, and 125 a day.
+constexpr int kEurLexMs = 1000;
+constexpr int kCanLiiMs = 600;          // It allows 2 a second, one at a time.
 
 const QString kCrossrefSearchPace = QStringLiteral("crossref-search");
 
@@ -43,6 +49,10 @@ QString providerOf(int ask)
     case 0: case 4: return kCrossref;
     case 1: case 5: return kOpenAlex;
     case 2: return kArxiv;
+    case 6: case 7: return kFindCaseLaw;
+    case 8: case 9: return kCourtListener;
+    case 10: return kEurLex;
+    case 11: return kCanLii;
     default: return kOpenLibrary;
     }
 }
@@ -112,6 +122,14 @@ int LookupEngine::intervalMsFor(const QString &pace) const
         interval = kOpenAlexMs;
     else if (pace == kArxiv)
         interval = kArxivMs;
+    else if (pace == kFindCaseLaw)
+        interval = kFindCaseLawMs;
+    else if (pace == kCourtListener)
+        interval = kCourtListenerMs;
+    else if (pace == kEurLex)
+        interval = kEurLexMs;
+    else if (pace == kCanLii)
+        interval = kCanLiiMs;
 
     // A source can lower its limit at any time, and says so in its answers.
     const int reported = m_reportedRates.value(pace);
@@ -176,20 +194,61 @@ void LookupEngine::next()
         m_exact.reset();
         m_anyAnswered = false;
         m_skippedBlocked = false;
-        if (!m_publication.doi.isEmpty())
-            m_asks << Ask::CrossrefDoi << Ask::OpenAlexDoi;
-        if (!m_publication.arxivId.isEmpty())
-            m_asks << Ask::Arxiv;
-        if (!m_publication.isbn13.isEmpty() || !m_publication.isbn10.isEmpty())
-            m_asks << Ask::OpenLibrary;
-        // Only worth searching on a title with enough words to tell it from others.
-        if (m_publication.title.count(u' ') >= 2)
-            m_asks << Ask::CrossrefTitle << Ask::OpenAlexTitle;
+        if (m_publication.type == PublicationType::CaseLaw) {
+            // A source of papers and books could only match a case's name to something else.
+            addCaseAsks();
+        } else {
+            if (!m_publication.doi.isEmpty())
+                m_asks << Ask::CrossrefDoi << Ask::OpenAlexDoi;
+            if (!m_publication.arxivId.isEmpty())
+                m_asks << Ask::Arxiv;
+            if (!m_publication.isbn13.isEmpty() || !m_publication.isbn10.isEmpty())
+                m_asks << Ask::OpenLibrary;
+            // Only worth searching on a title with enough words to tell it from others.
+            if (m_publication.title.count(u' ') >= 2)
+                m_asks << Ask::CrossrefTitle << Ask::OpenAlexTitle;
+        }
 
         emit progress(m_done, m_lookups.pendingCount(), QString());
         askNext();
     } catch (const std::exception &error) {
         hitProblem(QString::fromUtf8(error.what()), 0);
+    }
+}
+
+void LookupEngine::addCaseAsks()
+{
+    // A name with two parties, or enough words to tell it from others.
+    const bool nameWorthSearching = m_publication.title.contains(QStringLiteral(" v ")) || m_publication.title.count(u' ') >= 2;
+    switch (caseJurisdictionOf(m_publication)) {
+    case CaseJurisdiction::UnitedKingdom:
+        // Its licence doesn't cover searching it in bulk, so only for cases the user chose to look up.
+        if (!m_job || !m_job->chosen)
+            break;
+        if (isFindCaseLawCitation(m_publication.neutralCitation))
+            m_asks << Ask::FindCaseLawCitation;
+        if (nameWorthSearching)
+            m_asks << Ask::FindCaseLawName;
+        break;
+    case CaseJurisdiction::UnitedStates:
+        // Only with the user's own token, which it needs.
+        if (m_keys.value(kCourtListener).isEmpty())
+            break;
+        if (!reporterCitationOf(m_publication).isEmpty())
+            m_asks << Ask::CourtListenerCitation;
+        if (nameWorthSearching)
+            m_asks << Ask::CourtListenerName;
+        break;
+    case CaseJurisdiction::EuropeanUnion:
+        if (!eurLexQueryUrl(m_urls, euEcli(m_publication.neutralCitation), celexForCaseNumber(m_publication.caseNumber)).isEmpty())
+            m_asks << Ask::EurLex;
+        break;
+    case CaseJurisdiction::Canada:
+        if (!m_keys.value(kCanLii).isEmpty() && canLiiCaseFor(m_publication.neutralCitation))
+            m_asks << Ask::CanLii;
+        break;
+    case CaseJurisdiction::Unknown:
+        break;
     }
 }
 
@@ -210,6 +269,21 @@ void LookupEngine::askNext()
     case Ask::OpenLibrary: url = openLibraryUrl(m_urls, m_publication.isbn13.isEmpty() ? m_publication.isbn10 : m_publication.isbn13); break;
     case Ask::CrossrefTitle: url = crossrefSearchUrl(m_urls, m_publication.title); break;
     case Ask::OpenAlexTitle: url = openAlexSearchUrl(m_urls, m_publication.title); break;
+    case Ask::FindCaseLawCitation: url = findCaseLawSearchUrl(m_urls, QStringLiteral("\"%1\"").arg(m_publication.neutralCitation)); break;
+    case Ask::FindCaseLawName: url = findCaseLawSearchUrl(m_urls, m_publication.title); break;
+    case Ask::CourtListenerCitation: url = courtListenerCitationUrl(m_urls, reporterCitationOf(m_publication)); break;
+    case Ask::CourtListenerName: url = courtListenerNameUrl(m_urls, m_publication.title, m_publication.year); break;
+    case Ask::EurLex:
+        url = eurLexQueryUrl(m_urls, euEcli(m_publication.neutralCitation), celexForCaseNumber(m_publication.caseNumber));
+        break;
+    case Ask::CanLii:
+        if (const auto which = canLiiCaseFor(m_publication.neutralCitation))
+            url = canLiiCaseUrl(m_urls, *which);
+        break;
+    }
+    if (url.isEmpty()) {
+        askNext();
+        return;
     }
     emit progress(m_done, m_lookups.pendingCount(), provider);
     const QString pace = ask == Ask::CrossrefTitle ? kCrossrefSearchPace : provider;
@@ -244,8 +318,24 @@ void LookupEngine::fetch(const QString &provider, const QString &pace, const QUr
     m_nextAllowed[pace] = now + wait + intervalMsFor(pace);
     m_requestInFlight = true;
     QTimer::singleShot(int(wait), this, [this, provider, pace, url, key, then] {
-        const auto headers = keyHeaders(provider, m_keys.value(provider));
-        getWithHeaders(m_transport, withContact(provider, url), headers, [this, provider, pace, url, key, then, keyed = !headers.isEmpty()](const TransportReply &reply) {
+        const QString userKey = m_keys.value(provider).trimmed();
+        auto headers = keyHeaders(provider, userKey);
+        QUrl asked = withContact(provider, url);
+        bool keyed = !headers.isEmpty();
+        // CanLII only takes its key in the address. It's added only here, after the address is kept as the cache's
+        // key, and sent the way that never follows a redirect, and it's taken out of anything said about a failure.
+        static const QRegularExpression plainKey(QStringLiteral("^[A-Za-z0-9_-]{1,200}$"));
+        if (provider == kCanLii && plainKey.match(userKey).hasMatch()) {
+            QUrlQuery query(asked);
+            query.addQueryItem(QStringLiteral("api_key"), userKey);
+            asked.setQuery(query);
+            headers = {{QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json")}};
+            keyed = true;
+        }
+        getWithHeaders(m_transport, asked, headers, [this, provider, pace, url, key, then, keyed, userKey](const TransportReply &answer) {
+            TransportReply reply = answer;
+            if (!userKey.isEmpty())
+                reply.error.replace(userKey, QStringLiteral("(your key)"));
             m_requestInFlight = false;
             if (keyed && (reply.status == 401 || reply.status == 403)) {
                 // A key that's wrong, or not yet activated. The source still answers without one, so it's asked again.
@@ -309,9 +399,40 @@ void LookupEngine::onAnswer(Ask ask, int status, const QByteArray &body)
         case Ask::OpenLibrary: exact = parseOpenLibrary(body); matchedBy = QStringLiteral("isbn"); break;
         case Ask::CrossrefTitle: results = parseCrossrefSearch(body); break;
         case Ask::OpenAlexTitle: results = parseOpenAlexSearch(body); break;
+        case Ask::FindCaseLawCitation:
+        case Ask::FindCaseLawName: results = parseFindCaseLaw(body); break;
+        case Ask::CourtListenerCitation:
+        case Ask::CourtListenerName: results = parseCourtListenerSearch(body); break;
+        case Ask::EurLex: results = parseEurLex(body); break;
+        case Ask::CanLii:
+            if (const auto found = parseCanLii(body))
+                results << *found;
+            break;
+        }
+        // A case is matched by its citation, if a result has the same, and otherwise by its name.
+        if (m_publication.type == PublicationType::CaseLaw) {
+            for (FoundRecord &record : results) {
+                const QString citation = sameCaseCitation(m_publication, record);
+                if (!citation.isEmpty() && !exact) {
+                    record.matchedBy = citation;
+                    exact = record;
+                }
+            }
+            if (!exact) {
+                // Names are short, and share parties, so a little more is asked of them than of titles.
+                constexpr double kCaseWorthShowing = 0.6;
+                for (FoundRecord &record : results) {
+                    record.matchedBy = QStringLiteral("title");
+                    record.score = caseMatchScore(m_publication, record);
+                    if (record.score >= kCaseWorthShowing)
+                        m_found << record;
+                }
+            }
+            results.clear();
         }
         if (exact) {
-            exact->matchedBy = matchedBy;
+            if (!matchedBy.isEmpty())
+                exact->matchedBy = matchedBy;
             m_exact = exact;
         }
         for (FoundRecord &record : results) {
@@ -352,7 +473,8 @@ void LookupEngine::decide()
         bool waiting = false;
         bool changed = false;
         if (m_exact) {
-            const bool fits = titleAgrees(m_publication, m_fileNames, *m_exact);
+            const bool fits = m_publication.type == PublicationType::CaseLaw ? caseNameAgrees(m_publication, m_fileNames, *m_exact)
+                                                                             : titleAgrees(m_publication, m_fileNames, *m_exact);
             if (fits || automatic) {
                 // A match that fits settles any doubt about the details. One that doesn't raises some.
                 applyFoundRecord(m_db, m_publication.id, *m_exact, !fits);

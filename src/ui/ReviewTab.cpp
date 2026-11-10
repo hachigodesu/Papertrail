@@ -221,7 +221,13 @@ void ReviewTab::showCandidate()
     const FoundRecord record = FoundRecord::fromJson(QJsonDocument::fromJson(m_candidates->currentData().toString().toUtf8()).object());
 
     if (record.matchedBy == QLatin1StringView("title")) {
-        m_matchReason->setText(tr("%1 found this by searching for the title.").arg(providerLabel(record.provider)));
+        m_matchReason->setText(publication->type == PublicationType::CaseLaw
+                                   ? tr("%1 found this by searching for the case's name.").arg(providerLabel(record.provider))
+                                   : tr("%1 found this by searching for the title.").arg(providerLabel(record.provider)));
+    } else if (publication->type == PublicationType::CaseLaw) {
+        m_matchReason->setText(tr("%1 found this by the case's citation, but its name doesn't agree. The file may cite "
+                                  "another case.")
+                                   .arg(providerLabel(record.provider)));
     } else {
         m_matchReason->setText(tr("%1 found this from the identifier in your file, but the title doesn't agree. "
                                   "The file may mention another work's identifier.")

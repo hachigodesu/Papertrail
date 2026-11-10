@@ -53,8 +53,10 @@ OnlineLookupDialog::OnlineLookupDialog(const QString &heading, const QString &mo
     column->addWidget(m_offline);
     addText(tr("Only what's inside your files is used, and nothing is ever sent anywhere."), true);
 
-    addText(tr("Lookups send a DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library. "
-               "Your files, notes and tags are never sent."));
+    addText(tr("Lookups send a DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library. For a court "
+               "case, its name or citation goes to a source of judgments for its jurisdiction: Find Case Law for the UK, "
+               "only for cases you choose to look up, EUR-Lex for the EU, and CourtListener for the US or CanLII for "
+               "Canada with a key of your own. Your files, notes and tags are never sent."));
 
     if (showEmail) {
         column->addSpacing(6);

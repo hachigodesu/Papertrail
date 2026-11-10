@@ -1,0 +1,26 @@
+{
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "caseName": "Sample v. Example County",
+      "citation": ["99 S. Ct. 222", "999 U.S. 111", "88 L. Ed. 2d 333"],
+      "court": "Supreme Court of the United States",
+      "court_id": "scotus",
+      "dateFiled": "2021-06-14",
+      "docketNumber": "19-9999",
+      "cluster_id": 1234,
+      "absolute_url": "/opinion/1234/sample-v-example-county/"
+    },
+    {
+      "caseName": "Other Example Co. v. Sample",
+      "citation": ["12 F.4th 345"],
+      "court": "Court of Appeals for the Ninth Circuit",
+      "court_id": "ca9",
+      "dateFiled": "2021-09-01",
+      "docketNumber": "20-1111",
+      "absolute_url": "https://elsewhere.example.org/opinion/1"
+    }
+  ]
+}

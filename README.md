@@ -242,7 +242,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Copy references and in-text citations** in Harvard, APA (7th edition), IEEE or Chicago (author-date, 18th edition), with italics that paste into a word processor.
 - **Reference lists** for any selection, in the style's order, with 2020a and 2020b where needed.
 - **Export** BibTeX, RIS (for Zotero, Mendeley and EndNote) or CSL-JSON.
-- **Case law** is cited in the Bluebook's form, or OSCOLA's if you choose it for a case, in every style.
+- **Case law** is cited in the Bluebook's form, or OSCOLA's if you choose it for a case, in every style. With lookups online, a case's details come from a source of judgments for its jurisdiction: Find Case Law for the UK, for cases you choose to look up, EUR-Lex for the EU's courts, and CourtListener for the US or CanLII for Canada with a free key of your own.
 
 ### Summaries from Claude
 
@@ -279,7 +279,7 @@ To move your library to another computer, use **File > Export library...** rathe
 ## Your files and your privacy
 
 - **Your documents are never changed.** Highlights, notes and details are kept in Papertrail's own library.
-- **Papertrail stays offline until you choose otherwise.** If you turn lookups on, it sends a document's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library, DOIs to Crossref to check for retractions, a DOI to OpenAlex when you ask for a publication's related papers, and, when you choose a language for recognising scanned text, asks GitHub for that language's file. It never sends your files, notes or tags. An email address goes to Crossref and OpenAlex only if you enter one, which they ask for to contact heavy users. A free OpenAlex key of your own, if you enter one under **Online lookups**, goes only to OpenAlex, and is kept in your computer's credential store, never in Papertrail's database, settings or exports.
+- **Papertrail stays offline until you choose otherwise.** If you turn lookups on, it sends a document's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library, DOIs to Crossref to check for retractions, a DOI to OpenAlex when you ask for a publication's related papers, a court case's name, citation or case number to Find Case Law, EUR-Lex, CourtListener or CanLII, and, when you choose a language for recognising scanned text, asks GitHub for that language's file. It never sends your files, notes or tags. An email address goes to Crossref and OpenAlex only if you enter one, which they ask for to contact heavy users. A free OpenAlex key of your own, if you enter one under **Online lookups**, goes only to OpenAlex, and is kept in your computer's credential store, never in Papertrail's database, settings or exports.
 - **Summaries are sent to Anthropic only when you ask,** using your own API key. You're shown what will be sent and an estimated cost first. It sends identifying details such as the DOI and title, and Claude looks for the paper online. Your file is only sent if you choose that, with a confirmation of its own. The key is kept in your system's credential store, never in the library or its exports.
 - **Exports aren't encrypted.** A `.papertrail` file holds your notes and settings, so keep it as private as they are.
 - **There's no telemetry,** and nothing is sent anywhere else.

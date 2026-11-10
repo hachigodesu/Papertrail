@@ -498,6 +498,39 @@ private slots:
         QCOMPARE(found->day.value_or(0), 14);
     }
 
+    void canadianAndEuJudgmentsAreRecognised()
+    {
+        const QString canada = QStringLiteral(
+            "SUPREME COURT OF CANADA\n"
+            "Citation: Sample v. Example Corp., 2022 SCC 99\n"
+            "Appeal Heard: January 12, 2022\n"
+            "Coram: Made-Up C.J. and Example J.\n"
+            "Reasons for Judgment: Sample J.\n");
+        std::optional<CaseDetails> found = caseDetailsOnFirstPage(canada);
+        QVERIFY(found);
+        QCOMPARE(found->neutralCitation, QStringLiteral("2022 SCC 99"));
+        QCOMPARE(found->court, QStringLiteral("Supreme Court of Canada"));
+        QCOMPARE(found->jurisdiction, QStringLiteral("Canada"));
+        QCOMPARE(found->year.value_or(0), 2022);
+
+        const QString eu = QStringLiteral(
+            "JUDGMENT OF THE COURT (Grand Chamber)\n"
+            "5 December 2019 (*)\n"
+            "(Reference for a preliminary ruling - made-up directive)\n"
+            "In Case C-999/18,\n"
+            "REQUEST for a preliminary ruling from a made-up court, in the proceedings\n"
+            "ECLI:EU:C:2019:999\n");
+        found = caseDetailsOnFirstPage(eu);
+        QVERIFY(found);
+        QCOMPARE(found->neutralCitation, QStringLiteral("ECLI:EU:C:2019:999"));
+        QCOMPARE(found->court, QStringLiteral("Court of Justice"));
+        QCOMPARE(found->jurisdiction, QStringLiteral("European Union"));
+        QCOMPARE(found->caseNumber, QStringLiteral("C-999/18"));
+
+        // A paper citing a Canadian case isn't one.
+        QVERIFY(!caseDetailsOnFirstPage(QStringLiteral("As the court held in 2022 SCC 99, the made-up rule applies.")));
+    }
+
     void writingAboutACaseIsntOne()
     {
         // An article about a case cites it, and a court, on its first page, but has an abstract.

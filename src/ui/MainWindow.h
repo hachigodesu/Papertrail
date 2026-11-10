@@ -89,7 +89,8 @@ public:
     void setLookupMode(const QString &mode, const QString &email);
 
     // Queues lookups for these, and starts on them. Does nothing while offline.
-    void lookUp(const QList<qint64> &ids);
+    // `chosen` says the user chose these one by one, rather than the whole library, which some sources need.
+    void lookUp(const QList<qint64> &ids, bool chosen = false);
 
     void showReviewTab();
     ReviewTab *reviewTab() const;
@@ -403,6 +404,8 @@ private:
     ArticleCoverThread *m_articleCovers = nullptr;
     std::unique_ptr<ApiKeyStore> m_keys;
     std::unique_ptr<ApiKeyStore> m_openAlexKeys;
+    std::unique_ptr<ApiKeyStore> m_courtListenerKeys;
+    std::unique_ptr<ApiKeyStore> m_canLiiKeys;
     std::unique_ptr<metadata::Transport> m_summaryTransport;
     QCheckBox *m_searchInside = nullptr;
     QAction *m_indexContents = nullptr;

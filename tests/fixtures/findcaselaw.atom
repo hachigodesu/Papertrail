@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:tna="https://caselaw.nationalarchives.gov.uk">
+  <title>Find Case Law: made-up search results</title>
+  <id>https://caselaw.nationalarchives.gov.uk/atom.xml</id>
+  <updated>2026-11-11T00:00:00+00:00</updated>
+  <link href="https://caselaw.nationalarchives.gov.uk/atom.xml?query=made+up&amp;order=relevance&amp;per_page=10" rel="self"/>
+  <entry>
+    <title>Another Example Ltd v Sample Trust</title>
+    <link href="javascript:alert(1)" rel="alternate"/>
+    <published>2020-05-06T00:00:00+00:00</published>
+    <updated>2020-05-07T10:00:00+00:00</updated>
+    <author><name>High Court (Chancery Division)</name></author>
+    <id>https://caselaw.nationalarchives.gov.uk/id/ewhc/ch/2020/4321</id>
+    <tna:identifier type="ukncn" slug="ewhc/ch/2020/4321">[2020] EWHC 4321 (Ch)</tna:identifier>
+  </entry>
+  <entry>
+    <title>Made-Up Holdings Ltd v Example Council</title>
+    <link href="https://caselaw.nationalarchives.gov.uk/uksc/2021/99" rel="alternate"/>
+    <link href="https://caselaw.nationalarchives.gov.uk/uksc/2021/99/data.xml" rel="alternate" type="application/akn+xml"/>
+    <published>2021-03-04T00:00:00+00:00</published>
+    <updated>2021-03-04T12:00:00+00:00</updated>
+    <author><name>United Kingdom Supreme Court</name></author>
+    <id>https://caselaw.nationalarchives.gov.uk/id/uksc/2021/99</id>
+    <summary type="html"></summary>
+    <tna:identifier type="ukncn" slug="uksc/2021/99">[2021] UKSC 99</tna:identifier>
+    <tna:identifier type="fclid" slug="tna.abc12345">abc12345</tna:identifier>
+  </entry>
+</feed>

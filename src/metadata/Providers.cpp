@@ -33,6 +33,8 @@ QList<QPair<QByteArray, QByteArray>> keyHeaders(const QString &provider, const Q
         return {};
     if (provider == kOpenAlex)
         return {{QByteArrayLiteral("Authorization"), QByteArrayLiteral("Bearer ") + trimmed.toLatin1()}};
+    if (provider == QLatin1StringView("courtlistener"))
+        return {{QByteArrayLiteral("Authorization"), QByteArrayLiteral("Token ") + trimmed.toLatin1()}};
     return {};
 }
 

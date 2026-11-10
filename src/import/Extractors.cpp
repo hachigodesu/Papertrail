@@ -674,7 +674,32 @@ std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, cons
         QStringLiteral("\\[((?:19|20)\\d\\d)\\]\\s+(UKSC|UKHL|UKPC|EWCA\\s+Civ|EWCA\\s+Crim|EWHC|EWFC|EWCOP|UKUT|UKFTT|CSIH|CSOH|NICA|"
                        "IESC|HCA|NZSC)\\s+(\\d{1,5})(?:\\s*\\((?:[A-Za-z]+)\\))?"));
     const QRegularExpressionMatch neutralMatch = neutral.match(text);
+    // Canada's neutral citations have no brackets, such as "2022 SCC 30", and the EU's courts give an ECLI.
+    struct CanadianCourt {
+        const char *code;
+        const char *court;
+    };
+    static const CanadianCourt canadianCourts[] = {
+        {"SCC", "Supreme Court of Canada"},        {"FCA", "Federal Court of Appeal"},
+        {"FC", "Federal Court"},                   {"TCC", "Tax Court of Canada"},
+        {"ONCA", "Court of Appeal for Ontario"},   {"ONSC", "Ontario Superior Court of Justice"},
+        {"BCCA", "Court of Appeal for British Columbia"}, {"BCSC", "Supreme Court of British Columbia"},
+        {"ABCA", "Court of Appeal of Alberta"},    {"ABKB", "Court of King's Bench of Alberta"},
+        {"ABQB", "Court of Queen's Bench of Alberta"}, {"QCCA", "Court of Appeal of Quebec"},
+        {"QCCS", "Superior Court of Quebec"},      {"MBCA", "Court of Appeal of Manitoba"},
+        {"SKCA", "Court of Appeal for Saskatchewan"}, {"NSCA", "Nova Scotia Court of Appeal"},
+        {"NSSC", "Supreme Court of Nova Scotia"},  {"NBCA", "Court of Appeal of New Brunswick"},
+        {"NLCA", "Court of Appeal of Newfoundland and Labrador"}, {"PECA", "Court of Appeal of Prince Edward Island"},
+    };
+    static const QRegularExpression canadian(
+        QStringLiteral("\\b((?:19|20)\\d\\d)\\s+(SCC|FCA|FC|TCC|ONCA|ONSC|BCCA|BCSC|ABCA|ABKB|ABQB|QCCA|QCCS|MBCA|SKCA|NSCA|"
+                       "NSSC|NBCA|NLCA|PECA)\\s+(\\d{1,6})\\b"));
+    static const QRegularExpression ecli(QStringLiteral("\\bECLI:EU:([CT]):((?:19|20)\\d\\d):(\\d{1,6})\\b"));
+    const QRegularExpressionMatch canadianMatch = canadian.match(text);
+    const QRegularExpressionMatch ecliMatch = ecli.match(text);
     bool courtHeading = false;
+    // A Canadian or EU judgment's first page needn't name its parties as "X v Y" on a line of their own.
+    bool nameOptional = false;
     if (neutralMatch.hasMatch()) {
         details.neutralCitation = neutralMatch.captured(0).simplified();
         details.year = neutralMatch.captured(1).toInt();
@@ -690,6 +715,34 @@ std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, cons
                                            QStringLiteral("before:"), QStringLiteral("before :"), QStringLiteral("lord justice"),
                                            QStringLiteral("lady justice"), QStringLiteral("mr justice"),
                                            QStringLiteral("mrs justice"), QStringLiteral("judgment given on")});
+    } else if (canadianMatch.hasMatch()
+               && containsAny(lower, {QStringLiteral("supreme court of canada"), QStringLiteral("court of appeal for "),
+                                      QStringLiteral("court of appeal of "), QStringLiteral("reasons for judgment"),
+                                      QStringLiteral("coram"), QStringLiteral("court of king's bench"),
+                                      QStringLiteral("court of queen's bench"), QStringLiteral("superior court of justice"),
+                                      QStringLiteral("federal court"), QStringLiteral("tax court of canada")})) {
+        details.neutralCitation = canadianMatch.captured(0).simplified();
+        details.year = canadianMatch.captured(1).toInt();
+        for (const CanadianCourt &court : canadianCourts) {
+            if (canadianMatch.captured(2) == QLatin1StringView(court.code))
+                details.court = QString::fromLatin1(court.court);
+        }
+        details.jurisdiction = QStringLiteral("Canada");
+        courtHeading = true;
+        nameOptional = true;
+    } else if (ecliMatch.hasMatch()
+               && containsAny(lower, {QStringLiteral("judgment of the court"), QStringLiteral("judgment of the general court"),
+                                      QStringLiteral("order of the court")})) {
+        details.neutralCitation = ecliMatch.captured(0);
+        details.year = ecliMatch.captured(2).toInt();
+        details.court = ecliMatch.captured(1) == QLatin1StringView("C") ? QStringLiteral("Court of Justice")
+                                                                         : QStringLiteral("General Court");
+        details.jurisdiction = QStringLiteral("European Union");
+        static const QRegularExpression euCase(QStringLiteral("\\bCases?\\s+([CT])\\s*-\\s*(\\d{1,4}/\\d\\d)\\b"));
+        if (const QRegularExpressionMatch match = euCase.match(text); match.hasMatch())
+            details.caseNumber = match.captured(1) + u'-' + match.captured(2);
+        courtHeading = true;
+        nameOptional = true;
     } else {
         // An American court's heading, which names it at the top.
         struct UsCourt {
@@ -777,7 +830,7 @@ std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, cons
             }
             details.name = words.join(u' ');
         }
-    } else if (!containsAny(lower, {QStringLiteral("petitioner"), QStringLiteral("respondent"), QStringLiteral("appellant"),
+    } else if (!nameOptional && !containsAny(lower, {QStringLiteral("petitioner"), QStringLiteral("respondent"), QStringLiteral("appellant"),
                                     QStringLiteral("appellee"), QStringLiteral("claimant"), QStringLiteral("plaintiff"),
                                     QStringLiteral("defendant")})) {
         return std::nullopt; // Neither its name nor its parties: not enough to go on.

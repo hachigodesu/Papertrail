@@ -64,9 +64,14 @@ signals:
     void keyRefused(const QString &provider);
 
 private:
-    enum class Ask { CrossrefDoi, OpenAlexDoi, Arxiv, OpenLibrary, CrossrefTitle, OpenAlexTitle };
+    enum class Ask {
+        CrossrefDoi, OpenAlexDoi, Arxiv, OpenLibrary, CrossrefTitle, OpenAlexTitle,
+        // Court judgments, which the others know nothing about. See CaseLaw.h.
+        FindCaseLawCitation, FindCaseLawName, CourtListenerCitation, CourtListenerName, EurLex, CanLii,
+    };
 
     void next();
+    void addCaseAsks();
     void askNext();
     void fetch(const QString &provider, const QString &pace, const QUrl &url, const std::function<void(int, const QByteArray &)> &then);
     void onAnswer(Ask ask, int status, const QByteArray &body);

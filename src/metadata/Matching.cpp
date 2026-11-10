@@ -1,5 +1,7 @@
 #include "metadata/Matching.h"
 
+#include "metadata/CaseLaw.h"
+
 #include "import/JournalIssues.h"
 #include "core/db/Database.h"
 #include "core/model/Identifiers.h"
@@ -55,7 +57,8 @@ double wordOverlap(const QString &a, const QString &b)
 bool isLookupSource(const QString &source)
 {
     return source == kCrossref || source == kOpenAlex || source == kArxiv || source == kOpenLibrary || source == kBibTeXImport
-           || source == kRisImport;
+           || source == kRisImport || source == kFindCaseLaw || source == kCourtListener || source == kEurLex
+           || source == kCanLii;
 }
 
 } // namespace
@@ -100,13 +103,22 @@ bool titleAgrees(const Publication &publication, const QStringList &fileNames, c
 
 QList<FieldChange> plannedChanges(const Publication &publication, const FoundRecord &found, const QSet<QString> &setByHand)
 {
+    // A case is only ever changed by what a source of judgments says, and a paper or book never by one.
+    const bool caseFound = found.type == PublicationType::CaseLaw;
+    if ((publication.type == PublicationType::CaseLaw) != caseFound)
+        return {};
+    // A court's own record of its name and date is better than a file's. Its law report and the rest only fill gaps,
+    // since a case can be reported in more than one.
+    static const QSet<QString> replacedForCases = {QStringLiteral("title"), QStringLiteral("year"), QStringLiteral("month"),
+                                                   QStringLiteral("day")};
     // Better from the source than from a file, so these replace what's there.
-    static const QSet<QString> replaced = {
+    static const QSet<QString> replacedForWorks = {
         QStringLiteral("title"),     QStringLiteral("subtitle"),        QStringLiteral("authors"), QStringLiteral("editors"),
         QStringLiteral("year"),      QStringLiteral("month"),           QStringLiteral("day"),     QStringLiteral("container_title"),
         QStringLiteral("volume"),    QStringLiteral("issue"),           QStringLiteral("pages"),   QStringLiteral("publisher"),
         QStringLiteral("conference_name"), QStringLiteral("conference_location"),
     };
+    const QSet<QString> &replaced = caseFound ? replacedForCases : replacedForWorks;
 
     QList<FieldChange> changes;
     for (const QString &name : metadataFieldNames()) {
@@ -209,7 +221,8 @@ QString undoableSource(Database &db, qint64 publicationId)
 {
     auto select = db.prepare(
         "SELECT source FROM metadata_provenance WHERE publication_id = ? "
-        "AND source IN ('crossref', 'openalex', 'arxiv', 'openlibrary', 'bibtex', 'ris') "
+        "AND source IN ('crossref', 'openalex', 'arxiv', 'openlibrary', 'bibtex', 'ris', 'findcaselaw', 'courtlistener', 'eurlex', "
+        "'canlii') "
         "AND recorded_at > coalesce((SELECT max(recorded_at) FROM metadata_provenance WHERE publication_id = ?1 AND source = 'undo'), 0) "
         "ORDER BY recorded_at DESC, id DESC LIMIT 1");
     select->bind(1, publicationId);
@@ -272,6 +285,14 @@ QString providerLabel(const QString &provider)
         return QStringLiteral("a BibTeX file");
     if (provider == kRisImport)
         return QStringLiteral("an RIS file");
+    if (provider == kFindCaseLaw)
+        return QStringLiteral("Find Case Law");
+    if (provider == kCourtListener)
+        return QStringLiteral("CourtListener");
+    if (provider == kEurLex)
+        return QStringLiteral("EUR-Lex");
+    if (provider == kCanLii)
+        return QStringLiteral("CanLII");
     return provider;
 }
 

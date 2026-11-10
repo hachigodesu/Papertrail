@@ -39,6 +39,8 @@ private:
 // The names keys are kept under in the credential store.
 extern const QString kClaudeKeyEntry;
 extern const QString kOpenAlexKeyEntry;
+extern const QString kCourtListenerKeyEntry;
+extern const QString kCanLiiKeyEntry;
 
 // The operating system's credential store, holding the key named `entry`. If there isn't one, as on a Linux system
 // with no secret service, the key is held in memory for this session instead, and whoever's saving it is told.

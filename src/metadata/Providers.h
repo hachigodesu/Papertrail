@@ -51,6 +51,11 @@ struct ProviderUrls {
     QString openAlex = QStringLiteral("https://api.openalex.org");
     QString arxiv = QStringLiteral("https://export.arxiv.org");
     QString openLibrary = QStringLiteral("https://openlibrary.org");
+    // Court judgments. See CaseLaw.h.
+    QString findCaseLaw = QStringLiteral("https://caselaw.nationalarchives.gov.uk");
+    QString courtListener = QStringLiteral("https://www.courtlistener.com");
+    QString eurLex = QStringLiteral("https://publications.europa.eu");
+    QString canLii = QStringLiteral("https://api.canlii.org");
     QString anthropic = QStringLiteral("https://api.anthropic.com"); // Article summaries, and not lookups.
 };
 

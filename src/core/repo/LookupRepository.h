@@ -15,6 +15,9 @@ struct LookupJob {
     qint64 publicationId = 0;
     QString mode;     // "online_review" or "online_auto".
     bool fresh = false; // Asked for by hand, so an earlier "not found" doesn't count.
+    // Asked for on publications chosen one by one, rather than on import or for the whole library. Some sources, such
+    // as Find Case Law, are only asked then.
+    bool chosen = false;
     int attempts = 0;
 };
 
@@ -22,7 +25,7 @@ struct LookupCandidate {
     qint64 id = 0;
     qint64 publicationId = 0;
     QString provider;
-    QString matchedBy; // "doi", "isbn", "arxiv" or "title".
+    QString matchedBy; // "doi", "isbn", "arxiv" or "title", or for a case "neutral_citation", "ecli", "case_number" or "report".
     double score = 0;
     QString recordJson;
 };
@@ -33,7 +36,7 @@ class LookupRepository {
 public:
     explicit LookupRepository(Database &db) : m_db(db) {}
 
-    void enqueue(const QList<qint64> &publicationIds, const QString &mode, bool fresh = false);
+    void enqueue(const QList<qint64> &publicationIds, const QString &mode, bool fresh = false, bool chosen = false);
     std::optional<LookupJob> nextJob();
     void finishJob(qint64 jobId);
     void putBack(qint64 jobId); // To try again later, as though it hadn't been tried.

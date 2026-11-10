@@ -1,4 +1,6 @@
 add_library(papertrail_metadata STATIC
+    CaseLaw.cpp
+    CaseLaw.h
     LookupEngine.cpp
     LookupEngine.h
     Matching.cpp
