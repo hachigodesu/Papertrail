@@ -299,13 +299,21 @@ QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
     auto *withWords = dynamic_cast<engine::RecognisedTextDocument *>(document);
     QJsonArray pages;
     QJsonArray recognised; // Which pages' text was recognised rather than the file's own.
+    qint64 ownLetters = 0;  // In the file's own text on these pages, whatever's used.
+    const auto lettersIn = [](const QString &text) {
+        return qint64(std::count_if(text.begin(), text.end(), [](QChar c) { return c.isLetter(); }));
+    };
     for (int page = start; page < pageCount && page < start + count; ++page) {
         // A page that can't be read is an empty one, and later pages may still be fine.
         QString text;
         try {
             text = document->pageText(page);
-            if (withWords && withWords->hasRecognisedWords(page) && text != withWords->inner().pageText(page))
+            if (withWords && withWords->usesRecognisedWords(page)) {
                 recognised.append(page);
+                ownLetters += lettersIn(withWords->inner().pageText(page));
+            } else {
+                ownLetters += lettersIn(text);
+            }
         } catch (const engine::EngineError &) {
         }
         pages.append(text.left(kMostCharactersOnAPage));
@@ -316,6 +324,7 @@ QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
     reply.insert(QStringLiteral("pageCount"), pageCount);
     reply.insert(QStringLiteral("pages"), pages);
     reply.insert(QStringLiteral("recognised"), recognised);
+    reply.insert(QStringLiteral("ownLetters"), double(ownLetters));
     return reply;
 }
 
@@ -340,6 +349,17 @@ QJsonObject recognisePages(engine::Engine &engine, const QJsonObject &request)
     engine::Document &own = withWords ? withWords->inner() : *document;
 
     const bool again = request.value(QStringLiteral("again")).toBool();
+    // Every page, whatever text it has of its own, for a document whose own text is poor.
+    const bool everyPage = request.value(QStringLiteral("everyPage")).toBool();
+    if (everyPage) {
+        try {
+            worker::markRecognisingEveryPage(folder);
+        } catch (const engine::EngineError &caught) {
+            return failure(QString::fromUtf8(caught.what()));
+        }
+        if (withWords)
+            withWords->setPreferRecognised(true);
+    }
     const int start = qMax(0, request.value(QStringLiteral("start")).toInt());
     const int count = qMax(0, request.value(QStringLiteral("count")).toInt());
     int pageCount = 0;
@@ -352,7 +372,7 @@ QJsonObject recognisePages(engine::Engine &engine, const QJsonObject &request)
                 continue;
             // A page that can't be read is left, as the rest may be fine.
             try {
-                if (!engine::looksScanned(own, page))
+                if (!everyPage && !engine::looksScanned(own, page))
                     continue;
                 worker::applyPageFaults(request.value(QStringLiteral("path")).toString(), page);
                 const QList<engine::TextWord> found = worker::recognisePage(recogniser, own, page, tessdata, languages);

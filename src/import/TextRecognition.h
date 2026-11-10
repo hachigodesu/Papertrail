@@ -31,6 +31,10 @@ struct RecognitionReport {
 // time through the worker, at the worker's low priority. Where it's got to is kept beside the full-text index, so
 // stopping is safe and it carries on where it left off. A document with pages recognised is read into the index
 // again, with its words. The database connection needs the index attached.
+//
+// A document whose own text is poor, such as an old paper scanned with a publisher's text layer, can be asked for in
+// full with want(): those come first, every page of them is recognised, and their recognised words are used in place
+// of their own from then on.
 class TextRecognition {
 public:
     TextRecognition(core::Database &db, const RecognitionOptions &options);
@@ -41,6 +45,10 @@ public:
 
     // How many documents are waiting to be recognised with these languages.
     qint64 waitingCount();
+
+    // Asks for every page of the file with these contents to be recognised, starting again if it's been done.
+    static void want(core::Database &db, const QString &sha256);
+    static bool isWanted(core::Database &db, const QString &sha256);
 
 private:
     core::Database &m_db;

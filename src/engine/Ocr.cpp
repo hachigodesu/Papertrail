@@ -196,6 +196,13 @@ bool RecognisedTextDocument::hasRecognisedWords(int page)
     return wordsOn(page) != nullptr;
 }
 
+bool RecognisedTextDocument::usesRecognisedWords(int page)
+{
+    if (!wordsOn(page))
+        return false;
+    return m_prefer || letters(m_inner->pageText(page)) < kFewestLetters;
+}
+
 void RecognisedTextDocument::setLayout(double width, double height, double fontSize)
 {
     m_inner->setLayout(width, height, fontSize);
@@ -203,7 +210,10 @@ void RecognisedTextDocument::setLayout(double width, double height, double fontS
 
 QString RecognisedTextDocument::pageText(int page)
 {
-    // The page's own text wins wherever it has any: recognised words only fill in for a page without.
+    // The page's own text wins wherever it has any, unless the document prefers what was recognised: recognised words
+    // otherwise only fill in for a page without.
+    if (const QList<TextWord> *words = wordsOn(page); words && m_prefer)
+        return words::pageText(*words);
     const QString own = m_inner->pageText(page);
     if (const QList<TextWord> *words = wordsOn(page); words && letters(own) < kFewestLetters)
         return words::pageText(*words);
@@ -212,6 +222,8 @@ QString RecognisedTextDocument::pageText(int page)
 
 QList<QRectF> RecognisedTextDocument::search(int page, const QString &text)
 {
+    if (const QList<TextWord> *words = wordsOn(page); words && m_prefer)
+        return words::search(*words, text);
     const QList<QRectF> own = m_inner->search(page, text);
     if (!own.isEmpty())
         return own;
@@ -222,13 +234,15 @@ QList<QRectF> RecognisedTextDocument::search(int page, const QString &text)
 
 TextSelection RecognisedTextDocument::selectText(int page, const QPointF &a, const QPointF &b)
 {
-    if (const QList<TextWord> *words = wordsOn(page); words && m_inner->textLines(page).isEmpty())
+    if (const QList<TextWord> *words = wordsOn(page); words && (m_prefer || m_inner->textLines(page).isEmpty()))
         return words::selectText(*words, a, b);
     return m_inner->selectText(page, a, b);
 }
 
 QList<TextLine> RecognisedTextDocument::textLines(int page)
 {
+    if (const QList<TextWord> *words = wordsOn(page); words && m_prefer)
+        return words::textLines(*words);
     QList<TextLine> own = m_inner->textLines(page);
     if (!own.isEmpty())
         return own;
@@ -239,6 +253,8 @@ QList<TextLine> RecognisedTextDocument::textLines(int page)
 
 QString RecognisedTextDocument::largestTextOnPage(int page)
 {
+    if (const QList<TextWord> *words = wordsOn(page); words && m_prefer)
+        return words::largestText(*words);
     const QString own = m_inner->largestTextOnPage(page);
     if (!own.isEmpty())
         return own;

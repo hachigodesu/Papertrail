@@ -23,8 +23,13 @@ std::optional<QList<engine::TextWord>> readRecognised(const QString &folder, int
 // Keeps a page's words, replacing any earlier ones, all at once so a crash never leaves half a file.
 void writeRecognised(const QString &folder, int page, const QList<engine::TextWord> &words, const QString &languages);
 
-// The document, answering text questions for its scanned pages from the words kept in `folder`. As it is, if `folder`
-// is empty.
+// Whether every page of the document has been asked to be recognised, its own text being poor, so its recognised
+// words are used in place of its own. Kept as a file in the same folder.
+bool recognisingEveryPage(const QString &folder);
+void markRecognisingEveryPage(const QString &folder);
+
+// The document, answering text questions for its scanned pages from the words kept in `folder`, or for every page if
+// they're all to be recognised. As it is, if `folder` is empty.
 std::unique_ptr<engine::Document> withRecognisedText(std::unique_ptr<engine::Document> document, const QString &folder);
 
 // Renders a page at a resolution good for reading, and recognises its words.

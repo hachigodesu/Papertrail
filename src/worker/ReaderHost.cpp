@@ -291,6 +291,8 @@ public:
                 reply.insert(QStringLiteral("bookmark"), m_document->placeForPage(page(request)));
             else if (op == QStringLiteral("ocr"))
                 recognise(request, reply);
+            else if (op == QStringLiteral("rereadwords"))
+                rereadWords();
             else if (op == QStringLiteral("find"))
                 reply.insert(QStringLiteral("page"), m_document->pageForPlace(request.value(QStringLiteral("bookmark")).toString()));
             else
@@ -350,6 +352,17 @@ private:
             throw engine::EngineError("this file has no pages");
     }
 
+    // Reads the kept words again, as after pages have been recognised by another process.
+    void rereadWords()
+    {
+        if (auto *withWords = dynamic_cast<engine::RecognisedTextDocument *>(m_document.get())) {
+            withWords->forgetWords();
+            withWords->setPreferRecognised(recognisingEveryPage(m_ocrFolder));
+        }
+        m_lines.clear();
+        m_contentsPages.clear();
+    }
+
     // Recognises a scanned page's words, keeps them, and answers its text questions from them from now on.
     void recognise(const QJsonObject &request, QJsonObject &reply)
     {
@@ -358,11 +371,19 @@ private:
         auto *withWords = dynamic_cast<engine::RecognisedTextDocument *>(m_document.get());
         if (!withWords || m_ocrFolder.isEmpty())
             throw engine::EngineError("there's nowhere to keep recognised words");
+        // Asked to recognise every page, from now on its recognised words are used in place of its own.
+        const bool everyPage = request.value(QStringLiteral("everyPage")).toBool() || withWords->prefersRecognised();
+        if (everyPage && !withWords->prefersRecognised()) {
+            markRecognisingEveryPage(m_ocrFolder);
+            withWords->setPreferRecognised(true);
+            m_lines.clear();
+            m_contentsPages.clear();
+        }
         if (const std::optional<QList<engine::TextWord>> kept = readRecognised(m_ocrFolder, number)) {
             reply.insert(QStringLiteral("words"), int(kept->size()));
             return;
         }
-        if (!engine::looksScanned(withWords->inner(), number)) {
+        if (!everyPage && !engine::looksScanned(withWords->inner(), number)) {
             reply.insert(QStringLiteral("words"), 0);
             return;
         }

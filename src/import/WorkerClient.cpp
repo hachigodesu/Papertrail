@@ -130,12 +130,13 @@ WorkerClient::PageTexts WorkerClient::pageTexts(const QString &path, const QStri
         texts.pages << page.toString();
     for (const QJsonValue &page : reply.body.value(QStringLiteral("recognised")).toArray())
         texts.recognised << page.toInt();
+    texts.ownLetters = qint64(reply.body.value(QStringLiteral("ownLetters")).toDouble());
     return texts;
 }
 
 WorkerClient::Recognised WorkerClient::recognise(const QString &path, const QString &convertedPath, const QString &ocrFolder,
                                                  const QString &tessdata, const QString &languages, int start, int count,
-                                                 bool again, int timeoutMs)
+                                                 bool again, int timeoutMs, bool everyPage)
 {
     QJsonObject request;
     request.insert(QStringLiteral("op"), QStringLiteral("ocr"));
@@ -147,6 +148,8 @@ WorkerClient::Recognised WorkerClient::recognise(const QString &path, const QStr
     request.insert(QStringLiteral("start"), start);
     request.insert(QStringLiteral("count"), count);
     request.insert(QStringLiteral("again"), again);
+    if (everyPage)
+        request.insert(QStringLiteral("everyPage"), true);
     const Reply reply = call(request, timeoutMs);
 
     Recognised result;

@@ -97,8 +97,12 @@ public:
     // `languages`, such as "eng+fra". Set before opening. Without it, scanned pages have no text.
     void setRecognition(const QString &ocrFolder, const QString &tessdata, const QString &languages);
     bool canRecognise() const { return !m_ocrFolder.isEmpty() && !m_tessdata.isEmpty(); }
-    // Recognises a scanned page's words, if it hasn't been already, in the background. See pageRecognised.
-    void requestRecognition(int page);
+    // Recognises a scanned page's words, if it hasn't been already, in the background. See pageRecognised. With
+    // `everyPage`, the page is recognised whatever text it has, and from then on the document's recognised words are
+    // used in place of its own.
+    void requestRecognition(int page, bool everyPage = false);
+    // Reads the recognised words again, after another process has recognised more.
+    void rereadWords();
 
     // Lays a reflowable document out again, keeping `page`'s content in view. See layoutChanged.
     void setLayout(const ReaderLayout &layout, int page);
@@ -186,7 +190,7 @@ signals:
 private:
     enum class Kind {
         Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Images, Heading, Select, Bookmark, Anchor, Locate, Find,
-        Search, AreaPicture, AreaText, Lines, Reference, Recognise
+        Search, AreaPicture, AreaText, Lines, Reference, Recognise, RereadWords
     };
 
     struct Request {

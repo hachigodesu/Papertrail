@@ -75,12 +75,8 @@ FullTextReport FullTextIndexer::run(const Progress &progress)
             }
             pageCount = texts.pageCount;
             index.addPages(document, page, texts.pages);
-            for (qsizetype i = 0; i < texts.pages.size(); ++i) {
-                if (texts.recognised.contains(page + int(i)))
-                    continue;
-                const QString &text = texts.pages.at(i);
-                letters += std::count_if(text.begin(), text.end(), [](QChar c) { return c.isLetter(); });
-            }
+            // The file's own text, not what was recognised, decides whether it has a text layer.
+            letters += texts.ownLetters;
             report.pages += int(texts.pages.size());
             page += int(texts.pages.size());
             if (texts.pages.isEmpty() || page >= pageCount)

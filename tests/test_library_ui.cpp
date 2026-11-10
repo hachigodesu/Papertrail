@@ -24,6 +24,7 @@
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
 #include "import/ImportService.h"
+#include "import/TextRecognition.h"
 
 #include <QCheckBox>
 #include <QRadioButton>
@@ -45,6 +46,7 @@
 #include <QLabel>
 #include <QAction>
 #include <QMenu>
+#include <QStatusBar>
 #include <QPushButton>
 #include <QLineEdit>
 #include <QListView>
@@ -2218,6 +2220,31 @@ private slots:
         english->setCheckState(Qt::Unchecked);
         french->setCheckState(Qt::Unchecked);
         QCOMPARE(m_session->settings().value(QStringLiteral("ocr.languages")).toString(), QStringLiteral("eng"));
+    }
+
+    void aDocumentCanBeAskedToHaveItsTextRecognised()
+    {
+        if (!canRecogniseText())
+            QSKIP("This build can't recognise text");
+        openWindow();
+        FileRecord file;
+        file.sha256 = QStringLiteral("made-up-contents");
+        file.format = QStringLiteral("pdf");
+        FileRecord book = file;
+        book.sha256 = QStringLiteral("made-up-book");
+        book.format = QStringLiteral("epub");
+
+        // Not while it's turned off on this computer, which the window says.
+        m_session->settings().setValue(QStringLiteral("ocr.enabled"), false);
+        m_window->recogniseDocuments({file});
+        QVERIFY(!import::TextRecognition::isWanted(m_session->database(), file.sha256));
+        QVERIFY(m_window->statusBar()->currentMessage().contains(QStringLiteral("turned off")));
+
+        // Only fixed pages can be.
+        m_session->settings().setValue(QStringLiteral("ocr.enabled"), true);
+        m_window->recogniseDocuments({file, book});
+        QVERIFY(import::TextRecognition::isWanted(m_session->database(), file.sha256));
+        QVERIFY(!import::TextRecognition::isWanted(m_session->database(), book.sha256));
     }
 
     void theEditorSuggestsWhatsAlreadyInTheLibrary()

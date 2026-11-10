@@ -71,6 +71,10 @@ void attachFullText(Database &db, const QString &path)
             "  done INTEGER NOT NULL DEFAULT 0,"
             "  problem TEXT NOT NULL DEFAULT '',"
             "  updated_at INTEGER NOT NULL) STRICT");
+    // Documents whose every page is to be recognised, whatever text they have, since their own is poor.
+    db.exec("CREATE TABLE IF NOT EXISTS fulltext.recognition_wanted ("
+            "  sha256 TEXT PRIMARY KEY,"
+            "  wanted_at INTEGER NOT NULL) STRICT");
 }
 
 void FullTextIndex::forget(const QString &sha256)

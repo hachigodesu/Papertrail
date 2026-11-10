@@ -2037,6 +2037,33 @@ void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
         QAction *mark = menu->addAction(tr("Mark an area"), m_view, &PageView::startArea);
         mark->setObjectName(QStringLiteral("markArea"));
         mark->setToolTip(tr("Then drag over a figure, table or equation. Shift and a drag does it straight away."));
+        // For an old paper whose text layer is poor, such as one scanned by its publisher.
+        if (canRecogniseText() && !m_contentHash.isEmpty()) {
+            QAction *recognise = menu->addAction(tr("Recognise this document's text"), this, &ReaderTab::recogniseDocumentWanted);
+            recognise->setObjectName(QStringLiteral("recogniseDocument"));
+            recognise->setToolTip(tr("Reads the words on every page from the pictures of them, in place of the file's own text."));
+        }
+    }
+}
+
+bool ReaderTab::recogniseEveryPage()
+{
+    if (m_reflowable || !m_client->canRecognise())
+        return false;
+    m_client->requestRecognition(m_view->currentPage(), true);
+    return true;
+}
+
+void ReaderTab::rereadRecognisedWords()
+{
+    if (m_reflowable || !m_client->canRecognise())
+        return;
+    m_client->rereadWords();
+    if (!m_activeSearch.isEmpty()) {
+        const QString text = m_activeSearch;
+        m_activeSearch.clear();
+        m_search->setText(text);
+        applySearch();
     }
 }
 

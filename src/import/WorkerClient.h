@@ -65,6 +65,7 @@ public:
         int pageCount = 0;
         QStringList pages;
         QList<int> recognised; // Pages whose text was recognised, rather than the file's own.
+        qint64 ownLetters = 0; // Letters in the file's own text on these pages, whether or not it's what was given.
     };
     // With `ocrFolder`, scanned pages' text comes from the words recognised on them there, if any.
     PageTexts pageTexts(const QString &path, const QString &convertedPath, int start, int count, int timeoutMs,
@@ -78,9 +79,11 @@ public:
         int words = 0;
     };
     // Recognises the words on the scanned pages among `count` from `start`, keeping them in `ocrFolder`, with the
-    // languages' models in `tessdata`. Pages already recognised are left alone unless `again`.
+    // languages' models in `tessdata`. Pages already recognised are left alone unless `again`. With `everyPage`, every
+    // page is recognised whatever text it has, and from then on the document's recognised words are used in place of
+    // its own.
     Recognised recognise(const QString &path, const QString &convertedPath, const QString &ocrFolder, const QString &tessdata,
-                         const QString &languages, int start, int count, bool again, int timeoutMs);
+                         const QString &languages, int start, int count, bool again, int timeoutMs, bool everyPage = false);
 
     struct Cover {
         WorkerFailure failure = WorkerFailure::None;

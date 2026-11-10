@@ -42,7 +42,8 @@ private:
 
 // A document whose pages without text of their own are answered from words recognised on them, where there are
 // some. Everything else is the document's own. `wordsFor` gives a page's recognised words, or nothing if it has none;
-// it's asked once a page, and setWords replaces what it said.
+// it's asked once a page, and setWords replaces what it said. A document whose own text is poor, such as an old scan
+// with a publisher's text layer, can prefer its recognised words wherever a page has them.
 class RecognisedTextDocument : public Document {
 public:
     using WordSource = std::function<std::optional<QList<TextWord>>(int page)>;
@@ -50,6 +51,12 @@ public:
 
     void setWords(int page, const QList<TextWord> &words);
     bool hasRecognisedWords(int page);
+    void setPreferRecognised(bool prefer) { m_prefer = prefer; }
+    bool prefersRecognised() const { return m_prefer; }
+    // Asks `wordsFor` again for every page, as after they've been recognised elsewhere.
+    void forgetWords() { m_words.clear(); }
+    // Whether a page's text comes from its recognised words rather than its own.
+    bool usesRecognisedWords(int page);
     Document &inner() { return *m_inner; }
 
     bool needsPassword() override { return m_inner->needsPassword(); }
@@ -83,6 +90,7 @@ private:
     std::unique_ptr<Document> m_inner;
     WordSource m_wordsFor;
     QHash<int, std::optional<QList<TextWord>>> m_words;
+    bool m_prefer = false;
 };
 
 // Whether a page is only a picture, worth recognising: almost no text of its own, and either a picture covering most

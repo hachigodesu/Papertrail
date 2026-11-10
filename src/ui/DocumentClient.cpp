@@ -397,6 +397,8 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
             continueSearch();
         }
         break;
+    case Kind::RereadWords:
+        break;
     }
     pump();
 }
@@ -703,20 +705,40 @@ void DocumentClient::setRecognition(const QString &ocrFolder, const QString &tes
     m_languages = languages;
 }
 
-void DocumentClient::requestRecognition(int page)
+void DocumentClient::requestRecognition(int page, bool everyPage)
 {
-    if (!canRecognise() || m_unrecognisable.contains(page) || page < 0 || page >= m_pageCount)
+    if (!canRecognise() || page < 0 || page >= m_pageCount || (m_unrecognisable.contains(page) && !everyPage))
         return;
-    const bool waiting = std::any_of(m_background.cbegin(), m_background.cend(),
-                                     [page](const Request &request) { return request.kind == Kind::Recognise && request.page == page; });
-    if (waiting || (m_inFlight && m_inFlight->kind == Kind::Recognise && m_inFlight->page == page))
+    const auto same = [page, everyPage](const Request &request) {
+        return request.kind == Kind::Recognise && request.page == page
+               && (!everyPage || request.body.value(QStringLiteral("everyPage")).toBool());
+    };
+    if (std::any_of(m_background.cbegin(), m_background.cend(), same) || (m_inFlight && same(*m_inFlight)))
         return;
     Request request;
     request.kind = Kind::Recognise;
     request.page = page;
     request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("ocr")}, {QStringLiteral("page"), page},
                                {QStringLiteral("tessdata"), m_tessdata}, {QStringLiteral("languages"), m_languages}};
-    m_background << request;
+    if (everyPage) {
+        // Ahead of other pages' recognition, since it changes what the rest of the document's text is.
+        m_unrecognisable.remove(page);
+        request.body.insert(QStringLiteral("everyPage"), true);
+        m_background.prepend(request);
+    } else {
+        m_background << request;
+    }
+    pump();
+}
+
+void DocumentClient::rereadWords()
+{
+    if (!canRecognise())
+        return;
+    Request request;
+    request.kind = Kind::RereadWords;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("rereadwords")}};
+    m_urgent << request;
     pump();
 }
 

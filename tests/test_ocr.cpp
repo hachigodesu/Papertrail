@@ -137,6 +137,40 @@ private slots:
         QCOMPARE(forced.pages, 1);
     }
 
+    // A document whose own text is poor is recognised on every page, and its recognised words are used from then on,
+    // while what counts as the file's own text is still its own.
+    void everyPageCanBeRecognisedInPlaceOfAFilesOwnText()
+    {
+        requireOcr();
+        const QString folder = m_dir->filePath(QStringLiteral("ocr"));
+        import::WorkerClient worker(QStringLiteral(PAPERTRAIL_WORKER_PATH));
+        const QString path = sample(QStringLiteral("article.pdf"));
+
+        // Without asking for every page, a page with its own text is left alone.
+        const auto skipped = worker.recognise(path, QString(), folder, tessdata(), QStringLiteral("eng"), 0, 5, false, kWaitMs);
+        QVERIFY2(skipped.failure == import::WorkerFailure::None, qPrintable(skipped.error));
+        QCOMPARE(skipped.pages, 0);
+        const auto own = worker.pageTexts(path, QString(), 0, 5, kWaitMs, folder);
+        QVERIFY(own.recognised.isEmpty());
+        QVERIFY(own.ownLetters >= 40);
+
+        const auto every = worker.recognise(path, QString(), folder, tessdata(), QStringLiteral("eng"), 0, 5, false, kWaitMs,
+                                            true);
+        QVERIFY2(every.failure == import::WorkerFailure::None, qPrintable(every.error));
+        QCOMPARE(every.pages, every.pageCount);
+        QVERIFY(every.words > 5);
+
+        // Its text is what was recognised now, even in a worker started afresh, but its own letters are still counted.
+        import::WorkerClient fresh(QStringLiteral(PAPERTRAIL_WORKER_PATH));
+        const auto after = fresh.pageTexts(path, QString(), 0, 5, kWaitMs, folder);
+        QCOMPARE(after.recognised.size(), after.pageCount);
+        QCOMPARE(after.ownLetters, own.ownLetters);
+        QVERIFY2(found(after.pages.at(0), {QStringLiteral("Fatigue"), QStringLiteral("Steel"), QStringLiteral("Beams"),
+                                           QStringLiteral("made-up")})
+                     >= 3,
+                 qPrintable(after.pages.at(0)));
+    }
+
     void aMissingLanguageSaysSo()
     {
         requireOcr();
@@ -225,6 +259,71 @@ private slots:
         QCOMPARE(import::TextRecognition(db, options).waitingCount(), qint64(1));
     }
 
+    void aDocumentWithItsOwnTextCanBeRecognisedInFull()
+    {
+        requireOcr();
+        using namespace core;
+        const QString docs = m_dir->filePath(QStringLiteral("docs"));
+        QDir().mkpath(docs);
+        QVERIFY(QFile::copy(sample(QStringLiteral("article.pdf")), QDir(docs).filePath(QStringLiteral("article.pdf"))));
+        const QString database = m_dir->filePath(QStringLiteral("library.db"));
+        Database db(database);
+        migrateLibrary(db);
+        attachFullText(db, fullTextPathFor(database));
+        const QString cache = m_dir->filePath(QStringLiteral("cache"));
+        {
+            FileRepository files(db);
+            const qint64 root = files.addRoot(QStringLiteral("Docs"), docs);
+            import::ImportOptions options;
+            options.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+            options.cacheDirectory = cache;
+            import::ImportService service(db, options);
+            service.scan(root);
+            service.processQueue();
+        }
+        import::FullTextOptions indexing;
+        indexing.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        indexing.cacheDirectory = cache;
+        import::FullTextIndexer(db, indexing).run();
+        auto file = db.prepare("SELECT sha256, has_text_layer FROM file");
+        QVERIFY(file->step());
+        const QString sha256 = file->textAt(0);
+        QCOMPARE(file->intAt(1), 1);
+
+        import::RecognitionOptions options;
+        options.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        options.cacheDirectory = cache;
+        options.tessdata = tessdata();
+        options.languages = QStringLiteral("eng");
+        QCOMPARE(import::TextRecognition(db, options).waitingCount(), qint64(0));
+
+        QVERIFY(!import::TextRecognition::isWanted(db, sha256));
+        import::TextRecognition::want(db, sha256);
+        QVERIFY(import::TextRecognition::isWanted(db, sha256));
+        import::TextRecognition recognition(db, options);
+        QCOMPARE(recognition.waitingCount(), qint64(1));
+        const import::RecognitionReport report = recognition.run();
+        QVERIFY2(report.problem.isEmpty(), qPrintable(report.problem));
+        QCOMPARE(report.documents, 1);
+        QCOMPARE(report.pages, 1);
+        QCOMPARE(recognition.waitingCount(), qint64(0));
+
+        // Read again, it's still found, and the file still has text of its own.
+        import::FullTextIndexer(db, indexing).run();
+        PublicationFilter filter;
+        filter.searchText = QStringLiteral("fatigue");
+        filter.searchContents = true;
+        QCOMPARE(LibraryQuery(db).count(filter), qint64(1));
+        file->reset();
+        QVERIFY(file->step());
+        QCOMPARE(file->intAt(1), 1);
+
+        // Asked again, it starts over, keeping the pages it has.
+        import::TextRecognition::want(db, sha256);
+        QCOMPARE(recognition.waitingCount(), qint64(1));
+        QCOMPARE(recognition.run().pages, 0);
+    }
+
     // ---- In the reader
 
     void theReaderRecognisesAScannedPageAndSearchesIt()
@@ -258,6 +357,34 @@ private slots:
         QCOMPARE(hits.first().at(0).toInt(), 0);
         const QRectF hit = hits.first().at(1).value<QList<QRectF>>().first();
         QVERIFY(hit.top() > 50 && hit.top() < 400);
+    }
+
+    void theReaderRecognisesAPageWithTextWhenAskedForEveryPage()
+    {
+        requireOcr();
+        const QString folder = m_dir->filePath(QStringLiteral("ocr"));
+        ui::DocumentClient client(QStringLiteral(PAPERTRAIL_WORKER_PATH));
+        QSignalSpy opened(&client, &ui::DocumentClient::opened);
+        QSignalSpy recognised(&client, &ui::DocumentClient::pageRecognised);
+        client.setRecognition(folder, tessdata(), QStringLiteral("eng"));
+        client.open(sample(QStringLiteral("article.pdf")), {});
+        QVERIFY(opened.wait(kWaitMs));
+
+        client.requestRecognition(0);
+        QVERIFY(recognised.wait(kWaitMs));
+        QCOMPARE(recognised.last().at(1).toInt(), 0);
+        client.requestRecognition(0, true);
+        QTRY_COMPARE_WITH_TIMEOUT(recognised.size(), 2, kWaitMs);
+        QVERIFY(recognised.last().at(1).toInt() > 5);
+        QVERIFY(QFile::exists(QDir(folder).filePath(QStringLiteral("every-page"))));
+
+        // Reading the words again changes nothing the reader can't carry on from.
+        QSignalSpy hits(&client, &ui::DocumentClient::searchHits);
+        QSignalSpy finished(&client, &ui::DocumentClient::searchFinished);
+        client.rereadWords();
+        client.startSearch(QStringLiteral("fatigue"), 0);
+        QVERIFY(finished.wait(kWaitMs));
+        QVERIFY(!hits.isEmpty());
     }
 
     // Writes the sample above, when asked: a page that's only a picture of made-up text, as a scan is, and a page with

@@ -70,12 +70,27 @@ void writeRecognised(const QString &folder, int page, const QList<engine::TextWo
         throw engine::EngineError("the page's words couldn't be kept");
 }
 
+bool recognisingEveryPage(const QString &folder)
+{
+    return !folder.isEmpty() && QFile::exists(QDir(folder).filePath(QStringLiteral("every-page")));
+}
+
+void markRecognisingEveryPage(const QString &folder)
+{
+    QDir().mkpath(folder);
+    QSaveFile file(QDir(folder).filePath(QStringLiteral("every-page")));
+    if (!file.open(QIODevice::WriteOnly) || file.write("1") != 1 || !file.commit())
+        throw engine::EngineError("the document couldn't be marked for recognising");
+}
+
 std::unique_ptr<engine::Document> withRecognisedText(std::unique_ptr<engine::Document> document, const QString &folder)
 {
     if (folder.isEmpty())
         return document;
-    return std::make_unique<engine::RecognisedTextDocument>(std::move(document),
-                                                             [folder](int page) { return readRecognised(folder, page); });
+    auto recognised = std::make_unique<engine::RecognisedTextDocument>(std::move(document),
+                                                                        [folder](int page) { return readRecognised(folder, page); });
+    recognised->setPreferRecognised(recognisingEveryPage(folder));
+    return recognised;
 }
 
 QList<engine::TextWord> recognisePage(engine::Recogniser &recogniser, engine::Document &document, int page,

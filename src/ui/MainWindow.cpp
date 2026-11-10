@@ -1165,6 +1165,15 @@ void MainWindow::connectImport()
                                                   .arg(QLocale().toString(left))
                                             : tr("Recognising scanned text: %1 to go").arg(QLocale().toString(left)));
     });
+    connect(m_index, &IndexThread::recognitionFinished, this, [this](const import::RecognitionReport &report) {
+        if (report.pages <= 0)
+            return;
+        // Readers use the words the background recognised.
+        for (int i = 0; i < m_documentTabs->count(); ++i) {
+            for (ReaderTab *reader : readersIn(m_documentTabs->widget(i)))
+                reader->rereadRecognisedWords();
+        }
+    });
     connect(m_index, &IndexThread::finished, this, [this](const import::FullTextReport &report) {
         if (report.documents > 0)
             refreshNow(); // More searches can find things now, and which files have no text is better known.
@@ -1985,6 +1994,12 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
         connect(reader, &ReaderTab::statusMessage, this,
                 [this](const QString &message) { statusBar()->showMessage(message, 8000); });
         connect(reader, &ReaderTab::closeSideRequested, this, [this, reader] { closeSide(reader); });
+        connect(reader, &ReaderTab::recogniseDocumentWanted, this, [this, fileId] {
+            guarded(tr("Reading the file"), [&] {
+                if (const std::optional<FileRecord> file = m_session.files().get(fileId))
+                    recogniseDocuments({*file});
+            });
+        });
         connect(reader, &ReaderTab::textRecognised, this, [this](const QString &contentHash) {
             // Read into the index again, with its recognised words, once the reader's done with them.
             guarded(tr("Updating the index"), [&] { FullTextIndex(m_session.database()).forget(contentHash); });
@@ -2468,6 +2483,18 @@ void MainWindow::showContextMenu(const QPoint &position)
             menu.addAction(tr("Edit..."), this, [this, publication] { editPublication(publication); });
             menu.addAction(tr("Summarize with Claude..."), this, [this, publication] { showSummaryDialog(publication); });
             menu.addAction(tr("Related papers..."), this, [this, publication] { showRelatedPapers(publication); });
+            // For an old paper whose text layer is poor. Not for an article, whose file is its issue's.
+            if (canRecogniseText()) {
+                QList<FileRecord> fixed;
+                for (const FileRecord &file : choices) {
+                    if (file.format == QStringLiteral("pdf") || file.format == QStringLiteral("djvu"))
+                        fixed << file;
+                }
+                if (!fixed.isEmpty()) {
+                    menu.addAction(tr("Recognise its text"), this, [this, fixed] { recogniseDocuments(fixed); })
+                        ->setObjectName(QStringLiteral("recogniseText"));
+                }
+            }
             menu.addAction(tr("Summarize later at half price..."), this, &MainWindow::showBatchSummaryDialog);
             bool marked = false;
             guarded(tr("Reading the highlights"), [&] { marked = markedPdfFor(m_session, publication).has_value(); });
@@ -2754,6 +2781,45 @@ void MainWindow::kickIndexing()
 {
     if (m_indexContents->isChecked() && !m_import->isBusy())
         m_index->kick();
+}
+
+void MainWindow::recogniseDocuments(const QList<FileRecord> &files)
+{
+    if (!m_session.settings().value(QStringLiteral("ocr.enabled")).toBool()) {
+        statusBar()->showMessage(tr("Recognising text is turned off on this computer. Turn it on in File > Settings, "
+                                    "under Scanned documents."),
+                                 15000);
+        return;
+    }
+    QSet<QString> hashes;
+    for (const FileRecord &file : files) {
+        if (!file.sha256.isEmpty() && (file.format == QStringLiteral("pdf") || file.format == QStringLiteral("djvu")))
+            hashes.insert(file.sha256);
+    }
+    if (hashes.isEmpty())
+        return;
+    bool asked = false;
+    guarded(tr("Asking for the text to be recognised"), [&] {
+        for (const QString &hash : std::as_const(hashes))
+            import::TextRecognition::want(m_session.database(), hash);
+        asked = true;
+    });
+    if (!asked)
+        return;
+    // A reader showing one starts on the page being read.
+    for (int i = 0; i < m_documentTabs->count(); ++i) {
+        for (ReaderTab *reader : readersIn(m_documentTabs->widget(i))) {
+            if (hashes.contains(reader->contentHash()))
+                reader->recogniseEveryPage();
+        }
+    }
+    kickIndexing();
+    statusBar()->showMessage(m_indexContents->isChecked()
+                                 ? tr("Recognising the text on every page, in the background. It's used in place of the "
+                                      "file's own text as each page is done.")
+                                 : tr("Recognising the text on each page as you read it. Turn on Index document text to "
+                                      "have the rest done in the background."),
+                             15000);
 }
 
 void MainWindow::openAtMatch(qint64 publicationId, qint64 fileId, int page, const QString &text)

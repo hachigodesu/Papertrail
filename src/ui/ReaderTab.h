@@ -106,6 +106,13 @@ public:
     // Turns the pages clockwise by this much, kept with the place. Only fixed pages can be turned.
     void rotateBy(int degrees);
 
+    // Recognises the page being read whatever text it has, and from then on uses the document's recognised words in
+    // place of its own, for a document whose own text is poor. False if this reader can't recognise text.
+    bool recogniseEveryPage();
+    // Reads the recognised words again, after the background has recognised more pages.
+    void rereadRecognisedWords();
+    const QString &contentHash() const { return m_contentHash; }
+
     // Keeps the place at the top of the view as a bookmark, named after its page.
     void addBookmark();
     void goToBookmark(qint64 id);
@@ -178,6 +185,8 @@ signals:
 
     // A scanned page's words were recognised, so the document's text in the index is out of date.
     void textRecognised(const QString &contentHash);
+    // Recognise this document's text was chosen. The window asks for the rest of it to be recognised.
+    void recogniseDocumentWanted();
 
 private:
     struct Hit {

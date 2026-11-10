@@ -340,6 +340,9 @@ public:
     // What the metadata editor suggests while typing: values already in the library for `field`, or names of
     // people for a people field.
     QStringList metadataSuggestions(const QString &field, const QString &typed);
+    // Recognises every page of these files' text in the background, and in any reader showing them, in place of
+    // their own text.
+    void recogniseDocuments(const QList<core::FileRecord> &files);
 
 private:
     void showAbout();
