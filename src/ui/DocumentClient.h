@@ -52,6 +52,10 @@ struct ReaderTextLine {
     QString text;
     QRectF rect;
     QList<QRectF> chars;
+    double size = 0;
+    bool bold = false;
+    bool margin = false;    // A running head or page number in the page's margin.
+    bool paragraph = false; // The first line of a paragraph.
 };
 
 // Where a reference in a document's text points: see DocumentClient::requestReference.
@@ -128,7 +132,8 @@ public:
     // The text inside part of a page. The answer always comes, empty if there's none or it couldn't be read.
     void requestAreaText(qint64 token, int page, const QRectF &rect);
     // A page's lines of text, with where each character is.
-    void requestLines(int page);
+    // A page's lines, in the background unless `now`, as when reading along needs them at once.
+    void requestLines(int page, bool now = false);
     // What a reference at a point on a page points at, such as "Figure 3" to its caption, looking only from `first` to
     // `last`. The answer always comes, as not found if there was nothing to find or the process died.
     void requestReference(int page, const QPointF &point, int first, int last);

@@ -96,6 +96,8 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("reader.page_colours"), QStringLiteral("light"), K::Value,
          {QStringLiteral("light"), QStringLiteral("dark"), QStringLiteral("sepia")}},
         {QStringLiteral("reader.font_size"), 12.0, K::Value, {}},
+        // What the reading ruler marks.
+        {QStringLiteral("reader.ruler"), QStringLiteral("line"), K::Value, {QStringLiteral("line"), QStringLiteral("paragraph")}},
         {QStringLiteral("citation.style"), QStringLiteral("harvard"), K::Value,
          {QStringLiteral("harvard"), QStringLiteral("apa"), QStringLiteral("ieee"), QStringLiteral("chicago")}},
     };

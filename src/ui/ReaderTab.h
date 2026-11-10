@@ -97,6 +97,21 @@ public:
     QComboBox *zoomBox() const { return m_zoomBox; }
     QLineEdit *pageBox() const { return m_pageBox; }
     bool isReady() const { return m_ready; }
+
+    // The reading ruler, which dims all but the line or paragraph being read (reader.ruler), moved with Up and Down or
+    // a click, and following on to the next page.
+    void setRulerShown(bool shown);
+    bool isRulerShown() const { return m_rulerShown; }
+    void moveRuler(int step);
+    // Where it is, for tests: the page, and which line or paragraph of it.
+    int rulerPage() const { return m_rulerPage; }
+    int rulerIndex() const { return m_rulerIndex; }
+    // The parts of a page the ruler stops at, with their text, once its lines are known.
+    struct RulerStop {
+        QRectF rect;
+        QString text;
+    };
+    QList<RulerStop> rulerStops(int page) const;
     bool isShowingProblem() const;
     int hitCount() const { return int(m_hits.size()); }
     int currentHitIndex() const { return m_currentHit; }
@@ -174,6 +189,7 @@ public:
 signals:
     // The user asked to open this file with something else, because it can't be shown here.
     void openElsewhereRequested(const QString &path);
+    void rulerShownChanged(bool shown);
 
     // Reports what's happening with this tab's search and problems, for the window's status bar.
     void statusMessage(const QString &message);
@@ -340,6 +356,22 @@ private:
     double m_reached = 0; // The furthest it's been read, from 0 to 1, kept with the place.
     int m_bookmarkPage = -1;
     bool m_restoring = false;
+
+    // Each page's lines, as the ruler needs them, until the layout changes.
+    void onLines(int page, const QList<ReaderTextLine> &lines);
+    void placeRuler(int page, int index);
+    void rulerToPoint(int page, const QPointF &point);
+    void askForLines(int page);
+    QHash<int, QList<ReaderTextLine>> m_pageLines;
+    QSet<int> m_linesAsked;
+    bool m_layoutPending = false; // Lines that arrive meanwhile are the old layout's.
+    bool m_rulerShown = false;
+    int m_rulerPage = -1;
+    int m_rulerIndex = 0;
+    // What to do once the lines of m_rulerPage arrive: go to the first stop (1), the last (-1), or near a point.
+    int m_rulerWaiting = 0;
+    std::optional<QPointF> m_rulerWaitingPoint;
+    QString m_rulerText; // Where it was, to find again after a new layout.
     std::function<void(const QUrl &)> m_openLink;
 
     QList<Hit> m_hits;

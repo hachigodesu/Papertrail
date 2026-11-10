@@ -248,6 +248,111 @@ private slots:
         QCOMPARE(hits.at(1).at(0).toInt(), 1);
     }
 
+    void linesSayWhatKindTheyAre()
+    {
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy lines(&client, &DocumentClient::linesReady);
+        client.open(sample(QStringLiteral("reading_ruler.pdf")), {});
+        QVERIFY(opened.wait(kWaitMs));
+        client.requestLines(0, true);
+        QVERIFY(lines.wait(kWaitMs));
+        const auto found = lines.first().at(1).value<QList<ReaderTextLine>>();
+        const auto line = [&](const char *start) {
+            for (const ReaderTextLine &each : found) {
+                if (each.text.trimmed() == QLatin1StringView(start) || each.text.startsWith(QLatin1StringView(start)))
+                    return each;
+            }
+            QTest::qFail(qPrintable(QStringLiteral("no line starts %1").arg(QLatin1StringView(start))), __FILE__, __LINE__);
+            return ReaderTextLine{};
+        };
+        // The running head and the page number are in the margins.
+        QVERIFY(line("A Made-Up Journal").margin);
+        QVERIFY(line("1").margin);
+        QVERIFY(!line("The first paragraph").margin);
+        // Paragraphs start after a gap, or set in from the line before.
+        QVERIFY(line("The first paragraph").paragraph);
+        QVERIFY(!line("carries on over").paragraph);
+        QVERIFY(!line("and ends on").paragraph);
+        QVERIFY(line("A second paragraph").paragraph);
+        QVERIFY(!line("and has two").paragraph);
+        QVERIFY(line("A third is only").paragraph);
+        QVERIFY(!line("as some books").paragraph);
+        QVERIFY(qAbs(line("carries on over").size - 11) < 1.5);
+    }
+
+    void theRulerMovesALineOrAParagraphAndOnToTheNextPage()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reading_ruler.pdf"));
+        QVERIFY(reader && reader->isReady());
+        PageView *view = reader->pageView();
+        view->setFocus();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(0), kWaitMs);
+
+        reader->setRulerShown(true);
+        QTRY_VERIFY_WITH_TIMEOUT(view->hasRuler(), kWaitMs);
+        QCOMPARE(reader->rulerPage(), 0);
+        QCOMPARE(reader->rulerIndex(), 0);
+        // The running head and page number are passed over: seven lines of text.
+        QCOMPARE(reader->rulerStops(0).size(), 7);
+        QVERIFY(reader->rulerStops(0).first().text.startsWith(QStringLiteral("The first paragraph")));
+
+        for (int i = 0; i < 6; ++i)
+            QTest::keyClick(view, Qt::Key_Down);
+        QCOMPARE(reader->rulerIndex(), 6);
+        // On to the next page's first line, once its lines are read.
+        QTest::keyClick(view, Qt::Key_Down);
+        QTRY_COMPARE_WITH_TIMEOUT(reader->rulerPage(), 1, kWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(reader->rulerIndex(), 0, kWaitMs);
+        QCOMPARE(view->rulerPage(), 1);
+        QTest::keyClick(view, Qt::Key_Up);
+        QCOMPARE(reader->rulerPage(), 0);
+        QCOMPARE(reader->rulerIndex(), 6);
+
+        // A click chooses the line it's on.
+        const QRectF second = reader->rulerStops(0).at(3).rect;
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, {}, view->viewportPointFor(0, second.center()));
+        QCOMPARE(reader->rulerIndex(), 3);
+
+        // By paragraph, the three of them.
+        m_session->settings().setValue(QStringLiteral("reader.ruler"), QStringLiteral("paragraph"));
+        const QList<ReaderTab::RulerStop> paragraphs = reader->rulerStops(0);
+        QCOMPARE(paragraphs.size(), 3);
+        QVERIFY(paragraphs.at(1).text.startsWith(QStringLiteral("A second paragraph")));
+        QVERIFY(paragraphs.at(1).text.contains(QStringLiteral("and has two lines")));
+        m_session->settings().setValue(QStringLiteral("reader.ruler"), QStringLiteral("line"));
+
+        // Escape puts it away, and the View menu says so.
+        QTest::keyClick(view, Qt::Key_Escape);
+        QVERIFY(!reader->isRulerShown());
+        QVERIFY(!view->hasRuler());
+        // Up and Down scroll again.
+        QTest::keyClick(view, Qt::Key_Down);
+        QCOMPARE(reader->rulerIndex(), 3);
+    }
+
+    void theRulerFindsItsPlaceAgainAfterANewLayout()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reader_nav.epub"));
+        QVERIFY(reader && reader->isReady());
+        PageView *view = reader->pageView();
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(view->currentPage()), kWaitMs);
+        reader->setRulerShown(true);
+        QTRY_VERIFY_WITH_TIMEOUT(view->hasRuler(), kWaitMs);
+        const QString before = reader->rulerStops(reader->rulerPage()).value(reader->rulerIndex()).text;
+        QVERIFY(!before.isEmpty());
+
+        // Larger text lays the book out again, and the ruler comes back on the same words.
+        QSignalSpy laidOut(reader->client(), &DocumentClient::layoutChanged);
+        reader->changeFontSize(4);
+        QVERIFY(laidOut.wait(kWaitMs));
+        QTRY_VERIFY_WITH_TIMEOUT(view->hasRuler(), kWaitMs);
+        QVERIFY(reader->isRulerShown());
+        const QString after = reader->rulerStops(reader->rulerPage()).value(reader->rulerIndex()).text;
+        QVERIFY2(after.contains(before.left(20).simplified()) || before.contains(after.left(20).simplified()),
+                 qPrintable(before + QStringLiteral(" / ") + after));
+    }
+
     void readsLinesAndPartsOfAPage()
     {
         DocumentClient client(worker());

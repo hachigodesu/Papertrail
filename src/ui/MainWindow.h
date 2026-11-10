@@ -389,6 +389,8 @@ private:
     QPushButton *m_summaryStatus = nullptr;
     QAction *m_goTo = nullptr;
     QAction *m_fullScreen = nullptr;
+    QAction *m_ruler = nullptr;
+    void updateRulerAction();
     QToolBar *m_libraryBar = nullptr;
     std::unique_ptr<metadata::Transport> m_downloads; // For language models, made when first needed.
     QPointer<QWidget> m_fullScreenTab; // The document tab shown over the whole screen.

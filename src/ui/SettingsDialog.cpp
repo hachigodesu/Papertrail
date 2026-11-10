@@ -105,6 +105,9 @@ SettingsDialog::SettingsDialog(LibrarySession &session, const SettingsActions &a
     }
     connect(m_textSize, &QDoubleSpinBox::valueChanged, this, [this](double size) { save(QStringLiteral("reader.font_size"), size); });
     readingForm->addRow(tr("Text size:"), m_textSize);
+    m_ruler = choiceFor(QStringLiteral("reader.ruler"), {{tr("A line"), QStringLiteral("line")}, {tr("A paragraph"), QStringLiteral("paragraph")}});
+    m_ruler->setToolTip(tr("View > Reading ruler dims all but this, moved with Up and Down."));
+    readingForm->addRow(tr("Reading ruler marks:"), m_ruler);
     layout->addWidget(reading);
 
     auto *library = new QGroupBox(tr("Library"), this);

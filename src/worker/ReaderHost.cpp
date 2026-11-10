@@ -506,11 +506,34 @@ private:
     {
         const int number = page(request);
         const bool withChars = request.value(QStringLiteral("chars")).toBool();
+        const QList<engine::TextLine> &lines = linesOn(number);
+        const double body = bodySize(lines);
+        double pageHeight = 0;
+        try {
+            pageHeight = m_document->pageSize(number).height();
+        } catch (const engine::EngineError &) {
+        }
         QJsonArray items;
-        for (const engine::TextLine &line : linesOn(number)) {
-            QJsonObject item{{QStringLiteral("text"), line.text}, {QStringLiteral("rect"), rectToJson(line.rect)}};
+        for (int i = 0; i < lines.size(); ++i) {
+            const engine::TextLine &line = lines.at(i);
+            QJsonObject item{{QStringLiteral("text"), line.text}, {QStringLiteral("rect"), rectToJson(line.rect)},
+                             {QStringLiteral("size"), line.size}};
             if (withChars)
                 item.insert(QStringLiteral("chars"), rectsToJson(line.chars));
+            if (line.bold)
+                item.insert(QStringLiteral("bold"), true);
+            // A running head or a page number, which reading along passes over.
+            if (inMargin(line, pageHeight, body))
+                item.insert(QStringLiteral("margin"), true);
+            // A paragraph starts after a gap, or with its first line set in from the one above.
+            bool starts = standsApart(lines, i);
+            if (!starts && i > 0) {
+                const QRectF above = lines.at(i - 1).rect;
+                const bool sameColumn = above.right() > line.rect.left() && above.left() < line.rect.right();
+                starts = sameColumn && line.rect.left() > above.left() + qMax(4.0, line.rect.height() * 0.8);
+            }
+            if (starts)
+                item.insert(QStringLiteral("paragraph"), true);
             items.append(item);
         }
         reply.insert(QStringLiteral("page"), number);

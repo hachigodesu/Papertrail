@@ -413,6 +413,33 @@ def judgment_pdf(path):
              extra_pages=[[(10, "1. This made-up appeal concerns a made-up contract.")]])
 
 
+def reading_ruler_pdf(path):
+    """Two made-up pages for the reading ruler: a running head and a page number in the margins, then three paragraphs,
+    the first two set apart by a gap and the third only by its first line being set in, and a second page."""
+
+    def placed(items):
+        """`items` is a list of (size, x, y, text), in points from the bottom left."""
+        return "\n".join(f"BT /F1 {size} Tf {x} {y} Td ({escape_pdf(text)}) Tj ET"
+                         for size, x, y, text in items).encode("latin-1")
+
+    pages = [
+        placed([(9, 50, 815, "A Made-Up Journal of Reading, Volume 1"),
+                (11, 50, 740, "The first paragraph of a made-up page begins here and"),
+                (11, 50, 726, "carries on over a second line of words that mean nothing,"),
+                (11, 50, 712, "and ends on a third."),
+                (11, 50, 680, "A second paragraph follows after a gap, as most do,"),
+                (11, 50, 666, "and has two lines."),
+                (11, 70, 652, "A third is only set in from the line before it,"),
+                (11, 50, 638, "as some books set them."),
+                (9, 290, 30, "1")]),
+        placed([(9, 50, 815, "A Made-Up Journal of Reading, Volume 1"),
+                (11, 50, 740, "The second page has one paragraph of its own,"),
+                (11, 50, 726, "over two lines."),
+                (9, 290, 30, "2")]),
+    ]
+    path.write_bytes(build_pdf(pages))
+
+
 def smart_jump_headings_pdf(path):
     """A made-up paper whose mentions of Appendix E and Figure 4 wrap onto the start of lines in the middle of a
     paragraph, looking like a heading and a caption, before the real caption on page 2 and the real heading, in bold
@@ -857,6 +884,7 @@ def main():
     picture_pdf(out / "picture_page.pdf")
     smart_jump_pdf(out / "smart_jump.pdf")
     smart_jump_headings_pdf(out / "smart_jump_headings.pdf")
+    reading_ruler_pdf(out / "reading_ruler.pdf")
     smart_jump_contents_pdf(out / "smart_jump_contents.pdf")
     judgment_pdf(out / "judgment.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))

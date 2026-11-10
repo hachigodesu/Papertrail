@@ -1,0 +1,54 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+5 0 obj
+<< /Length 593 >>
+stream
+BT /F1 9 Tf 50 815 Td (A Made-Up Journal of Reading, Volume 1) Tj ET
+BT /F1 11 Tf 50 740 Td (The first paragraph of a made-up page begins here and) Tj ET
+BT /F1 11 Tf 50 726 Td (carries on over a second line of words that mean nothing,) Tj ET
+BT /F1 11 Tf 50 712 Td (and ends on a third.) Tj ET
+BT /F1 11 Tf 50 680 Td (A second paragraph follows after a gap, as most do,) Tj ET
+BT /F1 11 Tf 50 666 Td (and has two lines.) Tj ET
+BT /F1 11 Tf 70 652 Td (A third is only set in from the line before it,) Tj ET
+BT /F1 11 Tf 50 638 Td (as some books set them.) Tj ET
+BT /F1 9 Tf 290 30 Td (1) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+7 0 obj
+<< /Length 224 >>
+stream
+BT /F1 9 Tf 50 815 Td (A Made-Up Journal of Reading, Volume 1) Tj ET
+BT /F1 11 Tf 50 740 Td (The second page has one paragraph of its own,) Tj ET
+BT /F1 11 Tf 50 726 Td (over two lines.) Tj ET
+BT /F1 9 Tf 290 30 Td (2) Tj ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000191 00000 n 
+0000000317 00000 n 
+0000000961 00000 n 
+0000001087 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+1362
+%%EOF

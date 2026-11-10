@@ -837,7 +837,19 @@ void ReaderTab::connectClient()
         m_view->goToPage(page);
         m_restoring = false;
     });
+    connect(m_client, &DocumentClient::linesReady, this, &ReaderTab::onLines);
     connect(m_client, &DocumentClient::layoutChanged, this, [this](int pageCount, int page) {
+        m_layoutPending = false;
+        m_pageLines.clear();
+        m_linesAsked.clear();
+        if (m_rulerShown) {
+            // Found again by its words, on the page the new layout opens at.
+            m_rulerPage = page;
+            m_rulerIndex = 0;
+            m_rulerWaiting = 2;
+            m_view->clearRuler();
+            askForLines(page);
+        }
         m_view->forgetAllPages();
         m_view->setPageCount(pageCount, QSizeF(m_layout.width, m_layout.height));
         m_view->goToPage(page);
@@ -909,7 +921,15 @@ void ReaderTab::connectClient()
             m_saveTimer->start();
     });
     connect(m_view, &PageView::externalLinkActivated, this, &ReaderTab::followExternalLink);
-    connect(m_view, &PageView::escapeUnused, this, &ReaderTab::escapeUnused);
+    // The ruler goes before anything else Escape is for, such as leaving full screen.
+    connect(m_view, &PageView::escapeUnused, this, [this] {
+        if (m_rulerShown)
+            setRulerShown(false);
+        else
+            emit escapeUnused();
+    });
+    connect(m_view, &PageView::rulerStepRequested, this, &ReaderTab::moveRuler);
+    connect(m_view, &PageView::pageClicked, this, &ReaderTab::rulerToPoint);
     connect(m_view, &PageView::historyChanged, this, [this] {
         m_backButton->setEnabled(m_view->canGoBack());
         m_forwardButton->setEnabled(m_view->canGoForward());
@@ -1244,6 +1264,7 @@ void ReaderTab::changeFontSize(double change)
     m_layout.fontSize = size;
     m_session.settings().setValue(QStringLiteral("reader.font_size"), size);
     emit statusMessage(tr("Laying out the text again..."));
+    m_layoutPending = true;
     m_client->setLayout(m_layout, m_view->topPage());
 }
 
@@ -2066,10 +2087,176 @@ bool ReaderTab::recogniseEveryPage()
     return true;
 }
 
+void ReaderTab::setRulerShown(bool shown)
+{
+    if (shown == m_rulerShown)
+        return;
+    m_rulerShown = shown;
+    m_rulerWaiting = 0;
+    m_rulerWaitingPoint.reset();
+    if (!shown) {
+        m_view->clearRuler();
+    } else {
+        // From the page being read, at its first line.
+        m_rulerPage = m_view->currentPage();
+        m_rulerIndex = 0;
+        if (m_pageLines.contains(m_rulerPage)) {
+            placeRuler(m_rulerPage, 0);
+        } else {
+            m_rulerWaiting = 1;
+            askForLines(m_rulerPage);
+        }
+        m_view->setFocus();
+    }
+    emit rulerShownChanged(shown);
+}
+
+QList<ReaderTab::RulerStop> ReaderTab::rulerStops(int page) const
+{
+    QList<RulerStop> stops;
+    const auto found = m_pageLines.constFind(page);
+    if (found == m_pageLines.cend())
+        return stops;
+    bool byParagraph = false;
+    try {
+        byParagraph = m_session.settings().value(QStringLiteral("reader.ruler")).toString() == QLatin1StringView("paragraph");
+    } catch (const std::exception &) {
+    }
+    for (const ReaderTextLine &line : *found) {
+        // Running heads and page numbers are passed over, and so are empty lines.
+        if (line.margin || line.text.trimmed().isEmpty())
+            continue;
+        // A paragraph goes on until the next starts, or its text moves up into another column.
+        const bool joins = byParagraph && !stops.isEmpty() && !line.paragraph && line.rect.top() >= stops.last().rect.top() - 1;
+        if (joins) {
+            stops.last().rect = stops.last().rect.united(line.rect);
+            stops.last().text += u' ' + line.text;
+        } else {
+            stops << RulerStop{line.rect, line.text};
+        }
+    }
+    return stops;
+}
+
+void ReaderTab::askForLines(int page)
+{
+    if (m_linesAsked.contains(page))
+        return;
+    m_linesAsked.insert(page);
+    m_client->requestLines(page, true);
+}
+
+void ReaderTab::onLines(int page, const QList<ReaderTextLine> &lines)
+{
+    if (m_layoutPending)
+        return;
+    m_pageLines.insert(page, lines);
+    if (!m_rulerShown || page != m_rulerPage || (m_rulerWaiting == 0 && !m_rulerWaitingPoint))
+        return;
+    const QList<RulerStop> stops = rulerStops(page);
+    if (m_rulerWaitingPoint) {
+        const QPointF point = *m_rulerWaitingPoint;
+        m_rulerWaitingPoint.reset();
+        rulerToPoint(page, point);
+        return;
+    }
+    const int waiting = m_rulerWaiting;
+    m_rulerWaiting = 0;
+    if (stops.isEmpty()) {
+        // A page with nothing to read: on to the next in the same direction.
+        moveRuler(waiting < 0 ? -1 : 1);
+        return;
+    }
+    int index = waiting < 0 ? int(stops.size()) - 1 : 0;
+    if (waiting == 2) {
+        // After a new layout, where its words are now.
+        const QString words = m_rulerText.left(40).simplified();
+        for (int i = 0; i < stops.size() && !words.isEmpty(); ++i) {
+            if (stops.at(i).text.simplified().contains(words)) {
+                index = i;
+                break;
+            }
+        }
+    }
+    placeRuler(page, index);
+}
+
+void ReaderTab::placeRuler(int page, int index)
+{
+    const QList<RulerStop> stops = rulerStops(page);
+    if (stops.isEmpty())
+        return;
+    m_rulerPage = page;
+    m_rulerIndex = qBound(0, index, int(stops.size()) - 1);
+    const RulerStop &stop = stops.at(m_rulerIndex);
+    m_rulerText = stop.text;
+    m_view->setRuler(page, stop.rect);
+    m_view->scrollToShow(page, stop.rect);
+    // The page after is likely next.
+    if (page + 1 <= m_view->lastShownPage())
+        askForLines(page + 1);
+}
+
+void ReaderTab::moveRuler(int step)
+{
+    if (!m_rulerShown || m_rulerWaiting != 0)
+        return;
+    const QList<RulerStop> stops = rulerStops(m_rulerPage);
+    const int index = m_rulerIndex + step;
+    if (index >= 0 && index < stops.size()) {
+        placeRuler(m_rulerPage, index);
+        return;
+    }
+    // On to the next or previous page, within those shown, as an article's range is.
+    const int page = m_rulerPage + (step > 0 ? 1 : -1);
+    if (page < m_view->firstShownPage() || page > m_view->lastShownPage())
+        return;
+    m_rulerPage = page;
+    if (m_pageLines.contains(page)) {
+        const QList<RulerStop> next = rulerStops(page);
+        if (next.isEmpty()) {
+            moveRuler(step); // Nothing to read on it.
+            return;
+        }
+        placeRuler(page, step > 0 ? 0 : int(next.size()) - 1);
+    } else {
+        m_rulerWaiting = step > 0 ? 1 : -1;
+        askForLines(page);
+    }
+}
+
+void ReaderTab::rulerToPoint(int page, const QPointF &point)
+{
+    if (!m_rulerShown)
+        return;
+    if (!m_pageLines.contains(page)) {
+        m_rulerPage = page;
+        m_rulerWaitingPoint = point;
+        askForLines(page);
+        return;
+    }
+    const QList<RulerStop> stops = rulerStops(page);
+    int best = -1;
+    double nearest = 0;
+    for (int i = 0; i < stops.size(); ++i) {
+        const QRectF &rect = stops.at(i).rect;
+        const double distance = point.y() < rect.top() ? rect.top() - point.y() : point.y() > rect.bottom() ? point.y() - rect.bottom() : 0;
+        if (best < 0 || distance < nearest) {
+            best = i;
+            nearest = distance;
+        }
+    }
+    if (best >= 0)
+        placeRuler(page, best);
+}
+
 void ReaderTab::rereadRecognisedWords()
 {
     if (m_reflowable || !m_client->canRecognise())
         return;
+    // Recognised words make new lines.
+    m_pageLines.clear();
+    m_linesAsked.clear();
     m_client->rereadWords();
     if (!m_activeSearch.isEmpty()) {
         const QString text = m_activeSearch;

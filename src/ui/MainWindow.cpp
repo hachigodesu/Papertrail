@@ -905,6 +905,7 @@ void MainWindow::buildCentre()
         }
         if (m_fullScreen)
             m_fullScreen->setEnabled(reading);
+        updateRulerAction();
         if (index == 0 && m_lookup)
             offerWhatsDue();
         if (index > 0 && !readersIn(m_documentTabs->widget(index)).isEmpty())
@@ -1051,6 +1052,16 @@ void MainWindow::buildMenus()
         if (ReaderTab *reader = activeReader())
             reader->addBookmark();
     });
+    m_ruler = view->addAction(tr("Reading &ruler"));
+    m_ruler->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
+    m_ruler->setCheckable(true);
+    m_ruler->setEnabled(false);
+    m_ruler->setToolTip(tr("Dims all but the line or paragraph being read. Up and Down move it, and Escape puts it away."));
+    connect(m_ruler, &QAction::triggered, this, [this](bool shown) {
+        if (ReaderTab *reader = activeReader())
+            reader->setRulerShown(shown);
+    });
+    addAction(m_ruler); // In full screen too.
     m_fullScreen = view->addAction(tr("&Full screen"));
     m_fullScreen->setShortcut(QKeySequence(Qt::Key_F11));
     m_fullScreen->setCheckable(true);
@@ -2019,6 +2030,7 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
             guarded(tr("Updating the index"), [&] { FullTextIndex(m_session.database()).forget(contentHash); });
             kickIndexing();
         });
+        connect(reader, &ReaderTab::rulerShownChanged, this, &MainWindow::updateRulerAction);
         connect(reader, &ReaderTab::escapeUnused, this, [this] {
             if (isFullScreenReading())
                 m_fullScreen->setChecked(false);
@@ -2046,6 +2058,7 @@ void MainWindow::insertReaderTab(ReaderTab *reader, int index)
 int MainWindow::insertPair(ReaderTab *left, ReaderTab *right, int index)
 {
     auto *pair = new ReaderPair(left, right, m_documentTabs);
+    connect(pair, &ReaderPair::activeChanged, this, &MainWindow::updateRulerAction);
     const int at = m_documentTabs->insertTab(qMax(1, index), pair, QString());
     updatePairTitle(pair);
     m_documentTabs->setCurrentIndex(at);
@@ -2249,6 +2262,16 @@ void MainWindow::startDailyBackup()
         });
     }
     m_dailyBackup->start(QThread::LowPriority);
+}
+
+void MainWindow::updateRulerAction()
+{
+    if (!m_ruler)
+        return;
+    // It says whether the document being read has its ruler out.
+    ReaderTab *reader = activeReader();
+    m_ruler->setEnabled(reader != nullptr);
+    m_ruler->setChecked(reader && reader->isRulerShown());
 }
 
 HighlightsWindow *MainWindow::highlightsWindow() const

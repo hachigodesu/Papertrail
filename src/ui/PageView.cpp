@@ -663,6 +663,39 @@ void PageView::setCurrentHit(int page, const QRectF &rect)
     viewport()->update();
 }
 
+void PageView::setRuler(int page, const QRectF &rect)
+{
+    m_rulerPage = page;
+    m_rulerRect = rect;
+    viewport()->update();
+}
+
+void PageView::clearRuler()
+{
+    m_rulerPage = -1;
+    m_rulerRect = QRectF();
+    viewport()->update();
+}
+
+void PageView::scrollToShow(int page, const QRectF &rect)
+{
+    const QRectF pageArea = m_pageRects.value(page);
+    if (pageArea.isNull()) {
+        // Not laid out near here yet: goes to it first, then it's on screen.
+        goToPoint(page, qMax(0.0, rect.top() - 40));
+        return;
+    }
+    const QRectF shown = pageToContent(page).mapRect(rect);
+    const double margin = qMin(80.0, viewport()->height() / 6.0);
+    const double top = contentY();
+    const double bottom = top + viewport()->height();
+    QScrollBar *bar = verticalScrollBar();
+    if (shown.top() < top + margin)
+        bar->setValue(bar->value() - int(top + margin - shown.top()));
+    else if (shown.bottom() > bottom - margin)
+        bar->setValue(bar->value() + int(shown.bottom() - (bottom - margin)));
+}
+
 void PageView::setSelection(int page, const QList<QRectF> &rects, const QString &text)
 {
     m_selected.insert(page, Selected{rects, text});
@@ -965,6 +998,20 @@ void PageView::drawUnturnedPage(QPainter &painter, int page, const QRectF &targe
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(area);
     }
+
+    // The reading ruler dims all but its part of its page, after everything else, so it turns with the page.
+    if (m_rulerPage >= 0) {
+        QPainterPath dimmed;
+        dimmed.addRect(target);
+        if (page == m_rulerPage) {
+            QPainterPath kept;
+            kept.addRoundedRect(toTarget(m_rulerRect.adjusted(-3, -2, 3, 2)), 3, 3);
+            dimmed = dimmed.subtracted(kept);
+        }
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(0, 0, 0, m_colours == Colours::Dark ? 150 : 110));
+        painter.drawPath(dimmed);
+    }
 }
 
 void PageView::setImageBudget(qint64 bytes)
@@ -1124,6 +1171,13 @@ void PageView::keyPressEvent(QKeyEvent *event)
             return;
         }
         break;
+    case Qt::Key_Up:
+    case Qt::Key_Down:
+        if (m_rulerPage >= 0 && !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier))) {
+            emit rulerStepRequested(event->key() == Qt::Key_Down ? 1 : -1);
+            return;
+        }
+        break;
     case Qt::Key_Escape:
         if (m_drawingArea || m_areaMode) {
             stopDrawingArea();
@@ -1271,6 +1325,11 @@ void PageView::mouseReleaseEvent(QMouseEvent *event)
     }
     const bool wasClick = (position - m_pressPosition).manhattanLength() < QApplication::startDragDistance();
     m_dragging = false;
+    if (wasClick && !m_pressedOnLink && m_rulerPage >= 0 && event->modifiers() == Qt::NoModifier) {
+        if (const auto found = pageAt(position, false))
+            emit pageClicked(found->first, found->second);
+        return;
+    }
     if (!wasClick || !m_pressedOnLink)
         return;
     if (const ReaderLink *link = linkAt(position)) {

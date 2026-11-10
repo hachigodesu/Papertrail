@@ -291,8 +291,15 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
         QList<ReaderTextLine> lines;
         for (const QJsonValue &value : reply.value(QStringLiteral("lines")).toArray()) {
             const QJsonObject item = value.toObject();
-            lines << ReaderTextLine{item.value(QStringLiteral("text")).toString(), rectFromJson(item.value(QStringLiteral("rect"))),
-                                    rectsFromJson(item.value(QStringLiteral("chars")))};
+            ReaderTextLine line;
+            line.text = item.value(QStringLiteral("text")).toString();
+            line.rect = rectFromJson(item.value(QStringLiteral("rect")));
+            line.chars = rectsFromJson(item.value(QStringLiteral("chars")));
+            line.size = item.value(QStringLiteral("size")).toDouble();
+            line.bold = item.value(QStringLiteral("bold")).toBool();
+            line.margin = item.value(QStringLiteral("margin")).toBool();
+            line.paragraph = item.value(QStringLiteral("paragraph")).toBool();
+            lines << line;
         }
         emit linesReady(request.page, lines);
         break;
@@ -501,8 +508,12 @@ void DocumentClient::setLayout(const ReaderLayout &layout, int page)
     m_wanted.clear();
     m_thumbnails.clear();
     m_selections.clear();
-    // Sizes and pictures' places from the old layout are no use now.
-    m_background.removeIf([](const Request &request) { return request.kind == Kind::Sizes || request.kind == Kind::Images; });
+    // Sizes, pictures' places and lines from the old layout are no use now.
+    const auto old = [](const Request &request) {
+        return request.kind == Kind::Sizes || request.kind == Kind::Images || request.kind == Kind::Lines;
+    };
+    m_background.removeIf(old);
+    m_urgent.removeIf([](const Request &request) { return request.kind == Kind::Lines; });
     Request request;
     request.kind = Kind::Layout;
     request.body = layoutBody();
@@ -615,14 +626,17 @@ void DocumentClient::requestAreaText(qint64 token, int page, const QRectF &rect)
     pump();
 }
 
-void DocumentClient::requestLines(int page)
+void DocumentClient::requestLines(int page, bool now)
 {
     Request request;
     request.kind = Kind::Lines;
     request.page = page;
     request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("lines")}, {QStringLiteral("page"), page},
                                {QStringLiteral("chars"), true}};
-    m_background << request;
+    if (now)
+        m_urgent << request;
+    else
+        m_background << request;
     pump();
 }
 

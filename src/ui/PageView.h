@@ -117,6 +117,16 @@ public:
     void clearSearch();
     void setCurrentHit(int page, const QRectF &rect);
 
+    // A reading ruler: everything but this part of this page is dimmed. Up and Down ask for it to move, with
+    // rulerStepRequested, rather than scrolling, and a plain click says where with pageClicked.
+    void setRuler(int page, const QRectF &rect);
+    void clearRuler();
+    bool hasRuler() const { return m_rulerPage >= 0; }
+    int rulerPage() const { return m_rulerPage; }
+    QRectF rulerRect() const { return m_rulerRect; }
+    // Scrolls only as far as needed for this part of a page to be in view, keeping it a little from the edge.
+    void scrollToShow(int page, const QRectF &rect);
+
     void setSelection(int page, const QList<QRectF> &rects, const QString &text);
     void clearSelection();
     QString selectedText() const;
@@ -173,6 +183,10 @@ signals:
 
     // Escape was pressed with nothing here for it to stop, such as a selection, so something around the view may use it.
     void escapeUnused();
+    // Up or Down with a ruler shown: -1 or 1.
+    void rulerStepRequested(int step);
+    // A plain click on a page, not on a link, with a ruler shown.
+    void pageClicked(int page, const QPointF &point);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -268,6 +282,8 @@ private:
     QHash<int, QList<AnnotationMark>> m_marks;
     QHash<int, QList<QRectF>> m_searchHits;
     int m_currentHitPage = -1;
+    int m_rulerPage = -1;
+    QRectF m_rulerRect;
     QRectF m_currentHitRect;
 
     QHash<int, Selected> m_selected;
