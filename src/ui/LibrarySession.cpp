@@ -77,6 +77,10 @@ QString bundledTessdata()
     const QDir program(QCoreApplication::applicationDirPath());
     QStringList places = {program.filePath(QStringLiteral("tessdata")),
                           program.filePath(QStringLiteral("../share/papertrail/tessdata"))};
+    // An AppImage starts the program from its own root, as for the worker.
+    if (const QString appDir = qEnvironmentVariable("APPDIR"); !appDir.isEmpty())
+        places << QDir(appDir).filePath(QStringLiteral("usr/share/papertrail/tessdata"));
+    places << program.filePath(QStringLiteral("usr/share/papertrail/tessdata"));
 #if defined(PAPERTRAIL_SOURCE_TESSDATA) && defined(PAPERTRAIL_BUILD_DIR)
     // The checkout's own, only for a program run from where it was built, so that a package without English can't
     // pass its self-test by finding it in the folder it was built from.
