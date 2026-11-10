@@ -3,6 +3,8 @@ add_library(papertrail_import STATIC
     Extractors.h
     FullTextIndexer.cpp
     FullTextIndexer.h
+    TextRecognition.cpp
+    TextRecognition.h
     ImportService.cpp
     ImportService.h
     JournalIssues.cpp

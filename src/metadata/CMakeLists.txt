@@ -5,6 +5,8 @@ add_library(papertrail_metadata STATIC
     Matching.h
     NoticeChecker.cpp
     NoticeChecker.h
+    OcrLanguages.cpp
+    OcrLanguages.h
     Providers.cpp
     Providers.h
     RelatedFinder.cpp

@@ -52,6 +52,8 @@ public:
 
     // Forgets the text of contents that no file in the library has any more.
     int removeOrphans();
+    // Forgets a document's text, so it's read again, such as after its scanned pages' words have been recognised.
+    void forget(const QString &sha256);
 
     // Where these words are in a publication's files, or only the pages of an article. `match` is an FTS5
     // expression, as ParsedSearch::contentsMatch gives.

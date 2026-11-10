@@ -60,6 +60,54 @@ modules:
       - /bin
       - /share/djvu
 
+  # Recognising the text of scanned pages. Tesseract is only ever handed pixels Papertrail has rendered itself, so
+  # neither reads any image format, nor fetches anything.
+  - name: leptonica
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBUILD_PROG=OFF
+      - -DSW_BUILD=OFF
+      - -DENABLE_GIF=OFF
+      - -DENABLE_JPEG=OFF
+      - -DENABLE_PNG=OFF
+      - -DENABLE_TIFF=OFF
+      - -DENABLE_WEBP=OFF
+      - -DENABLE_OPENJPEG=OFF
+      - -DENABLE_ZLIB=OFF
+    sources:
+      - type: archive
+        url: https://github.com/DanBloomberg/leptonica/releases/download/1.87.0/leptonica-1.87.0.tar.gz
+        sha256: c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7
+    post-install:
+      - install -Dm644 ../leptonica-license.txt /app/share/licenses/leptonica/LICENSE
+
+  - name: tesseract
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBUILD_TRAINING_TOOLS=OFF
+      - -DBUILD_TESTS=OFF
+      - -DGRAPHICS_DISABLED=ON
+      - -DDISABLE_ARCHIVE=ON
+      - -DDISABLE_CURL=ON
+      - -DDISABLE_TIFF=ON
+      - -DOPENMP_BUILD=OFF
+      - -DENABLE_NATIVE=OFF
+    sources:
+      - type: archive
+        url: https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.4.tar.gz
+        sha256: a8dbf8b8c8ee427ff6ad1d99116502feaf59440af1adb893caf60a6576826cf4
+    post-install:
+      - install -Dm644 ../LICENSE /app/share/licenses/tesseract/LICENSE
+    cleanup:
+      - /bin
+      - /share/tessdata
+
   - name: papertrail
     buildsystem: cmake-ninja
     builddir: true

@@ -56,13 +56,15 @@ FullTextReport FullTextIndexer::run(const Progress &progress)
             progress(done, index.pendingCount(), name);
 
         const QString converted = convertedPathFor(m_options.cacheDirectory, pending->sha256);
+        const QString recognised = recognisedFolderFor(m_options.cacheDirectory, pending->sha256);
         const qint64 document = index.beginDocument(pending->sha256);
         int page = 0;
         int pageCount = 0;
         qint64 letters = 0;
         QString problem;
         while (true) {
-            const WorkerClient::PageTexts texts = worker.pageTexts(path, converted, page, m_options.pagesPerRequest, m_options.timeoutMs);
+            const WorkerClient::PageTexts texts
+                = worker.pageTexts(path, converted, page, m_options.pagesPerRequest, m_options.timeoutMs, recognised);
             if (texts.failure == WorkerFailure::Cancelled) {
                 report.stopped = true;
                 return report; // It isn't marked complete, so it starts again next time.
@@ -73,8 +75,12 @@ FullTextReport FullTextIndexer::run(const Progress &progress)
             }
             pageCount = texts.pageCount;
             index.addPages(document, page, texts.pages);
-            for (const QString &text : texts.pages)
+            for (qsizetype i = 0; i < texts.pages.size(); ++i) {
+                if (texts.recognised.contains(page + int(i)))
+                    continue;
+                const QString &text = texts.pages.at(i);
                 letters += std::count_if(text.begin(), text.end(), [](QChar c) { return c.isLetter(); });
+            }
             report.pages += int(texts.pages.size());
             page += int(texts.pages.size());
             if (texts.pages.isEmpty() || page >= pageCount)

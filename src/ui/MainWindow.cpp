@@ -3,6 +3,7 @@
 #include "import/JournalIssues.h"
 #include "core/db/Backups.h"
 #include "core/repo/FileRepository.h"
+#include "core/repo/FullTextIndex.h"
 #include "core/repo/RemovedContent.h"
 #include "core/repo/LookupRepository.h"
 #include "core/repo/NoticeRepository.h"
@@ -43,6 +44,7 @@
 #include "ui/ReaderPair.h"
 #include "ui/ReferenceImportDialog.h"
 #include "ui/RelatedPapersDialog.h"
+#include "metadata/OcrLanguages.h"
 #include "ui/ReaderTab.h"
 #include "core/repo/SavedSearchRepository.h"
 #include "ui/SettingsDialog.h"
@@ -1115,6 +1117,11 @@ void MainWindow::showSettings()
         dialog.exec();
     };
     actions.showBackups = [this] { showBackupsDialog(); };
+    actions.getLanguage = [this](const QString &code, std::function<void(bool)> done) { getOcrLanguage(code, std::move(done)); };
+    actions.recognitionChanged = [this] {
+        m_index->stopIndexing();
+        kickIndexing();
+    };
     SettingsDialog dialog(m_session, actions, this);
     dialog.exec();
 }
@@ -1150,6 +1157,13 @@ void MainWindow::connectImport()
     });
     connect(m_index, &IndexThread::progress, this, [this](qint64, qint64 remaining, const QString &) {
         m_indexLabel->setText(tr("Indexing document text: %1 to go").arg(QLocale().toString(remaining)));
+    });
+    connect(m_index, &IndexThread::recognitionProgress, this, [this](qint64 left, int page, int pageCount, const QString &) {
+        m_indexLabel->setText(pageCount > 0 ? tr("Recognising scanned text: page %1 of %2, %3 to go")
+                                                  .arg(page + 1)
+                                                  .arg(pageCount)
+                                                  .arg(QLocale().toString(left))
+                                            : tr("Recognising scanned text: %1 to go").arg(QLocale().toString(left)));
     });
     connect(m_index, &IndexThread::finished, this, [this](const import::FullTextReport &report) {
         if (report.documents > 0)
@@ -1971,6 +1985,11 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
         connect(reader, &ReaderTab::statusMessage, this,
                 [this](const QString &message) { statusBar()->showMessage(message, 8000); });
         connect(reader, &ReaderTab::closeSideRequested, this, [this, reader] { closeSide(reader); });
+        connect(reader, &ReaderTab::textRecognised, this, [this](const QString &contentHash) {
+            // Read into the index again, with its recognised words, once the reader's done with them.
+            guarded(tr("Updating the index"), [&] { FullTextIndex(m_session.database()).forget(contentHash); });
+            kickIndexing();
+        });
         connect(reader, &ReaderTab::escapeUnused, this, [this] {
             if (isFullScreenReading())
                 m_fullScreen->setChecked(false);
@@ -2965,6 +2984,54 @@ void MainWindow::askAndLookUpSelected()
 ReviewTab *MainWindow::reviewTab() const
 {
     return m_reviewTab;
+}
+
+void MainWindow::getOcrLanguage(const QString &code, std::function<void(bool)> done)
+{
+    const metadata::OcrLanguage *language = metadata::ocrLanguage(code);
+    if (!language) {
+        done(false);
+        return;
+    }
+    const QString name = QCoreApplication::translate("Languages", language->name);
+    // Fetching anything is going online, which only happens with lookups online.
+    bool online = false;
+    guarded(tr("Reading the settings"), [&] {
+        online = m_session.settings().value(QStringLiteral("metadata.mode_chosen")).toBool()
+                 && m_session.settings().value(QStringLiteral("metadata.mode")).toString() != QLatin1StringView("offline");
+    });
+    if (!online) {
+        QMessageBox::information(this, tr("Recognising %1").arg(name),
+                                 tr("Papertrail is set to stay offline, so it can't fetch the %1 model. Choose a lookup mode "
+                                    "under Online lookups first.").arg(name));
+        done(false);
+        return;
+    }
+    const auto answer = QMessageBox::question(
+        this, tr("Recognising %1").arg(name),
+        tr("Fetch the model for recognising %1, %2 MB, from Tesseract's collection on GitHub? Only the file is asked for.")
+            .arg(name)
+            .arg(QLocale().toString(double(language->bytes) / 1e6, 'f', 1)));
+    if (answer != QMessageBox::Yes) {
+        done(false);
+        return;
+    }
+    if (!m_downloads)
+        m_downloads = m_session.paths().transportFactory ? m_session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
+    statusBar()->showMessage(tr("Fetching the %1 model...").arg(name));
+    QPointer<MainWindow> self(this);
+    metadata::downloadOcrLanguage(*m_downloads, *language, m_session.paths().tessdataDirectory, [self, name, done](const QString &error) {
+        if (!self)
+            return;
+        if (error.isEmpty()) {
+            self->statusBar()->showMessage(tr("The %1 model is ready.").arg(name), 8000);
+            done(true);
+        } else {
+            self->statusBar()->clearMessage();
+            QMessageBox::warning(self, tr("Recognising %1").arg(name), tr("The %1 model couldn't be fetched: %2").arg(name, error));
+            done(false);
+        }
+    });
 }
 
 RelatedPapersDialog *MainWindow::showRelatedPapers(qint64 publicationId)

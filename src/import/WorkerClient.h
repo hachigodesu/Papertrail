@@ -64,8 +64,23 @@ public:
         QString error;
         int pageCount = 0;
         QStringList pages;
+        QList<int> recognised; // Pages whose text was recognised, rather than the file's own.
     };
-    PageTexts pageTexts(const QString &path, const QString &convertedPath, int start, int count, int timeoutMs);
+    // With `ocrFolder`, scanned pages' text comes from the words recognised on them there, if any.
+    PageTexts pageTexts(const QString &path, const QString &convertedPath, int start, int count, int timeoutMs,
+                        const QString &ocrFolder = QString());
+
+    struct Recognised {
+        WorkerFailure failure = WorkerFailure::None;
+        QString error;
+        int pageCount = 0;
+        int pages = 0; // How many were recognised.
+        int words = 0;
+    };
+    // Recognises the words on the scanned pages among `count` from `start`, keeping them in `ocrFolder`, with the
+    // languages' models in `tessdata`. Pages already recognised are left alone unless `again`.
+    Recognised recognise(const QString &path, const QString &convertedPath, const QString &ocrFolder, const QString &tessdata,
+                         const QString &languages, int start, int count, bool again, int timeoutMs);
 
     struct Cover {
         WorkerFailure failure = WorkerFailure::None;
@@ -80,6 +95,10 @@ public:
     };
     // Writes a copy of a PDF at `out` with `marks` added, each {page, kind, colour, note, rects: [[x, y, w, h]]}.
     MarkedCopy markedCopy(const QString &path, const QString &out, const QJsonArray &marks, int timeoutMs);
+
+    // Runs the worker below normal priority, for slow work in the background such as recognising text. From the next
+    // time it starts.
+    void setLowPriority(bool low) { m_lowPriority = low; }
 
     // How many times the worker has been started, for tests and reports.
     int startCount() const { return m_startCount; }
@@ -96,6 +115,7 @@ private:
 
     QString m_workerPath;
     std::function<bool()> m_cancelled;
+    bool m_lowPriority = false;
     std::unique_ptr<QProcess> m_process;
     qint64 m_nextId = 1;
     int m_startCount = 0;

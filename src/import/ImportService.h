@@ -83,6 +83,8 @@ QString coverPathFor(const QString &cacheDirectory, const QString &sha256);
 
 // Where a Kindle book that had to be converted keeps its readable copy.
 QString convertedPathFor(const QString &cacheDirectory, const QString &sha256);
+// Where the words recognised on a file's scanned pages are kept, by its contents.
+QString recognisedFolderFor(const QString &cacheDirectory, const QString &sha256);
 
 // Finds files and brings them into the library. All the work goes through a job queue stored in
 // the database, so a large import carries on after the app is closed.

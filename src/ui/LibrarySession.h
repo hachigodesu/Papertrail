@@ -25,6 +25,8 @@ struct LibraryPaths {
     QString database;
     QString cacheDirectory; // Covers go in a folder inside this one.
     QString workerPath;
+    // The models for recognising text, one file a language. English comes with Papertrail, and is copied here.
+    QString tessdataDirectory;
 
     // Files changed more recently than this are left for a later scan. See ImportOptions.
     qint64 settleMs = 5000;
@@ -52,6 +54,17 @@ struct LibraryPaths {
     static constexpr const char *kPortableMarker = "portable.txt";
     static constexpr const char *kPortableFolder = "Papertrail library";
 };
+
+// Whether this copy of Papertrail can recognise text in scanned pages.
+bool canRecogniseText();
+
+// Where the language models that come with Papertrail are: beside the program, in its shared data, or, for a build
+// that hasn't been installed, in the source. Empty if there are none.
+QString bundledTessdata();
+
+// Copies the models that come with Papertrail into `tessdata`, where any downloaded ones go too, since Tesseract reads
+// every language from one folder. Leaves any there already.
+void prepareTessdata(const QString &tessdata);
 
 // Thrown when another copy of Papertrail already has this library open.
 class LibraryInUse : public std::runtime_error {

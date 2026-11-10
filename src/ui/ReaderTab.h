@@ -176,6 +176,9 @@ signals:
     // Escape was pressed on the pages with nothing there for it to stop, as full screen uses to leave.
     void escapeUnused();
 
+    // A scanned page's words were recognised, so the document's text in the index is out of date.
+    void textRecognised(const QString &contentHash);
+
 private:
     struct Hit {
         int page = 0;

@@ -2,6 +2,7 @@
 
 #include "core/repo/ReadingStateRepository.h"
 #include "core/repo/VolumeArticles.h"
+#include "import/ImportService.h"
 #include "ui/ContentsPopup.h"
 #include "ui/Delegates.h"
 #include "ui/Labels.h"
@@ -342,6 +343,21 @@ ReaderTab::ReaderTab(LibrarySession &session, qint64 publicationId, qint64 fileI
 
     connectClient();
     m_toolbar->setEnabled(false);
+    // Scanned pages are recognised as they're read, if this computer does that, with words kept by the file's contents.
+    try {
+        const std::optional<FileRecord> file = session.files().get(fileId);
+        if (canRecogniseText() && file && !file->sha256.isEmpty() && !session.paths().tessdataDirectory.isEmpty()
+            && session.settings().value(QStringLiteral("ocr.enabled")).toBool()) {
+            prepareTessdata(session.paths().tessdataDirectory);
+            QString languages = session.settings().value(QStringLiteral("ocr.languages")).toString();
+            if (languages.isEmpty())
+                languages = QStringLiteral("eng");
+            m_client->setRecognition(import::recognisedFolderFor(session.paths().cacheDirectory, file->sha256),
+                                     session.paths().tessdataDirectory, languages);
+        }
+    } catch (const std::exception &) {
+        // Without it, scanned pages simply have no text.
+    }
     m_client->open(path, m_layout, convertedPath);
 }
 
@@ -857,7 +873,26 @@ void ReaderTab::connectClient()
     connect(m_client, &DocumentClient::areaPictureReady, this, &ReaderTab::onAreaPicture);
     connect(m_client, &DocumentClient::anchored, this, &ReaderTab::onAnchored);
     connect(m_client, &DocumentClient::located, this, &ReaderTab::onLocated);
-    connect(m_view, &PageView::currentPageChanged, this, [this] { updatePageBox(); });
+    connect(m_view, &PageView::currentPageChanged, this, [this](int page) {
+        updatePageBox();
+        // The worker looks first, and does nothing for a page with text of its own or one already recognised.
+        if (!m_reflowable)
+            m_client->requestRecognition(page);
+    });
+    connect(m_client, &DocumentClient::pageRecognised, this, [this](int page, int words) {
+        if (words <= 0)
+            return;
+        emit statusMessage(tr("Recognised the text on page %1. It can be searched, selected and highlighted now.")
+                               .arg(page - m_view->firstShownPage() + 1));
+        emit textRecognised(m_contentHash);
+        // A search already made looks again, now there's more to find.
+        if (!m_activeSearch.isEmpty()) {
+            const QString text = m_activeSearch;
+            m_activeSearch.clear();
+            m_search->setText(text);
+            applySearch();
+        }
+    });
     connect(m_view, &PageView::zoomChanged, this, [this] {
         updateZoomBox();
         m_saveTimer->start();

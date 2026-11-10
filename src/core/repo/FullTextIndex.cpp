@@ -61,6 +61,31 @@ void attachFullText(Database &db, const QString &path)
             "  indexed_at INTEGER NOT NULL) STRICT");
     db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS fulltext.page_text USING fts5("
             "  text, tokenize = \"unicode61 remove_diacritics 2\")");
+    // How far recognising a scanned document's words has got, with which languages. See import::TextRecognition.
+    db.exec("CREATE TABLE IF NOT EXISTS fulltext.recognition ("
+            "  sha256 TEXT PRIMARY KEY,"
+            "  languages TEXT NOT NULL,"
+            "  next_page INTEGER NOT NULL DEFAULT 0,"
+            "  page_count INTEGER NOT NULL DEFAULT 0,"
+            "  recognised INTEGER NOT NULL DEFAULT 0,"
+            "  done INTEGER NOT NULL DEFAULT 0,"
+            "  problem TEXT NOT NULL DEFAULT '',"
+            "  updated_at INTEGER NOT NULL) STRICT");
+}
+
+void FullTextIndex::forget(const QString &sha256)
+{
+    Transaction transaction(m_db);
+    auto find = m_db.prepare("SELECT id FROM fulltext.document WHERE sha256 = ?");
+    find->bind(1, sha256);
+    if (find->step()) {
+        const qint64 id = find->int64At(0);
+        deleteDocumentPages(m_db, id);
+        auto remove = m_db.prepare("DELETE FROM fulltext.document WHERE id = ?");
+        remove->bind(1, id);
+        remove->step();
+    }
+    transaction.commit();
 }
 
 std::optional<FullTextIndex::Pending> FullTextIndex::nextPending(qint64 afterFileId)

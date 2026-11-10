@@ -77,6 +77,21 @@ bool runSelfTest(const QString &reportPath)
             checkDocument(report, worker, folder, QStringLiteral(":/selftest/book.epub"));
             checkDocument(report, worker, folder, QStringLiteral(":/selftest/with_text.djvu"));
 
+            // Recognising a scanned page with the English that comes with it.
+            if (ui::canRecogniseText()) {
+                const QString scan = folder.filePath(QStringLiteral("scanned_text.pdf"));
+                QFile::copy(QStringLiteral(":/selftest/scanned_text.pdf"), scan);
+                const QString tessdata = ui::bundledTessdata();
+                report.check(!tessdata.isEmpty(), QStringLiteral("English for recognising text is installed"), QDir::toNativeSeparators(tessdata));
+                const QString words = folder.filePath(QStringLiteral("ocr"));
+                const auto recognised = worker.recognise(scan, QString(), words, tessdata, QStringLiteral("eng"), 0, 1, false, kWorkerTimeoutMs * 3);
+                const auto texts = worker.pageTexts(scan, QString(), 0, 1, kWorkerTimeoutMs, words);
+                const bool read = recognised.failure == import::WorkerFailure::None && recognised.pages == 1 && !texts.pages.isEmpty()
+                                  && texts.pages.first().contains(QStringLiteral("beam"), Qt::CaseInsensitive);
+                report.check(read, QStringLiteral("a scanned page's text can be recognised"),
+                             recognised.error.isEmpty() ? QStringLiteral("%1 words").arg(recognised.words) : recognised.error);
+            }
+
             ui::LibrarySession session(paths);
             core::Publication publication;
             publication.title = QStringLiteral("Fatigue of Steel Beams");

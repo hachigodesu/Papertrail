@@ -119,6 +119,13 @@ QString convertedPathFor(const QString &cacheDirectory, const QString &sha256)
     return QDir(cacheDirectory).filePath(QStringLiteral("converted/%1/%2.epub").arg(sha256.left(2), sha256));
 }
 
+QString recognisedFolderFor(const QString &cacheDirectory, const QString &sha256)
+{
+    if (sha256.isEmpty())
+        return {};
+    return QDir(cacheDirectory).filePath(QStringLiteral("ocr/%1/%2").arg(sha256.left(2), sha256));
+}
+
 struct ImportService::Job {
     qint64 id = 0;
     QString kind;

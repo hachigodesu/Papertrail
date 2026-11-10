@@ -33,7 +33,11 @@ cmake --install "$build" --prefix "$stage/install"
 app="$stage/Papertrail"
 mkdir -p "$app/licenses"
 cp "$stage/install/bin/papertrail.exe" "$stage/install/bin/papertrail-worker.exe" "$app/"
-cp "$stage/install/share/licenses/papertrail/"* "$app/licenses/"
+cp -r "$stage/install/share/licenses/papertrail/"* "$app/licenses/"
+# English, for recognising scanned text, beside the program where it looks first.
+if [ -d "$stage/install/share/papertrail/tessdata" ]; then
+    cp -r "$stage/install/share/papertrail/tessdata" "$app/tessdata"
+fi
 
 # Qt's libraries and plugins. The compiler's own DLLs are found below, with everything else.
 windeployqt6 --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime \
@@ -110,7 +114,7 @@ fi
 # Windows' own editors want CRLF line endings, and the installer shows this one.
 sed 's/$/\r/' "$app/licenses/LICENSE" > "$app/licenses/LICENSE.txt"
 rm "$app/licenses/LICENSE"
-for required in libmupdf qt6-base djvulibre libmobi qtkeychain; do
+for required in libmupdf qt6-base djvulibre libmobi qtkeychain tesseract-ocr leptonica tessdata; do
     [ -d "$app/licenses/$required" ] || { echo "FAILED: the licence of $required is missing" >&2; exit 1; }
 done
 

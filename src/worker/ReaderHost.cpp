@@ -1,4 +1,5 @@
 #include "ReaderHost.h"
+#include "RecognisedText.h"
 
 #include "core/text/References.h"
 #include "engine/Document.h"
@@ -78,6 +79,19 @@ QJsonArray rectsToJson(const QList<QRectF> &rects)
     return array;
 }
 
+
+void applyOpenFaults(const QString &path)
+{
+    static const bool enabled = qEnvironmentVariableIsSet("PAPERTRAIL_WORKER_TEST_FAULTS");
+    if (enabled && QFileInfo(path).fileName().contains(QStringLiteral("__crash__")))
+        std::abort();
+}
+
+// Enough to hold a Kindle file's headers.
+constexpr qint64 kKindleHeadBytes = 256 * 1024;
+
+} // namespace
+
 // For testing how the reader copes with a page that crashes or hangs. Only with this variable set,
 // which the app itself never does: a file named __crashpage3__.pdf crashes on page 3.
 void applyPageFaults(const QString &path, int page)
@@ -97,18 +111,6 @@ void applyPageFaults(const QString &path, int page)
             QThread::sleep(60);
     }
 }
-
-void applyOpenFaults(const QString &path)
-{
-    static const bool enabled = qEnvironmentVariableIsSet("PAPERTRAIL_WORKER_TEST_FAULTS");
-    if (enabled && QFileInfo(path).fileName().contains(QStringLiteral("__crash__")))
-        std::abort();
-}
-
-// Enough to hold a Kindle file's headers.
-constexpr qint64 kKindleHeadBytes = 256 * 1024;
-
-} // namespace
 
 QString readablePath(engine::Engine &engine, const QString &path, const QString &convertedPath)
 {
@@ -287,6 +289,8 @@ public:
                 select(request, reply);
             else if (op == QStringLiteral("bookmark"))
                 reply.insert(QStringLiteral("bookmark"), m_document->placeForPage(page(request)));
+            else if (op == QStringLiteral("ocr"))
+                recognise(request, reply);
             else if (op == QStringLiteral("find"))
                 reply.insert(QStringLiteral("page"), m_document->pageForPlace(request.value(QStringLiteral("bookmark")).toString()));
             else
@@ -328,7 +332,9 @@ private:
         m_path = request.value(QStringLiteral("path")).toString();
         applyOpenFaults(m_path);
         try {
-            m_document = m_engine.open(readablePath(m_engine, m_path, request.value(QStringLiteral("convertedPath")).toString()));
+            m_ocrFolder = request.value(QStringLiteral("ocrFolder")).toString();
+            m_document = withRecognisedText(
+                m_engine.open(readablePath(m_engine, m_path, request.value(QStringLiteral("convertedPath")).toString())), m_ocrFolder);
         } catch (const engine::KindleProtected &) {
             reply.insert(QStringLiteral("protected"), true);
             throw;
@@ -342,6 +348,34 @@ private:
         describe(reply);
         if (m_document->pageCount() < 1)
             throw engine::EngineError("this file has no pages");
+    }
+
+    // Recognises a scanned page's words, keeps them, and answers its text questions from them from now on.
+    void recognise(const QJsonObject &request, QJsonObject &reply)
+    {
+        const int number = page(request);
+        reply.insert(QStringLiteral("page"), number);
+        auto *withWords = dynamic_cast<engine::RecognisedTextDocument *>(m_document.get());
+        if (!withWords || m_ocrFolder.isEmpty())
+            throw engine::EngineError("there's nowhere to keep recognised words");
+        if (const std::optional<QList<engine::TextWord>> kept = readRecognised(m_ocrFolder, number)) {
+            reply.insert(QStringLiteral("words"), int(kept->size()));
+            return;
+        }
+        if (!engine::looksScanned(withWords->inner(), number)) {
+            reply.insert(QStringLiteral("words"), 0);
+            return;
+        }
+        applyPageFaults(m_path, number);
+        static engine::Recogniser recogniser;
+        const QList<engine::TextWord> words = recognisePage(recogniser, withWords->inner(), number,
+                                                            request.value(QStringLiteral("tessdata")).toString(),
+                                                            request.value(QStringLiteral("languages")).toString());
+        writeRecognised(m_ocrFolder, number, words, request.value(QStringLiteral("languages")).toString());
+        withWords->setWords(number, words);
+        m_lines.remove(number);
+        m_contentsPages.remove(number);
+        reply.insert(QStringLiteral("words"), int(words.size()));
     }
 
     // Keeps the reader's place through the change.
@@ -1091,6 +1125,7 @@ private:
     engine::Engine &m_engine;
     FILE *m_out;
     QString m_path;
+    QString m_ocrFolder;
     std::unique_ptr<engine::Document> m_document;
     QHash<int, QList<engine::TextLine>> m_lines;
     QHash<int, bool> m_contentsPages;

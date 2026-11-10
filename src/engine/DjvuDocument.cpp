@@ -1,4 +1,5 @@
 #include "engine/Backends.h"
+#include "engine/WordLayer.h"
 
 #include <libdjvu/ddjvuapi.h>
 #include <libdjvu/miniexp.h>
@@ -33,15 +34,8 @@ void collectText(miniexp_t node, QString &out)
     }
 }
 
-// One word of a page's hidden text, with its position in points from the top left.
-struct Word {
-    QRectF rect;
-    QString text;
-    bool endsLine = false;
-};
-
 // A page's text is a tree of (kind x0 y0 x1 y1 child...) lists, in pixels up from the bottom left.
-void collectWords(miniexp_t node, double pointsPerPixel, double pageHeight, QList<Word> &words)
+void collectWords(miniexp_t node, double pointsPerPixel, double pageHeight, QList<TextWord> &words)
 {
     if (!miniexp_consp(node) || !miniexp_symbolp(miniexp_car(node)))
         return;
@@ -56,7 +50,7 @@ void collectWords(miniexp_t node, double pointsPerPixel, double pageHeight, QLis
     }
 
     if (miniexp_consp(rest) && miniexp_stringp(miniexp_car(rest))) {
-        Word word;
+        TextWord word;
         word.rect = QRectF(box[0] * pointsPerPixel, (pageHeight - box[3]) * pointsPerPixel,
                            (box[2] - box[0]) * pointsPerPixel, (box[3] - box[1]) * pointsPerPixel);
         word.text = QString::fromUtf8(miniexp_to_str(miniexp_car(rest)));
@@ -71,13 +65,6 @@ void collectWords(miniexp_t node, double pointsPerPixel, double pageHeight, QLis
                              || level == QLatin1StringView("column") || level == QLatin1StringView("region"))) {
         words.last().endsLine = true;
     }
-}
-
-double distanceTo(const QRectF &rect, const QPointF &point)
-{
-    const double dx = qMax(qMax(rect.left() - point.x(), point.x() - rect.right()), 0.0);
-    const double dy = qMax(qMax(rect.top() - point.y(), point.y() - rect.bottom()), 0.0);
-    return dx * dx + dy * dy;
 }
 
 class DjvuDocument : public Document {
@@ -148,100 +135,14 @@ public:
         return links;
     }
 
-    QList<QRectF> search(int page, const QString &query) override
-    {
-        const QStringList wanted = query.simplified().split(u' ', Qt::SkipEmptyParts);
-        if (wanted.isEmpty())
-            return {};
-        const QList<Word> &words = wordsOn(page);
-        constexpr int kMaxHits = 512;
-
-        // Words are matched in sequence, so that a phrase can run across a line break.
-        QList<QRectF> rects;
-        for (qsizetype start = 0; start + wanted.size() <= words.size() && rects.size() < kMaxHits; ++start) {
-            bool matched = true;
-            for (qsizetype i = 0; i < wanted.size() && matched; ++i) {
-                const QString &word = words.at(start + i).text;
-                const bool last = i == wanted.size() - 1;
-                const bool first = i == 0;
-                matched = (first && last) ? word.contains(wanted.at(i), Qt::CaseInsensitive)
-                    : first               ? word.endsWith(wanted.at(i), Qt::CaseInsensitive)
-                    : last                ? word.startsWith(wanted.at(i), Qt::CaseInsensitive)
-                                          : word.compare(wanted.at(i), Qt::CaseInsensitive) == 0;
-            }
-            if (matched) {
-                for (qsizetype i = 0; i < wanted.size(); ++i)
-                    rects << words.at(start + i).rect;
-            }
-        }
-        return rects;
-    }
+    QList<QRectF> search(int page, const QString &query) override { return words::search(wordsOn(page), query); }
 
     // DjVu's hidden text places words, not characters, so each word's box is shared out evenly among its characters.
-    QList<TextLine> textLines(int page) override
-    {
-        // DjVu's hidden text has no fonts, so a line's height stands in for its size.
-        QList<TextLine> lines;
-        TextLine line;
-        const auto finish = [&] {
-            line.size = line.rect.height() * 0.8;
-            if (!line.text.trimmed().isEmpty())
-                lines << line;
-            line = TextLine();
-        };
-        for (const Word &word : wordsOn(page)) {
-            if (!line.text.isEmpty()) {
-                line.text += u' ';
-                const QRectF previous = line.chars.last();
-                line.chars << QRectF(previous.right(), previous.top(), qMax(0.0, word.rect.left() - previous.right()),
-                                     previous.height());
-            }
-            const qsizetype count = qMax<qsizetype>(1, word.text.size());
-            const double width = word.rect.width() / double(count);
-            for (qsizetype i = 0; i < word.text.size(); ++i) {
-                line.text += word.text.at(i);
-                line.chars << QRectF(word.rect.left() + width * double(i), word.rect.top(), width, word.rect.height());
-            }
-            line.rect = line.rect.isNull() ? word.rect : line.rect.united(word.rect);
-            if (word.endsLine)
-                finish();
-        }
-        finish();
-        return lines;
-    }
+    QList<TextLine> textLines(int page) override { return words::textLines(wordsOn(page)); }
 
     TextSelection selectText(int page, const QPointF &a, const QPointF &b) override
     {
-        const QList<Word> &words = wordsOn(page);
-        if (words.isEmpty())
-            return {};
-
-        const auto nearest = [&](const QPointF &point) {
-            qsizetype best = 0;
-            double bestDistance = distanceTo(words.first().rect, point);
-            for (qsizetype i = 1; i < words.size() && bestDistance > 0; ++i) {
-                const double distance = distanceTo(words.at(i).rect, point);
-                if (distance < bestDistance) {
-                    best = i;
-                    bestDistance = distance;
-                }
-            }
-            return best;
-        };
-        qsizetype first = nearest(a);
-        qsizetype last = nearest(b);
-        if (first > last)
-            std::swap(first, last);
-
-        TextSelection selection;
-        for (qsizetype i = first; i <= last; ++i) {
-            const Word &word = words.at(i);
-            selection.rects << word.rect;
-            selection.text += word.text;
-            if (i < last)
-                selection.text += word.endsLine ? u'\n' : u' ';
-        }
-        return selection;
+        return words::selectText(wordsOn(page), a, b);
     }
 
     bool needsPassword() override { return false; }
@@ -317,7 +218,7 @@ private:
     }
 
     // The words of the page last asked about, which a drag to select asks about over and over.
-    const QList<Word> &wordsOn(int page)
+    const QList<TextWord> &wordsOn(int page)
     {
         if (page == m_wordsPage)
             return m_words;
@@ -380,7 +281,7 @@ private:
 
     ddjvu_context_t *m_ctx;
     ddjvu_document_t *m_doc;
-    QList<Word> m_words;
+    QList<TextWord> m_words;
     int m_wordsPage = -1;
 };
 

@@ -5,8 +5,10 @@
 // serves one open document to the reader: see ReaderHost.h.
 
 #include "ReaderHost.h"
+#include "RecognisedText.h"
 
 #include "engine/Document.h"
+#include "engine/Ocr.h"
 #include "import/Extractors.h"
 
 #include <QCoreApplication>
@@ -223,6 +225,7 @@ QJsonObject inspectFile(engine::Engine &engine, const QString &originalPath, con
 // The document the last request was about, kept open since requests usually come in runs for one file. It
 // has to be closed before the engine that opened it goes, so main() closes it before returning.
 QString openPath;
+QString openRecognised; // Where its recognised words are kept, if anywhere.
 std::unique_ptr<engine::Document> document;
 
 // The document a request is about. Returns null with `error` set if it can't be read.
@@ -230,15 +233,17 @@ engine::Document *documentFor(engine::Engine &engine, const QJsonObject &request
 {
 
     const QString path = request.value(QStringLiteral("path")).toString();
-    if (path != openPath || !document) {
+    const QString recognised = request.value(QStringLiteral("ocrFolder")).toString();
+    if (path != openPath || recognised != openRecognised || !document) {
         document.reset();
         openPath.clear();
         try {
             QString readable = path;
             if (isKindleSuffix(QFileInfo(path).suffix().toLower()))
                 readable = worker::readablePath(engine, path, request.value(QStringLiteral("convertedPath")).toString());
-            document = engine.open(readable);
+            document = worker::withRecognisedText(engine.open(readable), recognised);
             openPath = path;
+            openRecognised = recognised;
         } catch (const engine::EngineError &caught) {
             error = QString::fromUtf8(caught.what());
             return nullptr;
@@ -291,12 +296,16 @@ QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
 
     const int start = request.value(QStringLiteral("start")).toInt();
     const int count = request.value(QStringLiteral("count")).toInt();
+    auto *withWords = dynamic_cast<engine::RecognisedTextDocument *>(document);
     QJsonArray pages;
+    QJsonArray recognised; // Which pages' text was recognised rather than the file's own.
     for (int page = start; page < pageCount && page < start + count; ++page) {
         // A page that can't be read is an empty one, and later pages may still be fine.
         QString text;
         try {
             text = document->pageText(page);
+            if (withWords && withWords->hasRecognisedWords(page) && text != withWords->inner().pageText(page))
+                recognised.append(page);
         } catch (const engine::EngineError &) {
         }
         pages.append(text.left(kMostCharactersOnAPage));
@@ -306,6 +315,68 @@ QJsonObject pageTexts(engine::Engine &engine, const QJsonObject &request)
     reply.insert(QStringLiteral("ok"), true);
     reply.insert(QStringLiteral("pageCount"), pageCount);
     reply.insert(QStringLiteral("pages"), pages);
+    reply.insert(QStringLiteral("recognised"), recognised);
+    return reply;
+}
+
+// Recognises the words on the scanned pages among `count` from `start`, and keeps them in `ocrFolder`. Pages with
+// text of their own, or already recognised, are left alone unless `again`. The rest of the reply says how it went,
+// so the app knows where to carry on from.
+QJsonObject recognisePages(engine::Engine &engine, const QJsonObject &request)
+{
+    static engine::Recogniser recogniser;
+    const QString folder = request.value(QStringLiteral("ocrFolder")).toString();
+    const QString tessdata = request.value(QStringLiteral("tessdata")).toString();
+    const QString languages = request.value(QStringLiteral("languages")).toString();
+    if (!engine::canRecognise())
+        return failure(QStringLiteral("this copy of Papertrail can't recognise text"));
+    if (folder.isEmpty() || tessdata.isEmpty() || languages.isEmpty())
+        return failure(QStringLiteral("there's nowhere to keep the words, or no language to read them in"));
+    QString error;
+    engine::Document *document = documentFor(engine, request, error);
+    if (!document)
+        return failure(error);
+    auto *withWords = dynamic_cast<engine::RecognisedTextDocument *>(document);
+    engine::Document &own = withWords ? withWords->inner() : *document;
+
+    const bool again = request.value(QStringLiteral("again")).toBool();
+    const int start = qMax(0, request.value(QStringLiteral("start")).toInt());
+    const int count = qMax(0, request.value(QStringLiteral("count")).toInt());
+    int pageCount = 0;
+    int recognisedPages = 0;
+    int words = 0;
+    try {
+        pageCount = document->pageCount();
+        for (int page = start; page < pageCount && page < start + count; ++page) {
+            if (!again && worker::readRecognised(folder, page))
+                continue;
+            // A page that can't be read is left, as the rest may be fine.
+            try {
+                if (!engine::looksScanned(own, page))
+                    continue;
+                worker::applyPageFaults(request.value(QStringLiteral("path")).toString(), page);
+                const QList<engine::TextWord> found = worker::recognisePage(recogniser, own, page, tessdata, languages);
+                worker::writeRecognised(folder, page, found, languages);
+                if (withWords)
+                    withWords->setWords(page, found);
+                ++recognisedPages;
+                words += int(found.size());
+            } catch (const engine::EngineError &caught) {
+                const QString message = QString::fromUtf8(caught.what());
+                // A missing language is the same on every page, so it stops here.
+                if (message.contains(QLatin1StringView("couldn't start")))
+                    return failure(message);
+            }
+        }
+    } catch (const engine::EngineError &caught) {
+        return failure(QString::fromUtf8(caught.what()));
+    }
+
+    QJsonObject reply;
+    reply.insert(QStringLiteral("ok"), true);
+    reply.insert(QStringLiteral("pageCount"), pageCount);
+    reply.insert(QStringLiteral("recognised"), recognisedPages);
+    reply.insert(QStringLiteral("words"), words);
     return reply;
 }
 
@@ -401,6 +472,8 @@ int main(int argc, char *argv[])
             reply = hashFile(path);
         } else if (op == QStringLiteral("pagetext")) {
             reply = pageTexts(engine, object);
+        } else if (op == QStringLiteral("ocr")) {
+            reply = recognisePages(engine, object);
         } else if (op == QStringLiteral("cover")) {
             reply = pageCover(engine, object);
         } else if (op == QStringLiteral("markedcopy")) {

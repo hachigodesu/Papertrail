@@ -8,6 +8,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
 
@@ -45,6 +46,7 @@ LibraryPaths LibraryPaths::standard()
                          .filePath(QStringLiteral("library.db"));
     paths.cacheDirectory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     paths.workerPath = installedWorker();
+    paths.tessdataDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("tessdata"));
     return paths;
 }
 
@@ -55,7 +57,49 @@ LibraryPaths LibraryPaths::inFolder(const QString &folder)
     paths.database = dir.filePath(QStringLiteral("library.db"));
     paths.cacheDirectory = dir.filePath(QStringLiteral("cache"));
     paths.workerPath = installedWorker();
+    paths.tessdataDirectory = dir.filePath(QStringLiteral("tessdata"));
     return paths;
+}
+
+bool canRecogniseText()
+{
+#ifdef PAPERTRAIL_WITH_OCR
+    return true;
+#else
+    return false;
+#endif
+}
+
+QString bundledTessdata()
+{
+    if (const QString chosen = qEnvironmentVariable("PAPERTRAIL_TESSDATA"); !chosen.isEmpty())
+        return chosen;
+    const QDir program(QCoreApplication::applicationDirPath());
+    QStringList places = {program.filePath(QStringLiteral("tessdata")),
+                          program.filePath(QStringLiteral("../share/papertrail/tessdata"))};
+#ifdef PAPERTRAIL_SOURCE_TESSDATA
+    places << QStringLiteral(PAPERTRAIL_SOURCE_TESSDATA);
+#endif
+    for (const QString &place : places) {
+        if (QFileInfo::exists(QDir(place).filePath(QStringLiteral("eng.traineddata"))))
+            return QDir::cleanPath(place);
+    }
+    return {};
+}
+
+void prepareTessdata(const QString &tessdata)
+{
+    const QString bundled = bundledTessdata();
+    if (bundled.isEmpty() || tessdata.isEmpty() || QDir::cleanPath(tessdata) == bundled)
+        return;
+    QDir().mkpath(tessdata);
+    for (const QFileInfo &model : QDir(bundled).entryInfoList({QStringLiteral("*.traineddata")}, QDir::Files)) {
+        const QString target = QDir(tessdata).filePath(model.fileName());
+        if (!QFileInfo::exists(target) || QFileInfo(target).size() != model.size()) {
+            QFile::remove(target);
+            QFile::copy(model.absoluteFilePath(), target);
+        }
+    }
 }
 
 LibraryPaths LibraryPaths::forThisCopy()

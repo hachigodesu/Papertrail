@@ -82,3 +82,8 @@ add_library(papertrail_ui STATIC
 
 target_include_directories(papertrail_ui PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(papertrail_ui PUBLIC papertrail_summary papertrail_citation papertrail_transfer Papertrail::Keychain papertrail_core papertrail_import papertrail_metadata Qt6::Widgets)
+# The English model is found in the source until it's installed beside the program.
+target_compile_definitions(papertrail_ui PRIVATE PAPERTRAIL_SOURCE_TESSDATA="${CMAKE_SOURCE_DIR}/packaging/tessdata")
+if(PAPERTRAIL_WITH_OCR)
+    target_compile_definitions(papertrail_ui PRIVATE PAPERTRAIL_WITH_OCR)
+endif()

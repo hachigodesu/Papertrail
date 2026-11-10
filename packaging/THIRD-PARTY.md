@@ -13,8 +13,11 @@ Packages of Papertrail include other free software. Each package includes the li
 | SQLite | The library's database | Public domain | https://sqlite.org |
 | QtKeychain | Keeping the Claude API key in the system's credential store | BSD-3-Clause | https://github.com/frankosterfeld/qtkeychain |
 | zlib | Library exports | Zlib | https://zlib.net |
+| Tesseract | Recognising the text of scanned pages | Apache-2.0 | https://github.com/tesseract-ocr/tesseract |
+| Leptonica | Tesseract's handling of page images | BSD-2-Clause | http://www.leptonica.org |
+| Tesseract's English model (tessdata_fast 4.1.0) | Recognising English. Other languages are fetched when chosen, from the same collection | Apache-2.0 | https://github.com/tesseract-ocr/tessdata_fast |
 | OpenSSL | Secure connections for online lookups and summaries, in Linux packages. Windows uses its own | Apache-2.0 | https://www.openssl.org |
 
-MuPDF and Qt bring in others, such as FreeType, HarfBuzz, libjpeg-turbo, OpenJPEG, jbig2dec, Gumbo, libpng, ICU and Brotli, whose licences are included the same way.
+MuPDF, Qt and Tesseract bring in others, such as FreeType, HarfBuzz, libjpeg-turbo, OpenJPEG, jbig2dec, Gumbo, libpng, ICU, Brotli, libarchive, libcurl and the GCC OpenMP runtime, whose licences are included the same way.
 
 Qt is used under the LGPL, so you may replace the Qt libraries in a package with your own build of the same version. DjVuLibre is used under GPL version 3, as its "or later" allows, which section 13 of the GNU GPL and AGPL lets be combined with Papertrail.

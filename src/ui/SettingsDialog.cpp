@@ -1,6 +1,7 @@
 #include "ui/SettingsDialog.h"
 
 #include "core/settings/SettingsStore.h"
+#include "metadata/OcrLanguages.h"
 #include "ui/LibrarySession.h"
 #include "ui/Theme.h"
 
@@ -11,6 +12,12 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QListWidget>
+#include <QLocale>
+#include <QPointer>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -117,6 +124,36 @@ SettingsDialog::SettingsDialog(LibrarySession &session, const SettingsActions &a
     libraryLayout->addLayout(libraryButtons);
     layout->addWidget(library);
 
+    // Only where this copy can recognise text at all.
+    if (canRecogniseText()) {
+        auto *scanned = new QGroupBox(tr("Scanned documents"), this);
+        auto *scannedLayout = new QVBoxLayout(scanned);
+        m_recognise = new QCheckBox(tr("Recognise the text of scanned documents"), scanned);
+        m_recognise->setToolTip(tr("Reads the words in documents that are only pictures of pages, so they can be searched, "
+                                   "selected and highlighted. It works in the background, slowly, and only on this computer. "
+                                   "Your files aren't changed."));
+        try {
+            m_recognise->setChecked(m_session.settings().value(QStringLiteral("ocr.enabled")).toBool());
+        } catch (const std::exception &) {
+        }
+        connect(m_recognise, &QCheckBox::toggled, this, [this, actions](bool on) {
+            save(QStringLiteral("ocr.enabled"), on);
+            if (actions.recognitionChanged)
+                actions.recognitionChanged();
+        });
+        scannedLayout->addWidget(m_recognise);
+        auto *languagesNote = new QLabel(tr("Languages to read them in. Those not here yet are fetched when chosen."), scanned);
+        languagesNote->setWordWrap(true);
+        scannedLayout->addWidget(languagesNote);
+        m_languages = new QListWidget(scanned);
+        m_languages->setAccessibleName(tr("Languages to recognise"));
+        m_languages->setMaximumHeight(140);
+        scannedLayout->addWidget(m_languages);
+        fillLanguages();
+        connect(m_languages, &QListWidget::itemChanged, this, [this, actions](QListWidgetItem *item) { onLanguageChanged(item, actions); });
+        layout->addWidget(scanned);
+    }
+
     auto *online = new QGroupBox(tr("Online"), this);
     auto *onlineLayout = new QHBoxLayout(online);
     onlineLayout->addWidget(buttonFor(tr("Online lookups..."), tr("Whether and how details are looked up online"),
@@ -128,6 +165,83 @@ SettingsDialog::SettingsDialog(LibrarySession &session, const SettingsActions &a
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
+}
+
+void SettingsDialog::fillLanguages()
+{
+    m_fillingLanguages = true;
+    m_languages->clear();
+    QStringList chosen;
+    try {
+        chosen = m_session.settings().value(QStringLiteral("ocr.languages")).toString().split(u'+', Qt::SkipEmptyParts);
+    } catch (const std::exception &) {
+    }
+    const QDir tessdata(m_session.paths().tessdataDirectory);
+    for (const metadata::OcrLanguage &language : metadata::ocrLanguages()) {
+        const QString code = QString::fromLatin1(language.code);
+        const bool here = QFileInfo::exists(tessdata.filePath(code + QStringLiteral(".traineddata"))) || code == QLatin1StringView("eng");
+        const QString name = QCoreApplication::translate("Languages", language.name);
+        auto *item = new QListWidgetItem(here ? name
+                                              : tr("%1 (to fetch, %2 MB)").arg(name).arg(QLocale().toString(double(language.bytes) / 1e6, 'f', 1)),
+                                         m_languages);
+        item->setData(Qt::UserRole, code);
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+        item->setCheckState(chosen.contains(code) ? Qt::Checked : Qt::Unchecked);
+    }
+    m_fillingLanguages = false;
+}
+
+QStringList SettingsDialog::chosenLanguages() const
+{
+    QStringList codes;
+    for (int row = 0; row < m_languages->count(); ++row) {
+        if (m_languages->item(row)->checkState() == Qt::Checked)
+            codes << m_languages->item(row)->data(Qt::UserRole).toString();
+    }
+    return codes;
+}
+
+void SettingsDialog::onLanguageChanged(QListWidgetItem *item, const SettingsActions &actions)
+{
+    if (m_fillingLanguages)
+        return;
+    const QString code = item->data(Qt::UserRole).toString();
+    const bool here = code == QLatin1StringView("eng")
+                      || QFileInfo::exists(QDir(m_session.paths().tessdataDirectory).filePath(code + QStringLiteral(".traineddata")));
+    const auto choose = [this, actions] {
+        QStringList codes = chosenLanguages();
+        // At least one, or nothing could be read.
+        if (codes.isEmpty())
+            codes << QStringLiteral("eng");
+        save(QStringLiteral("ocr.languages"), codes.join(u'+'));
+        if (actions.recognitionChanged)
+            actions.recognitionChanged();
+    };
+    if (item->checkState() != Qt::Checked || here) {
+        choose();
+        return;
+    }
+    // Not here yet: unchosen until it's been fetched.
+    m_fillingLanguages = true;
+    item->setCheckState(Qt::Unchecked);
+    m_fillingLanguages = false;
+    if (!actions.getLanguage)
+        return;
+    QPointer<SettingsDialog> self(this);
+    actions.getLanguage(code, [self, code, choose](bool ready) {
+        if (!self || !ready)
+            return;
+        self->fillLanguages();
+        for (int row = 0; row < self->m_languages->count(); ++row) {
+            QListWidgetItem *fetched = self->m_languages->item(row);
+            if (fetched->data(Qt::UserRole).toString() == code) {
+                self->m_fillingLanguages = true;
+                fetched->setCheckState(Qt::Checked);
+                self->m_fillingLanguages = false;
+            }
+        }
+        choose();
+    });
 }
 
 QComboBox *SettingsDialog::choiceFor(const QString &key, const QList<QPair<QString, QString>> &labelsAndValues)

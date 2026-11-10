@@ -31,6 +31,16 @@ struct HttpRequest {
     qint64 maxReplyBytes = 8 * 1024 * 1024;
 };
 
+// A file to fetch and keep, such as a language's model for recognising text. It's written to a temporary file as it
+// arrives, and only kept at `path` if it's exactly `sha256`, no larger than `maxBytes`. Redirects aren't followed.
+struct DownloadRequest {
+    QUrl url;
+    QString path;
+    qint64 maxBytes = 0;
+    QByteArray sha256; // In hex.
+    int timeoutMs = 120000; // Without anything arriving.
+};
+
 // The only way anything in Papertrail reaches the network. Offline mode never queues any work that
 // would call this, and tests swap it to prove that.
 class Transport {
@@ -39,6 +49,8 @@ public:
     using Callback = std::function<void(const TransportReply &)>;
     virtual void get(const QUrl &url, const Callback &callback) = 0;
     virtual void send(const HttpRequest &request, const Callback &callback);
+    // Calls `done` with an empty string once the file is kept, or what went wrong.
+    virtual void download(const DownloadRequest &request, const std::function<void(const QString &error)> &done);
 };
 
 class NetworkTransport : public Transport {
@@ -48,6 +60,7 @@ public:
 
     void get(const QUrl &url, const Callback &callback) override;
     void send(const HttpRequest &request, const Callback &callback) override;
+    void download(const DownloadRequest &request, const std::function<void(const QString &error)> &done) override;
 
     // Whether this build can make secure connections at all.
     static bool canUseTls();

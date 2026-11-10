@@ -1,6 +1,7 @@
 #include "ui/DocumentClient.h"
 
 #include <QFileInfo>
+#include <algorithm>
 #include <QJsonArray>
 #include <QJsonDocument>
 
@@ -9,6 +10,7 @@ namespace papertrail::ui {
 namespace {
 
 constexpr int kOtherTimeoutMs = 30000;
+constexpr int kRecogniseTimeoutMs = 180000; // A dense page at 300 dpi on a slow computer.
 constexpr int kSizesPerRequest = 500;
 constexpr int kMaxRestarts = 10;
 constexpr qsizetype kMaxWaitingThumbnails = 40;
@@ -102,6 +104,8 @@ void DocumentClient::startProcess()
     open.body.insert(QStringLiteral("op"), QStringLiteral("open"));
     open.body.insert(QStringLiteral("path"), m_path);
     open.body.insert(QStringLiteral("convertedPath"), m_convertedPath);
+    if (!m_ocrFolder.isEmpty())
+        open.body.insert(QStringLiteral("ocrFolder"), m_ocrFolder);
     m_inFlight.reset();
     m_urgent.prepend(open);
     pump();
@@ -121,6 +125,8 @@ void DocumentClient::send(const Request &request)
     else if (request.kind == Kind::Render || request.kind == Kind::Thumbnail || request.kind == Kind::AreaPicture
              || request.kind == Kind::Reference)
         timeout = m_renderTimeoutMs;
+    else if (request.kind == Kind::Recognise)
+        timeout = kRecogniseTimeoutMs;
     m_timeout.start(timeout);
 }
 
@@ -368,6 +374,11 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
         emit located(request.token, request.part, ok ? reply.value(QStringLiteral("page")).toInt(-1) : -1,
                      ok ? rectsFromJson(reply.value(QStringLiteral("rects"))) : QList<QRectF>());
         break;
+    case Kind::Recognise:
+        if (!ok)
+            m_unrecognisable.insert(request.page);
+        emit pageRecognised(request.page, ok ? reply.value(QStringLiteral("words")).toInt() : -1);
+        break;
     case Kind::Find:
         if (request.token != 0)
             emit placeFound(request.token, ok ? reply.value(QStringLiteral("page")).toInt(-1) : -1);
@@ -428,6 +439,11 @@ void DocumentClient::handleLostRequest()
         break;
     case Kind::Reference:
         emit referenceReady(ReaderReference{});
+        break;
+    case Kind::Recognise:
+        // Not tried again this session, but the page can still be shown.
+        m_unrecognisable.insert(request.page);
+        emit pageRecognised(request.page, -1);
         break;
     default:
         break;
@@ -677,6 +693,30 @@ void DocumentClient::requestPageForBookmark(const QString &bookmark)
     request.kind = Kind::Find;
     request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("find")}, {QStringLiteral("bookmark"), bookmark}};
     m_urgent << request;
+    pump();
+}
+
+void DocumentClient::setRecognition(const QString &ocrFolder, const QString &tessdata, const QString &languages)
+{
+    m_ocrFolder = ocrFolder;
+    m_tessdata = tessdata;
+    m_languages = languages;
+}
+
+void DocumentClient::requestRecognition(int page)
+{
+    if (!canRecognise() || m_unrecognisable.contains(page) || page < 0 || page >= m_pageCount)
+        return;
+    const bool waiting = std::any_of(m_background.cbegin(), m_background.cend(),
+                                     [page](const Request &request) { return request.kind == Kind::Recognise && request.page == page; });
+    if (waiting || (m_inFlight && m_inFlight->kind == Kind::Recognise && m_inFlight->page == page))
+        return;
+    Request request;
+    request.kind = Kind::Recognise;
+    request.page = page;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("ocr")}, {QStringLiteral("page"), page},
+                               {QStringLiteral("tessdata"), m_tessdata}, {QStringLiteral("languages"), m_languages}};
+    m_background << request;
     pump();
 }
 

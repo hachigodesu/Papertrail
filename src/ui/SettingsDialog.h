@@ -11,6 +11,8 @@ class QAction;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QListWidget;
+class QListWidgetItem;
 
 namespace papertrail::ui {
 
@@ -26,6 +28,10 @@ struct SettingsActions {
     std::function<void()> showOnlineLookups;
     std::function<void()> showApiKey;
     std::function<void()> showBackups;
+    // Fetches a language's model for recognising text, after asking, and says whether it's there now.
+    std::function<void(const QString &code, std::function<void(bool ready)> done)> getLanguage;
+    // Recognising text was turned on or off, or its languages changed.
+    std::function<void()> recognitionChanged;
 };
 
 class SettingsDialog : public QDialog {
@@ -39,6 +45,8 @@ public:
     QComboBox *pageLayoutBox() const { return m_pageLayout; }
     QComboBox *pageColoursBox() const { return m_pageColours; }
     QDoubleSpinBox *textSizeBox() const { return m_textSize; }
+    QCheckBox *recogniseBox() const { return m_recognise; }
+    QListWidget *languageList() const { return m_languages; }
 
 private:
     QCheckBox *boxFor(QAction *action, const QString &text, const QString &explanation);
@@ -52,6 +60,13 @@ private:
     QComboBox *m_pageLayout = nullptr;
     QComboBox *m_pageColours = nullptr;
     QDoubleSpinBox *m_textSize = nullptr;
+    QCheckBox *m_recognise = nullptr;
+    QListWidget *m_languages = nullptr;
+    bool m_fillingLanguages = false;
+
+    void fillLanguages();
+    void onLanguageChanged(QListWidgetItem *item, const SettingsActions &actions);
+    QStringList chosenLanguages() const;
 };
 
 } // namespace papertrail::ui

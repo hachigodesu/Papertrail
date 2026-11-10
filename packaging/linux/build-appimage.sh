@@ -27,6 +27,11 @@ cmake -S "$src" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TES
     -DCMAKE_PREFIX_PATH="$qt" -DCMAKE_INSTALL_PREFIX=/usr
 cmake --build "$work/build"
 DESTDIR="$work/AppDir" cmake --install "$work/build"
+# Tesseract and Leptonica, for recognising scanned text, come from the distro and are bundled below. Their licences
+# go with them.
+for doc in /usr/share/doc/libtesseract*/copyright /usr/share/doc/liblept*/copyright; do
+    [ -f "$doc" ] && install -Dm644 "$doc" "$work/AppDir/usr/share/licenses/$(basename "$(dirname "$doc")")/copyright"
+done
 
 export PATH="$tools:$qt/bin:$PATH"
 export QMAKE="$qt/bin/qmake"

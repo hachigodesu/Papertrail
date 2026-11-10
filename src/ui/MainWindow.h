@@ -235,6 +235,8 @@ public:
     void setFullScreenReading(bool on);
     // Papers this cites, and that cite it, in a window of their own.
     RelatedPapersDialog *showRelatedPapers(qint64 publicationId);
+    // Fetches a language's model for recognising text, after asking, if lookups are online.
+    void getOcrLanguage(const QString &code, std::function<void(bool ready)> done);
     bool isFullScreenReading() const { return m_fullScreenTab != nullptr; }
     ReferenceImportActions *referenceImports() const { return m_references; }
     // What an empty library says, for tests.
@@ -375,6 +377,7 @@ private:
     QAction *m_goTo = nullptr;
     QAction *m_fullScreen = nullptr;
     QToolBar *m_libraryBar = nullptr;
+    std::unique_ptr<metadata::Transport> m_downloads; // For language models, made when first needed.
     QPointer<QWidget> m_fullScreenTab; // The document tab shown over the whole screen.
     bool m_maximizedBeforeFullScreen = false;
     QPointer<QWidget> m_lastDocument; // The document tab last shown.

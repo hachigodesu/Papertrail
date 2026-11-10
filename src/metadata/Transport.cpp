@@ -1,6 +1,8 @@
 #include "metadata/Transport.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QSaveFile>
 #include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -35,6 +37,72 @@ void Transport::send(const HttpRequest &, const Callback &callback)
     TransportReply reply;
     reply.error = QStringLiteral("this can't send requests of this kind");
     callback(reply);
+}
+
+void Transport::download(const DownloadRequest &, const std::function<void(const QString &)> &done)
+{
+    done(QStringLiteral("this can't fetch files"));
+}
+
+void NetworkTransport::download(const DownloadRequest &download, const std::function<void(const QString &)> &done)
+{
+    if (download.url.scheme() != QLatin1StringView("https") && download.url.host() != QLatin1StringView("127.0.0.1")) {
+        done(QStringLiteral("files are only fetched securely"));
+        return;
+    }
+    auto file = std::make_shared<QSaveFile>(download.path);
+    if (!file->open(QIODevice::WriteOnly)) {
+        done(QStringLiteral("it couldn't be saved: %1").arg(file->errorString()));
+        return;
+    }
+    QNetworkRequest request(download.url);
+    const QString version = QCoreApplication::applicationVersion();
+    request.setHeader(QNetworkRequest::UserAgentHeader,
+                      QStringLiteral("Papertrail/%1 (https://github.com/hachigodesu/Papertrail)").arg(version.isEmpty() ? QStringLiteral("dev") : version));
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(download.timeoutMs);
+
+    QNetworkReply *reply = m_network->get(request);
+    auto hash = std::make_shared<QCryptographicHash>(QCryptographicHash::Sha256);
+    auto received = std::make_shared<qint64>(0);
+    auto problem = std::make_shared<QString>();
+    const qint64 limit = download.maxBytes;
+    QObject::connect(reply, &QNetworkReply::readyRead, reply, [reply, file, hash, received, problem, limit] {
+        const QByteArray chunk = reply->readAll();
+        *received += chunk.size();
+        if (*received > limit) {
+            *problem = QStringLiteral("it was larger than it should be");
+            reply->abort();
+            return;
+        }
+        hash->addData(chunk);
+        if (file->write(chunk) != chunk.size()) {
+            *problem = QStringLiteral("it couldn't be saved: %1").arg(file->errorString());
+            reply->abort();
+        }
+    });
+    const QByteArray expected = download.sha256.toLower();
+    QObject::connect(reply, &QNetworkReply::finished, reply, [reply, file, hash, problem, expected, done] {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        QString error = *problem;
+        if (error.isEmpty() && status != 200)
+            error = status >= 300 && status < 400 ? QStringLiteral("it was somewhere else, which isn't followed")
+                  : status > 0                    ? QStringLiteral("the server said %1").arg(status)
+                                                  : reply->errorString();
+        if (error.isEmpty() && hash->result().toHex() != expected)
+            error = QStringLiteral("it wasn't the file expected");
+        reply->deleteLater();
+        if (!error.isEmpty()) {
+            file->cancelWriting();
+            done(error);
+            return;
+        }
+        if (!file->commit()) {
+            done(QStringLiteral("it couldn't be saved: %1").arg(file->errorString()));
+            return;
+        }
+        done(QString());
+    });
 }
 
 NetworkTransport::NetworkTransport()

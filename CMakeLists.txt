@@ -39,6 +39,11 @@ add_compile_definitions(PAPERTRAIL_SOURCE_URL="${PAPERTRAIL_SOURCE_URL}")
 # Papertrail's licence and a list of what packages bundle, which About can show. Packages add the licence
 # texts of the libraries they bundle beside these.
 install(FILES LICENSE packaging/THIRD-PARTY.md DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/papertrail)
+# English, for recognising text, found beside the program by ui::bundledTessdata.
+if(PAPERTRAIL_WITH_OCR)
+    install(FILES packaging/tessdata/eng.traineddata DESTINATION ${CMAKE_INSTALL_DATADIR}/papertrail/tessdata)
+    install(FILES packaging/tessdata/LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/papertrail/tessdata)
+endif()
 
 # What Linux desktops and software centres need, named by the app id.
 if(UNIX AND NOT APPLE)
@@ -48,6 +53,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 option(PAPERTRAIL_BUILD_FORMAT_PROBE "Build the document format probe tool" OFF)
+option(PAPERTRAIL_WITH_OCR "Recognise text in scanned pages with Tesseract" ON)
 
 include(SQLite)
 include(Mobi)

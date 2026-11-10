@@ -27,6 +27,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libmupdf
             mingw-w64-ucrt-x86_64-djvulibre
             mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-tesseract-ocr
             mingw-w64-ucrt-x86_64-nsis
             bsdtar
       # The preset expects MSYS2 at C:/msys64, which the action's isn't, so the package script is told to configure

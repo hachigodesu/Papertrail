@@ -1,6 +1,7 @@
 #pragma once
 
 #include "import/FullTextIndexer.h"
+#include "import/TextRecognition.h"
 #include "ui/LibrarySession.h"
 
 #include <QMetaType>
@@ -30,6 +31,9 @@ signals:
     void busyChanged(bool busy);
     void progress(qint64 done, qint64 remaining, const QString &fileName);
     void finished(const papertrail::import::FullTextReport &report);
+    // Recognising the words of scanned documents, after indexing: how many documents are left, and where it is.
+    void recognitionProgress(qint64 documentsLeft, int page, int pageCount, const QString &fileName);
+    void recognitionFinished(const papertrail::import::RecognitionReport &report);
     void problem(const QString &message);
 
 protected:
@@ -48,3 +52,4 @@ private:
 } // namespace papertrail::ui
 
 Q_DECLARE_METATYPE(papertrail::import::FullTextReport)
+Q_DECLARE_METATYPE(papertrail::import::RecognitionReport)

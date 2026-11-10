@@ -19,4 +19,8 @@ QString readablePath(engine::Engine &engine, const QString &path, const QString 
 // "bytes" value, that many bytes of raw data follow straight after the line.
 int runReaderHost(engine::Engine &engine);
 
+// For testing how the worker copes with a page that crashes or hangs. Only with PAPERTRAIL_WORKER_TEST_FAULTS set,
+// which the app itself never does: a file named __crashpage3__.pdf crashes on page 3.
+void applyPageFaults(const QString &path, int page);
+
 } // namespace papertrail::worker

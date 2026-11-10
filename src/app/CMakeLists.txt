@@ -31,11 +31,14 @@ set_source_files_properties(
     ${CMAKE_SOURCE_DIR}/tests/samples/book.epub PROPERTIES QT_RESOURCE_ALIAS book.epub)
 set_source_files_properties(
     ${CMAKE_SOURCE_DIR}/tests/samples/with_text.djvu PROPERTIES QT_RESOURCE_ALIAS with_text.djvu)
+set_source_files_properties(
+    ${CMAKE_SOURCE_DIR}/tests/samples/scanned_text.pdf PROPERTIES QT_RESOURCE_ALIAS scanned_text.pdf)
 qt_add_resources(papertrail selftest
     PREFIX /selftest
     FILES
         ${CMAKE_SOURCE_DIR}/tests/samples/article.pdf
         ${CMAKE_SOURCE_DIR}/tests/samples/book.epub
-        ${CMAKE_SOURCE_DIR}/tests/samples/with_text.djvu)
+        ${CMAKE_SOURCE_DIR}/tests/samples/with_text.djvu
+        ${CMAKE_SOURCE_DIR}/tests/samples/scanned_text.pdf)
 
 install(TARGETS papertrail RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

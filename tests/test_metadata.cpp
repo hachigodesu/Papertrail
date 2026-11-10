@@ -10,6 +10,7 @@
 #include "metadata/LookupEngine.h"
 #include "metadata/Matching.h"
 #include "metadata/NoticeChecker.h"
+#include "metadata/OcrLanguages.h"
 #include "metadata/RelatedFinder.h"
 #include "ui/RelatedPapersDialog.h"
 #include "metadata/Providers.h"
@@ -45,6 +46,9 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QCryptographicHash>
+#include <QEventLoop>
+#include <QFileInfo>
 #include <QtTest>
 
 #include <atomic>
@@ -1105,6 +1109,97 @@ private slots:
     }
 
     // ---- The real network path, on this computer only ----
+
+    void aFileIsOnlyKeptIfItsExactlyWhatWasExpected()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        NetworkTransport transport;
+        const QByteArray body = "A made-up model, standing in for a language's.";
+        const QByteArray hash = QCryptographicHash::hash(body, QCryptographicHash::Sha256).toHex();
+        const QString path = m_dir->filePath(QStringLiteral("tessdata/made.traineddata"));
+        QDir().mkpath(QFileInfo(path).path());
+
+        const auto fetch = [&](qint64 maxBytes, const QByteArray &sha256) {
+            DownloadRequest request;
+            request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/made.traineddata").arg(server.serverPort()));
+            request.path = path;
+            request.maxBytes = maxBytes;
+            request.sha256 = sha256;
+            QString error = QStringLiteral("never answered");
+            QEventLoop loop;
+            transport.download(request, [&](const QString &result) {
+                error = result;
+                loop.quit();
+            });
+            loop.exec();
+            return error;
+        };
+        const QByteArray ok = "HTTP/1.1 200 OK\r\nContent-Length: " + QByteArray::number(body.size())
+            + "\r\nConnection: close\r\n\r\n" + body;
+
+        // The wrong file, one too large, or one somewhere else, is never kept.
+        server.response = ok;
+        QVERIFY(fetch(body.size(), QByteArray(64, 'a')).contains(QStringLiteral("expected")));
+        QVERIFY(!QFile::exists(path));
+        QVERIFY(fetch(body.size() - 1, hash).contains(QStringLiteral("larger")));
+        QVERIFY(!QFile::exists(path));
+        server.response = "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        QVERIFY(fetch(body.size(), hash).contains(QStringLiteral("somewhere else")));
+        QVERIFY(!QFile::exists(path));
+
+        // The right one is.
+        server.response = ok;
+        QCOMPARE(fetch(body.size(), hash), QString());
+        QFile kept(path);
+        QVERIFY(kept.open(QIODevice::ReadOnly));
+        QCOMPARE(kept.readAll(), body);
+
+        // Only securely, from anywhere but here.
+        DownloadRequest plain;
+        plain.url = QUrl(QStringLiteral("http://example.org/made.traineddata"));
+        plain.path = path;
+        QString refused;
+        transport.download(plain, [&](const QString &error) { refused = error; });
+        QVERIFY(refused.contains(QStringLiteral("securely")));
+    }
+
+    void languagesComeFromOnePlaceAndAreChecked()
+    {
+        QVERIFY(ocrLanguages().size() > 20);
+        for (const OcrLanguage &language : ocrLanguages()) {
+            const QUrl url = ocrLanguageUrl(language);
+            QCOMPARE(url.scheme(), QStringLiteral("https"));
+            QCOMPARE(url.host(), QStringLiteral("raw.githubusercontent.com"));
+            QVERIFY(url.path().startsWith(QStringLiteral("/tesseract-ocr/tessdata_fast/4.1.0/")));
+            QCOMPARE(QByteArray(language.sha256).size(), 64);
+            QVERIFY(language.bytes > 100000 && language.bytes < 20000000);
+        }
+        // The English that comes with Papertrail is the one listed.
+        const OcrLanguage *english = ocrLanguage(QStringLiteral("eng"));
+        QVERIFY(english);
+        QFile bundled(QStringLiteral(PAPERTRAIL_SOURCE_TESSDATA "/eng.traineddata"));
+        QVERIFY(bundled.open(QIODevice::ReadOnly));
+        const QByteArray data = bundled.readAll();
+        QCOMPARE(data.size(), english->bytes);
+        QCOMPARE(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex(), QByteArray(english->sha256));
+        QVERIFY(!ocrLanguage(QStringLiteral("../eng")));
+    }
+
+    void aLanguageIsntFetchedWhileOffline()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        openWindow(&server);
+        // No choice made yet, which is offline: it says so, and nothing is asked for.
+        bool ready = true;
+        m_window->getOcrLanguage(QStringLiteral("fra"), [&](bool result) { ready = result; });
+        QVERIFY(!ready);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_unexpectedBoxes.isEmpty(), kWaitMs);
+        QVERIFY(m_unexpectedBoxes.first().contains(QStringLiteral("offline")));
+        m_unexpectedBoxes.clear();
+        QCOMPARE(server.connections.load(), 0);
+    }
 
     void theRealTransportHandlesAnswers()
     {

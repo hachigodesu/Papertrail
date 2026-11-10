@@ -62,6 +62,10 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("summary.effort"), QStringLiteral("high"), K::Value,
          {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("xhigh"), QStringLiteral("max")}},
         {QStringLiteral("library.index_contents"), true, K::Value, {}},
+        // Recognising scanned documents' words in the background takes a while, so it's for each computer to choose.
+        {QStringLiteral("ocr.enabled"), true, K::ThisComputer, {}},
+        // Tesseract's language codes joined by "+", such as "eng+fra".
+        {QStringLiteral("ocr.languages"), QStringLiteral("eng"), K::Value, {}},
         {QStringLiteral("library.daily_backups"), true, K::Value, {}},
         {QStringLiteral("metadata.check_notices"), true, K::Value, {}},
         {QStringLiteral("library.search_contents"), false, K::Value, {}},

@@ -12,8 +12,8 @@ pkgdesc="Library manager and reader for academic publications: papers, textbooks
 arch=('x86_64')
 url="https://github.com/hachigodesu/Papertrail"
 license=('AGPL-3.0-or-later')
-depends=('qt6-base' 'libmupdf' 'djvulibre' 'libsecret' 'zlib' 'hicolor-icon-theme')
-makedepends=('cmake' 'ninja')
+depends=('qt6-base' 'libmupdf' 'djvulibre' 'libsecret' 'zlib' 'tesseract' 'leptonica' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja' 'pkgconf')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         "sqlite-amalgamation-3540100.zip::https://sqlite.org/2026/sqlite-amalgamation-3540100.zip"
         "libmobi-0.12.tar.gz::https://github.com/bfabiszewski/libmobi/archive/refs/tags/v0.12.tar.gz"

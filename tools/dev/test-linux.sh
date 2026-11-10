@@ -12,19 +12,21 @@ shift
 src="$(cd "$(dirname "$0")/../.." && pwd)"
 logs="$src/build/test-logs"
 mkdir -p "$logs"
+# PAPERTRAIL_LINUX_BUILD chooses another build folder, such as for a second checkout, which needs one of its own.
+build="${PAPERTRAIL_LINUX_BUILD:-$HOME/papertrail-build}"
 extra=()
 [ $# -ge 1 ] && [ -n "$1" ] && extra=("-DCMAKE_PREFIX_PATH=$1")
 
 grep PRETTY_NAME /etc/os-release
 cd "$src" || exit 1
-cmake --preset linux-debug -B "$HOME/papertrail-build" "${extra[@]}" > "$logs/$name-configure.log" 2>&1 \
+cmake --preset linux-debug -B "$build" "${extra[@]}" > "$logs/$name-configure.log" 2>&1 \
     || { echo "configure failed"; tail -20 "$logs/$name-configure.log"; exit 1; }
 # One distro at a time, with a job limit: building on two at once, or without one, has hung the shared WSL VM.
-timeout 1800 cmake --build "$HOME/papertrail-build" -j 8 > "$logs/$name-build.log" 2>&1
+timeout 1800 cmake --build "$build" -j 8 > "$logs/$name-build.log" 2>&1
 echo "build rc=$?"
 grep -E 'error|warning:|FAILED' "$logs/$name-build.log" | cut -c1-200 | head -15
 
-QT_QPA_PLATFORM=offscreen timeout 1800 ctest --test-dir "$HOME/papertrail-build" -LE perf --output-on-failure </dev/null \
+QT_QPA_PLATFORM=offscreen timeout 1800 ctest --test-dir "$build" -LE perf --output-on-failure </dev/null \
     > "$logs/$name-test.log" 2>&1
 echo "ctest rc=$?"
 grep -E 'tests passed|tests failed|FAIL!|Actual|Expected|Loc:|QFATAL|\(Failed\)|\(Subprocess|Timeout|Total Test time' \

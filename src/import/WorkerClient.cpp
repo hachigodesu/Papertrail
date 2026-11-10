@@ -1,5 +1,11 @@
 #include "import/WorkerClient.h"
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <QDeadlineTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -24,6 +30,14 @@ bool WorkerClient::ensureRunning()
     m_process = std::make_unique<QProcess>();
     m_process->setProgram(m_workerPath);
     m_process->setStandardErrorFile(QProcess::nullDevice()); // Libraries' messages aren't needed.
+    if (m_lowPriority) {
+#ifdef Q_OS_WIN
+        m_process->setCreateProcessArgumentsModifier(
+            [](QProcess::CreateProcessArguments *arguments) { arguments->flags |= BELOW_NORMAL_PRIORITY_CLASS; });
+#else
+        m_process->setChildProcessModifier([] { [[maybe_unused]] const int ignored = nice(10); });
+#endif
+    }
     m_process->start(QIODevice::ReadWrite);
     ++m_startCount;
     return m_process->waitForStarted(30000);
@@ -92,12 +106,15 @@ WorkerClient::HashResult WorkerClient::hash(const QString &path, int timeoutMs)
     return {reply.failure, reply.error, reply.body.value(QStringLiteral("sha256")).toString()};
 }
 
-WorkerClient::PageTexts WorkerClient::pageTexts(const QString &path, const QString &convertedPath, int start, int count, int timeoutMs)
+WorkerClient::PageTexts WorkerClient::pageTexts(const QString &path, const QString &convertedPath, int start, int count, int timeoutMs,
+                                                const QString &ocrFolder)
 {
     QJsonObject request;
     request.insert(QStringLiteral("op"), QStringLiteral("pagetext"));
     request.insert(QStringLiteral("path"), path);
     request.insert(QStringLiteral("convertedPath"), convertedPath);
+    if (!ocrFolder.isEmpty())
+        request.insert(QStringLiteral("ocrFolder"), ocrFolder);
     request.insert(QStringLiteral("start"), start);
     request.insert(QStringLiteral("count"), count);
     const Reply reply = call(request, timeoutMs);
@@ -111,7 +128,36 @@ WorkerClient::PageTexts WorkerClient::pageTexts(const QString &path, const QStri
     const QJsonArray pages = reply.body.value(QStringLiteral("pages")).toArray();
     for (const QJsonValue &page : pages)
         texts.pages << page.toString();
+    for (const QJsonValue &page : reply.body.value(QStringLiteral("recognised")).toArray())
+        texts.recognised << page.toInt();
     return texts;
+}
+
+WorkerClient::Recognised WorkerClient::recognise(const QString &path, const QString &convertedPath, const QString &ocrFolder,
+                                                 const QString &tessdata, const QString &languages, int start, int count,
+                                                 bool again, int timeoutMs)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("op"), QStringLiteral("ocr"));
+    request.insert(QStringLiteral("path"), path);
+    request.insert(QStringLiteral("convertedPath"), convertedPath);
+    request.insert(QStringLiteral("ocrFolder"), ocrFolder);
+    request.insert(QStringLiteral("tessdata"), tessdata);
+    request.insert(QStringLiteral("languages"), languages);
+    request.insert(QStringLiteral("start"), start);
+    request.insert(QStringLiteral("count"), count);
+    request.insert(QStringLiteral("again"), again);
+    const Reply reply = call(request, timeoutMs);
+
+    Recognised result;
+    result.failure = reply.failure;
+    result.error = reply.error;
+    if (reply.failure != WorkerFailure::None)
+        return result;
+    result.pageCount = reply.body.value(QStringLiteral("pageCount")).toInt();
+    result.pages = reply.body.value(QStringLiteral("recognised")).toInt();
+    result.words = reply.body.value(QStringLiteral("words")).toInt();
+    return result;
 }
 
 WorkerClient::Cover WorkerClient::pageCover(const QString &path, const QString &convertedPath, int page,

@@ -106,6 +106,7 @@ set_tests_properties(test_volumes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscr
 
 qt_add_executable(test_metadata test_metadata.cpp)
 target_link_libraries(test_metadata PRIVATE papertrail_ui Qt6::Test Qt6::Network)
+target_compile_definitions(test_metadata PRIVATE PAPERTRAIL_SOURCE_TESSDATA="${CMAKE_SOURCE_DIR}/packaging/tessdata")
 target_compile_definitions(test_metadata PRIVATE
     PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
     PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples"
@@ -143,3 +144,16 @@ get_property(all_tests DIRECTORY PROPERTY TESTS)
 foreach(one_test IN LISTS all_tests)
     set_property(TEST ${one_test} APPEND PROPERTY ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1")
 endforeach()
+
+qt_add_executable(test_ocr test_ocr.cpp)
+target_link_libraries(test_ocr PRIVATE papertrail_ui papertrail_engine Qt6::Test Qt6::Gui)
+target_compile_definitions(test_ocr PRIVATE
+    PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
+    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples"
+    PAPERTRAIL_TEST_TESSDATA="${CMAKE_SOURCE_DIR}/packaging/tessdata")
+if(PAPERTRAIL_WITH_OCR)
+    target_compile_definitions(test_ocr PRIVATE PAPERTRAIL_TEST_OCR)
+endif()
+add_dependencies(test_ocr papertrail-worker)
+add_test(NAME test_ocr COMMAND test_ocr)
+set_tests_properties(test_ocr PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 900)

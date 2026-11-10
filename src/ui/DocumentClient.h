@@ -93,6 +93,13 @@ public:
     // `convertedPath` is where a Kindle book that has to be converted keeps its readable copy.
     void open(const QString &path, const ReaderLayout &layout, const QString &convertedPath = QString());
 
+    // Where the words recognised on scanned pages are kept, and what reads them: `tessdata` holds the models for
+    // `languages`, such as "eng+fra". Set before opening. Without it, scanned pages have no text.
+    void setRecognition(const QString &ocrFolder, const QString &tessdata, const QString &languages);
+    bool canRecognise() const { return !m_ocrFolder.isEmpty() && !m_tessdata.isEmpty(); }
+    // Recognises a scanned page's words, if it hasn't been already, in the background. See pageRecognised.
+    void requestRecognition(int page);
+
     // Lays a reflowable document out again, keeping `page`'s content in view. See layoutChanged.
     void setLayout(const ReaderLayout &layout, int page);
 
@@ -169,6 +176,8 @@ signals:
     void bookmarkReady(int page, const QString &bookmark);
     void bookmarkResolved(int page);
     void placeFound(qint64 token, int page); // -1 if it couldn't be found.
+    // A page's words were recognised: how many, 0 if it isn't a scan, or -1 if they couldn't be.
+    void pageRecognised(int page, int words);
     void searchHits(int page, const QList<QRectF> &rects);
     void searchProgress(int pagesDone, int pageCount);
     void searchFinished();
@@ -177,7 +186,7 @@ signals:
 private:
     enum class Kind {
         Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Images, Heading, Select, Bookmark, Anchor, Locate, Find,
-        Search, AreaPicture, AreaText, Lines, Reference
+        Search, AreaPicture, AreaText, Lines, Reference, Recognise
     };
 
     struct Request {
@@ -220,6 +229,10 @@ private:
     QList<Request> m_urgent;
     QList<RenderRequest> m_wanted;
     QList<Request> m_background;
+    QString m_ocrFolder;
+    QString m_tessdata;
+    QString m_languages;
+    QSet<int> m_unrecognisable; // Pages whose recognition failed, not asked about again.
     QList<Request> m_thumbnails;
     QHash<int, Request> m_selections;
     QSet<int> m_badPages;
