@@ -68,6 +68,8 @@ modules:
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DBUILD_SHARED_LIBS=ON
+      # In /app/lib, where pkg-config and the loader look, rather than lib64.
+      - -DCMAKE_INSTALL_LIBDIR=lib
       - -DBUILD_PROG=OFF
       - -DSW_BUILD=OFF
       - -DENABLE_GIF=OFF
@@ -90,6 +92,7 @@ modules:
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DBUILD_SHARED_LIBS=ON
+      - -DCMAKE_INSTALL_LIBDIR=lib
       - -DBUILD_TRAINING_TOOLS=OFF
       - -DBUILD_TESTS=OFF
       - -DGRAPHICS_DISABLED=ON
