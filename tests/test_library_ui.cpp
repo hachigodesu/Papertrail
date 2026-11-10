@@ -18,6 +18,7 @@
 #include "ui/MainWindow.h"
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
+#include "ui/ReferenceImportDialog.h"
 #include "core/repo/SavedSearchRepository.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
@@ -2122,6 +2123,62 @@ private slots:
         QCOMPARE(qobject_cast<QStringListModel *>(people->model())->stringList(), QStringList{QStringLiteral("Denton, Avery")});
         emit people->activated(QStringLiteral("Denton, Avery"));
         QCOMPARE(authors->toPlainText(), QStringLiteral("Somebody, Else\nDenton, Avery"));
+    }
+
+    void referencesFromAnotherManagerAreImported()
+    {
+        openWindow();
+        Publication existing;
+        existing.title = QStringLiteral("Bending of Example Beams under Made-Up Loads");
+        existing.doi = QStringLiteral("10.1000/example.beams");
+        const qint64 id = m_session->publications().create(existing);
+
+        ReferenceImportActions *actions = m_window->referenceImports();
+        QVERIFY(actions);
+        std::optional<transfer::ReferencePlan> plan;
+        QString problem;
+        actions->planFile(QStringLiteral(PAPERTRAIL_TEST_FIXTURES "/references/zotero.bib"),
+                          [&](const transfer::ReferencePlan &made, const QString &why) {
+                              plan = made;
+                              problem = why;
+                          });
+        QTRY_VERIFY_WITH_TIMEOUT(plan.has_value(), 10000);
+        QVERIFY2(problem.isEmpty(), qPrintable(problem));
+        QCOMPARE(plan->name, QStringLiteral("zotero"));
+        QCOMPARE(plan->count(transfer::ReferenceMatch::ByIdentifier), 1);
+        QCOMPARE(plan->count(transfer::ReferenceMatch::None), 4);
+
+        // What it would do, as plain text, with nothing chosen beyond the details.
+        ReferenceImportDialog dialog(*plan, m_window.get());
+        QCOMPARE(dialog.summaryLabel()->textFormat(), Qt::PlainText);
+        QVERIFY(dialog.summaryLabel()->text().contains(QStringLiteral("5 entries in this file")));
+        QCOMPARE(dialog.table()->rowCount(), 5);
+        QVERIFY(!dialog.addUnmatchedBox()->isChecked());
+        QVERIFY(!dialog.collectionBox()->isChecked());
+        QVERIFY(!dialog.options().addUnmatched);
+
+        // Applying it backs the library up first, and only changes what matched.
+        const qint64 backupsBefore = backups(m_session->paths().database).size();
+        bool finished = false;
+        bool succeeded = false;
+        transfer::ReferenceImportReport report;
+        actions->apply(*plan, dialog.options(), [&](bool ok, const transfer::ReferenceImportReport &made, const QString &) {
+            finished = true;
+            succeeded = ok;
+            report = made;
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 10000);
+        QVERIFY(succeeded);
+        QCOMPARE(report.updated, 1);
+        QCOMPARE(report.notAdded, 4);
+        QCOMPARE(backups(m_session->paths().database).size(), backupsBefore + 1);
+        QCOMPARE(m_session->publications().get(id)->authors.size(), 3);
+        QCOMPARE(m_session->query().count({}), qint64(1));
+        QVERIFY(describeReferenceImport(report).contains(QStringLiteral("4 entries matched nothing")));
+        bool offered = false;
+        for (QAction *action : m_window->menuBar()->actions().first()->menu()->actions())
+            offered = offered || action->text().startsWith(QStringLiteral("Import references"));
+        QVERIFY(offered);
     }
 
     void theSearchHelpListsEveryWayToSearch()

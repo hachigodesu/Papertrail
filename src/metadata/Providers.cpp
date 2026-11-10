@@ -21,6 +21,8 @@ const QString kCrossref = QStringLiteral("crossref");
 const QString kOpenAlex = QStringLiteral("openalex");
 const QString kArxiv = QStringLiteral("arxiv");
 const QString kOpenLibrary = QStringLiteral("openlibrary");
+const QString kBibTeXImport = QStringLiteral("bibtex");
+const QString kRisImport = QStringLiteral("ris");
 
 namespace {
 

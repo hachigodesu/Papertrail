@@ -50,10 +50,12 @@ double wordOverlap(const QString &a, const QString &b)
     return 2.0 * shared / (totalA + totalB);
 }
 
-// A source, and the fields that came from it, count as lookup changes that can be undone.
+// A source, and the fields that came from it, count as lookup changes that can be undone. So does a reference
+// manager's export.
 bool isLookupSource(const QString &source)
 {
-    return source == kCrossref || source == kOpenAlex || source == kArxiv || source == kOpenLibrary;
+    return source == kCrossref || source == kOpenAlex || source == kArxiv || source == kOpenLibrary || source == kBibTeXImport
+           || source == kRisImport;
 }
 
 } // namespace
@@ -138,6 +140,30 @@ QList<FieldChange> plannedChanges(const Publication &publication, const FoundRec
     return changes;
 }
 
+QList<FieldChange> importedChanges(const Publication &current, const Publication &imported, const QSet<QString> &setByHand,
+                                   bool onlyGaps)
+{
+    QList<FieldChange> changes;
+    for (const QString &name : metadataFieldNames()) {
+        if (name == QLatin1StringView("type") || setByHand.contains(name))
+            continue;
+        const QString after = metadataFieldValue(imported, name);
+        const QString before = metadataFieldValue(current, name);
+        if (after.isEmpty() || after == before || (onlyGaps && !before.isEmpty()))
+            continue;
+        changes << FieldChange{name, before, after};
+    }
+    // The other manager's type, where it says something: never "other", never a preprint either way, and not for an
+    // issue or an article in one, whose types belong together.
+    const bool typeCanMove = !onlyGaps && !setByHand.contains(QStringLiteral("type")) && imported.type != current.type
+                             && imported.type != PublicationType::Other && imported.type != PublicationType::Preprint
+                             && current.type != PublicationType::Preprint && current.type != PublicationType::JournalIssue
+                             && imported.type != PublicationType::JournalIssue && !current.parentId;
+    if (typeCanMove)
+        changes << FieldChange{QStringLiteral("type"), toDbString(current.type), toDbString(imported.type)};
+    return changes;
+}
+
 QSet<QString> fieldsSetByHand(Database &db, qint64 publicationId)
 {
     QSet<QString> fields;
@@ -182,7 +208,8 @@ int applyFoundRecord(Database &db, qint64 publicationId, const FoundRecord &foun
 QString undoableSource(Database &db, qint64 publicationId)
 {
     auto select = db.prepare(
-        "SELECT source FROM metadata_provenance WHERE publication_id = ? AND source IN ('crossref', 'openalex', 'arxiv', 'openlibrary') "
+        "SELECT source FROM metadata_provenance WHERE publication_id = ? "
+        "AND source IN ('crossref', 'openalex', 'arxiv', 'openlibrary', 'bibtex', 'ris') "
         "AND recorded_at > coalesce((SELECT max(recorded_at) FROM metadata_provenance WHERE publication_id = ?1 AND source = 'undo'), 0) "
         "ORDER BY recorded_at DESC, id DESC LIMIT 1");
     select->bind(1, publicationId);
@@ -241,6 +268,10 @@ QString providerLabel(const QString &provider)
         return QStringLiteral("arXiv");
     if (provider == kOpenLibrary)
         return QStringLiteral("Open Library");
+    if (provider == kBibTeXImport)
+        return QStringLiteral("a BibTeX file");
+    if (provider == kRisImport)
+        return QStringLiteral("an RIS file");
     return provider;
 }
 

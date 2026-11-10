@@ -15,7 +15,8 @@ qt_add_executable(test_library_ui test_library_ui.cpp)
 target_link_libraries(test_library_ui PRIVATE papertrail_ui Qt6::Test)
 target_compile_definitions(test_library_ui PRIVATE
     PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
-    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples")
+    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples"
+    PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 add_dependencies(test_library_ui papertrail-worker)
 add_test(NAME test_library_ui COMMAND test_library_ui)
 set_tests_properties(test_library_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 600)
@@ -37,6 +38,12 @@ target_compile_definitions(test_transfer PRIVATE
     PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples"
     PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 add_dependencies(test_transfer papertrail-worker)
+papertrail_core_test(test_reference_import papertrail_transfer papertrail_import)
+target_compile_definitions(test_reference_import PRIVATE
+    PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
+    PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples"
+    PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_dependencies(test_reference_import papertrail-worker)
 target_compile_definitions(test_import PRIVATE
     PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"
     PAPERTRAIL_TEST_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples")

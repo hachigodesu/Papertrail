@@ -37,6 +37,12 @@ struct FieldChange {
 QList<FieldChange> plannedChanges(const core::Publication &publication, const FoundRecord &found,
                                   const QSet<QString> &setByHand);
 
+// What an entry from another reference manager's export would change, which knows the publication better than a file
+// or a search does: every field it has, except those set by hand, or with `onlyGaps`, only empty ones. The type too,
+// unless it would make or unmake a preprint, or move an issue or its articles.
+QList<FieldChange> importedChanges(const core::Publication &current, const core::Publication &imported,
+                                   const QSet<QString> &setByHand, bool onlyGaps);
+
 // The fields that have a value set by hand.
 QSet<QString> fieldsSetByHand(core::Database &db, qint64 publicationId);
 

@@ -47,18 +47,6 @@ QString formatForFile(const QString &name)
     return suffix;
 }
 
-// A title without its subtitle, ready to compare. A PDF's metadata often has only one or the other.
-QString mainTitleKey(const QString &title)
-{
-    return titleSortKey(title.section(u':', 0, 0));
-}
-
-// Long enough that two different works are unlikely to share it, unlike "Introduction" or "Notes".
-bool isDistinctiveTitle(const QString &key)
-{
-    return key.size() >= 12 && key.contains(u' ');
-}
-
 bool sameMainTitle(const Publication &a, const Publication &b)
 {
     const QString keyA = mainTitleKey(a.title);

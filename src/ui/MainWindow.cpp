@@ -41,6 +41,7 @@
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
 #include "ui/ReaderPair.h"
+#include "ui/ReferenceImportDialog.h"
 #include "ui/ReaderTab.h"
 #include "core/repo/SavedSearchRepository.h"
 #include "ui/SettingsDialog.h"
@@ -200,6 +201,14 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     });
     connect(m_citations, &CitationActions::message, this, [this](const QString &text) { statusBar()->showMessage(text, 8000); });
     m_transfer = new LibraryTransferActions(session, this);
+    m_references = new ReferenceImportActions(session, this);
+    connect(m_references, &ReferenceImportActions::changed, this, [this] {
+        refreshNow();
+        m_details->reload();
+    });
+    connect(m_references, &ReferenceImportActions::reviewWanted, this,
+            [this] { chooseStatus(QStringLiteral("review"), tr("Needs checking")); });
+    connect(m_references, &ReferenceImportActions::message, this, [this](const QString &text) { statusBar()->showMessage(text, 8000); });
     if (session.paths().dailyBackupDelayMs >= 0)
         QTimer::singleShot(session.paths().dailyBackupDelayMs, this, &MainWindow::startDailyBackup);
     connect(m_transfer, &LibraryTransferActions::message, this, [this](const QString &text) { statusBar()->showMessage(text, 8000); });
@@ -914,6 +923,8 @@ void MainWindow::buildMenus()
     file->addSeparator();
     file->addAction(tr("Export library..."), this, [this] { m_transfer->askAndExport(); });
     file->addAction(tr("Import library..."), this, [this] { m_transfer->askAndImport([this] { prepareForImport(); }); });
+    file->addAction(tr("Import references (BibTeX or RIS)..."), this, [this] { m_references->askAndImport(); })
+        ->setToolTip(tr("Details and tags from another reference manager's export, such as Zotero's or Mendeley's"));
     m_checkSuggestedFiles = file->addAction(tr("Check suggested files..."), this, &MainWindow::showSuggestedFiles);
     updateSuggestedFilesAction();
     file->addSeparator();
@@ -2895,18 +2906,21 @@ void MainWindow::showNewRetractions()
         if (!warnings.isEmpty())
             settings.setValue(key, double(warnings.first().foundAt));
     });
+    chooseStatus(QStringLiteral("retracted"), tr("Retracted or of concern"));
+    updateRetractionWarning();
+}
+
+void MainWindow::chooseStatus(const QString &key, const QString &label)
+{
     m_documentTabs->setCurrentIndex(0);
     SidebarChoices choices = m_sidebar->choices();
     QList<QPair<QString, QString>> &status = choices.values[FilterSidebar::Status];
-    const bool chosen = std::any_of(status.cbegin(), status.cend(), [](const QPair<QString, QString> &value) {
-        return value.first == QLatin1StringView("retracted");
-    });
+    const bool chosen = std::any_of(status.cbegin(), status.cend(), [&](const QPair<QString, QString> &value) { return value.first == key; });
     if (!chosen) {
-        status.append({QStringLiteral("retracted"), tr("Retracted or of concern")});
+        status.append({key, label});
         m_sidebar->setChoices(choices);
         applyFilters();
     }
-    updateRetractionWarning();
 }
 
 // Comes up once everything has finished, so that a large import doesn't bring up one after another. It

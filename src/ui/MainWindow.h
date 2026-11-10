@@ -62,6 +62,7 @@ class ApiKeyStore;
 class IndexThread;
 class CitationActions;
 class LibraryTransferActions;
+class ReferenceImportActions;
 class ArticleCoverThread;
 class ReviewTab;
 
@@ -223,6 +224,7 @@ public:
     // What right-clicking a document's tab offers, for tests too.
     QMenu *documentTabMenu(int tabIndex); // The caller owns it.
     QAction *goToAction() const { return m_goTo; }
+    ReferenceImportActions *referenceImports() const { return m_references; }
     // What an empty library says, for tests.
     QPushButton *welcomeImportButton() const { return m_welcomeImport; }
     QLabel *welcomePlaceLabel() const { return m_welcomePlace; }
@@ -367,6 +369,9 @@ private:
     RemovedPublicationsDialog *m_removedDialog = nullptr;
     QToolButton *m_searchHelp = nullptr;
     LibraryTransferActions *m_transfer = nullptr;
+    ReferenceImportActions *m_references = nullptr;
+    // Chooses one of the sidebar's status flags, such as those to review, on the Library tab.
+    void chooseStatus(const QString &key, const QString &label);
     QAction *m_checkSuggestedFiles = nullptr;
     QWidget *m_libraryPage = nullptr; // Always the first tab.
     ArticleCoverThread *m_articleCovers = nullptr;

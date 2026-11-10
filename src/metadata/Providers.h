@@ -36,6 +36,9 @@ extern const QString kCrossref;
 extern const QString kOpenAlex;
 extern const QString kArxiv;
 extern const QString kOpenLibrary;
+// Not online sources, but changes from them can be undone in the same way: a reference manager's export.
+extern const QString kBibTeXImport;
+extern const QString kRisImport;
 
 // Where each source is, so that tests can point them at a local server.
 struct ProviderUrls {

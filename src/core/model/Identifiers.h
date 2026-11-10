@@ -18,6 +18,11 @@ QString titleSortKey(const QString &title);
 // As above, but keeps leading words, because a family name can start with "A" or "The".
 QString nameSortKey(const QString &name);
 
+// A title without its subtitle, ready to compare. A PDF's metadata often has only one or the other.
+QString mainTitleKey(const QString &title);
+// Long enough that two different works are unlikely to share it, unlike "Introduction" or "Notes".
+bool isDistinctiveTitle(const QString &key);
+
 // Text for matching what someone types: case-folded, without accents, and with its spaces tidied.
 QString foldedText(const QString &text);
 

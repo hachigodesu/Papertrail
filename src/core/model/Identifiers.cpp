@@ -78,6 +78,16 @@ QString nameSortKey(const QString &name)
     return foldForSort(name);
 }
 
+QString mainTitleKey(const QString &title)
+{
+    return titleSortKey(title.section(u':', 0, 0));
+}
+
+bool isDistinctiveTitle(const QString &key)
+{
+    return key.size() >= 12 && key.contains(u' ');
+}
+
 QString foldedText(const QString &text)
 {
     return foldForSort(text);

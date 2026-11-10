@@ -5,6 +5,8 @@ add_library(papertrail_citation STATIC
     Exporters.h
     Formatting.cpp
     Formatting.h
+    Importers.cpp
+    Importers.h
     Styles.cpp
     Styles.h)
 

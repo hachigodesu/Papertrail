@@ -1,6 +1,7 @@
 #include "citation/CitationItem.h"
 #include "citation/Exporters.h"
 #include "citation/Formatting.h"
+#include "citation/Importers.h"
 #include "citation/Styles.h"
 
 #include <QFile>
@@ -621,6 +622,47 @@ private slots:
         QCOMPARE(ukCase.value(QStringLiteral("authority")).toString(), QStringLiteral("Court of Appeal (Civil Division)"));
         QCOMPARE(ukCase.value(QStringLiteral("container-title")).toString(), QStringLiteral("WLR"));
         QVERIFY(ukCase.value(QStringLiteral("note")).toString().contains(QStringLiteral("[2021] EWCA Civ 1234")));
+    }
+
+    // What Papertrail exports, another copy of it can import, as anything else that reads these formats would.
+    void exportsReadBackAsTheyWent_data()
+    {
+        QTest::addColumn<int>("format");
+        QTest::newRow("bibtex") << int(ExportFormat::BibTeX);
+        QTest::newRow("ris") << int(ExportFormat::Ris);
+    }
+
+    void exportsReadBackAsTheyWent()
+    {
+        QFETCH(int, format);
+        const auto chosen = ExportFormat(format);
+        using Kind = CitationItem::Kind;
+        for (const auto &[name, item] : fixtureItems()) {
+            const ParsedReferences parsed = parseReferences(exportCitations({item}, chosen));
+            QVERIFY2(parsed.problems.isEmpty(), qPrintable(name + u' ' + parsed.problems.join(u' ')));
+            QCOMPARE(parsed.entries.size(), 1);
+            const ImportedReference &back = parsed.entries.first();
+            const CitationItem again = citationItem(back.publication);
+            QVERIFY2(again.title == item.title || (item.kind == Kind::Issue && again.title == item.containerTitle),
+                     qPrintable(name + QStringLiteral(": ") + again.title));
+            QCOMPARE(again.year, item.year);
+            QCOMPARE(again.authors.size(), item.authors.size());
+            for (qsizetype i = 0; i < item.authors.size(); ++i)
+                QCOMPARE(again.authors.at(i).family, item.authors.at(i).family);
+            QCOMPARE(again.doi, item.doi);
+            QCOMPARE(back.tags, item.keywords);
+            // BibTeX has no types for these, so they come back as documents. A preprint is only ever a hint.
+            const bool noBibTeXType = item.kind == Kind::Issue || item.kind == Kind::Standard || item.kind == Kind::Preprint
+                                      || item.kind == Kind::Document || item.kind == Kind::Case;
+            if (item.kind == Kind::Preprint) {
+                QVERIFY2(back.preprintHint, qPrintable(name));
+                QCOMPARE(again.kind, Kind::Document);
+            } else if (chosen == ExportFormat::BibTeX && noBibTeXType) {
+                QCOMPARE(again.kind, Kind::Document);
+            } else {
+                QVERIFY2(again.kind == item.kind, qPrintable(name));
+            }
+        }
     }
 
     void casesAreCitedInEitherForm()
