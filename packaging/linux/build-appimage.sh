@@ -23,7 +23,7 @@ do
     [ -x "$file" ] || { curl -fsSL --retry 5 -o "$file" "https://github.com/$tool"; chmod +x "$file"; }
 done
 
-cmake -S "$src" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+cmake -S "$src" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DPAPERTRAIL_PACKAGE=ON \
     -DCMAKE_PREFIX_PATH="$qt" -DCMAKE_INSTALL_PREFIX=/usr
 cmake --build "$work/build"
 DESTDIR="$work/AppDir" cmake --install "$work/build"

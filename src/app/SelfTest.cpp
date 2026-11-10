@@ -77,7 +77,11 @@ bool runSelfTest(const QString &reportPath)
             checkDocument(report, worker, folder, QStringLiteral(":/selftest/book.epub"));
             checkDocument(report, worker, folder, QStringLiteral(":/selftest/with_text.djvu"));
 
-            // Recognising a scanned page with the English that comes with it.
+            // Recognising a scanned page with the English that comes with it, which every package must be able to.
+#ifdef PAPERTRAIL_PACKAGE
+            report.check(ui::canRecogniseText(), QStringLiteral("this package can recognise scanned text"),
+                         ui::canRecogniseText() ? QString() : QStringLiteral("it was built without Tesseract"));
+#endif
             if (ui::canRecogniseText()) {
                 const QString scan = folder.filePath(QStringLiteral("scanned_text.pdf"));
                 QFile::copy(QStringLiteral(":/selftest/scanned_text.pdf"), scan);

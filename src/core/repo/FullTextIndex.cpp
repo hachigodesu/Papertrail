@@ -75,6 +75,11 @@ void attachFullText(Database &db, const QString &path)
     db.exec("CREATE TABLE IF NOT EXISTS fulltext.recognition_wanted ("
             "  sha256 TEXT PRIMARY KEY,"
             "  wanted_at INTEGER NOT NULL) STRICT");
+    // For a document with text of its own, the pages with little or none, which may be scanned, as page numbers joined
+    // by commas, or empty if there are none. Noted once from the index by import::TextRecognition.
+    db.exec("CREATE TABLE IF NOT EXISTS fulltext.mixed_pages ("
+            "  sha256 TEXT PRIMARY KEY,"
+            "  pages TEXT NOT NULL) STRICT");
 }
 
 void FullTextIndex::forget(const QString &sha256)

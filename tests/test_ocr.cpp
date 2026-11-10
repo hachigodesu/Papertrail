@@ -259,6 +259,126 @@ private slots:
         QCOMPARE(import::TextRecognition(db, options).waitingCount(), qint64(1));
     }
 
+    void theScannedPagesOfAMixedDocumentAreRecognisedInTheBackground()
+    {
+        requireOcr();
+        using namespace core;
+        const QString docs = m_dir->filePath(QStringLiteral("docs"));
+        QDir().mkpath(docs);
+        QVERIFY(QFile::copy(sample(QStringLiteral("scanned_mixed.pdf")), QDir(docs).filePath(QStringLiteral("mixed.pdf"))));
+        const QString database = m_dir->filePath(QStringLiteral("library.db"));
+        Database db(database);
+        migrateLibrary(db);
+        attachFullText(db, fullTextPathFor(database));
+        const QString cache = m_dir->filePath(QStringLiteral("cache"));
+        {
+            FileRepository files(db);
+            const qint64 root = files.addRoot(QStringLiteral("Docs"), docs);
+            import::ImportOptions options;
+            options.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+            options.cacheDirectory = cache;
+            import::ImportService service(db, options);
+            service.scan(root);
+            service.processQueue();
+        }
+        import::FullTextOptions indexing;
+        indexing.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        indexing.cacheDirectory = cache;
+        import::FullTextIndexer(db, indexing).run();
+        auto file = db.prepare("SELECT has_text_layer, sha256 FROM file");
+        QVERIFY(file->step());
+        QCOMPARE(file->intAt(0), 1); // Three pages of its own text.
+        const QString sha256 = file->textAt(1);
+        file.reset();
+
+        PublicationFilter filter;
+        filter.searchText = QStringLiteral("deflection");
+        filter.searchContents = true;
+        QCOMPARE(LibraryQuery(db).count(filter), qint64(0)); // Only on the scanned page.
+
+        import::RecognitionOptions options;
+        options.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        options.cacheDirectory = cache;
+        options.tessdata = tessdata();
+        options.languages = QStringLiteral("eng");
+        import::TextRecognition recognition(db, options);
+        const import::RecognitionReport report = recognition.run();
+        QVERIFY2(report.problem.isEmpty(), qPrintable(report.problem));
+        QCOMPARE(report.documents, 1);
+        QCOMPARE(report.pages, 1);
+        QCOMPARE(recognition.waitingCount(), qint64(0));
+
+        // Only the scanned page was looked at, and only it has recognised words.
+        auto noted = db.prepare("SELECT pages FROM fulltext.mixed_pages WHERE sha256 = ?");
+        noted->bind(1, sha256);
+        QVERIFY(noted->step());
+        QCOMPARE(noted->textAt(0), QStringLiteral("3"));
+        noted.reset();
+        const QDir words(import::recognisedFolderFor(cache, sha256));
+        QCOMPARE(words.entryList({QStringLiteral("p*.json")}, QDir::Files), QStringList{QStringLiteral("p3.json")});
+
+        // Read into the index again, its words are found, and the file still has its own text.
+        import::FullTextIndexer(db, indexing).run();
+        QCOMPARE(LibraryQuery(db).count(filter), qint64(1));
+        file = db.prepare("SELECT has_text_layer FROM file");
+        QVERIFY(file->step());
+        QCOMPARE(file->intAt(0), 1);
+        file.reset();
+
+        // Done once, unless the languages change.
+        QCOMPARE(import::TextRecognition(db, options).run().documents, 0);
+        options.languages = QStringLiteral("eng+osd");
+        QCOMPARE(import::TextRecognition(db, options).waitingCount(), qint64(1));
+    }
+
+    void aDocumentIndexedBeforeIsLookedAtToo()
+    {
+        requireOcr();
+        using namespace core;
+        // As a library indexed by 1.3.0 is: read into the index, with nothing noted about its pages.
+        const QString docs = m_dir->filePath(QStringLiteral("docs"));
+        QDir().mkpath(docs);
+        QVERIFY(QFile::copy(sample(QStringLiteral("scanned_mixed.pdf")), QDir(docs).filePath(QStringLiteral("mixed.pdf"))));
+        QVERIFY(QFile::copy(sample(QStringLiteral("article.pdf")), QDir(docs).filePath(QStringLiteral("article.pdf"))));
+        const QString database = m_dir->filePath(QStringLiteral("library.db"));
+        Database db(database);
+        migrateLibrary(db);
+        attachFullText(db, fullTextPathFor(database));
+        const QString cache = m_dir->filePath(QStringLiteral("cache"));
+        {
+            FileRepository files(db);
+            const qint64 root = files.addRoot(QStringLiteral("Docs"), docs);
+            import::ImportOptions options;
+            options.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+            options.cacheDirectory = cache;
+            import::ImportService service(db, options);
+            service.scan(root);
+            service.processQueue();
+        }
+        import::FullTextOptions indexing;
+        indexing.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        indexing.cacheDirectory = cache;
+        import::FullTextIndexer(db, indexing).run();
+        auto none = db.prepare("SELECT count(*) FROM fulltext.mixed_pages");
+        QVERIFY(none->step());
+        QCOMPARE(none->int64At(0), qint64(0));
+        none.reset();
+
+        import::RecognitionOptions options;
+        options.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
+        options.cacheDirectory = cache;
+        options.tessdata = tessdata();
+        options.languages = QStringLiteral("eng");
+        const import::RecognitionReport report = import::TextRecognition(db, options).run();
+        QVERIFY2(report.problem.isEmpty(), qPrintable(report.problem));
+        QCOMPARE(report.pages, 1);
+        // Both were looked at once, and the article, all its own text, has nothing to recognise.
+        auto noted = db.prepare("SELECT count(*), sum(pages = '') FROM fulltext.mixed_pages");
+        QVERIFY(noted->step());
+        QCOMPARE(noted->int64At(0), qint64(2));
+        QCOMPARE(noted->int64At(1), qint64(1));
+    }
+
     void aDocumentWithItsOwnTextCanBeRecognisedInFull()
     {
         requireOcr();
@@ -427,6 +547,60 @@ private slots:
         text.setPointSize(12);
         pdf.setFont(text);
         pdf.drawText(QPoint(300, 400), QStringLiteral("Its own text, made up."));
+        pdf.end();
+    }
+
+    // Writes scanned_mixed.pdf, when asked: three pages of made-up text of its own, then a page that's only a picture of
+    // made-up text, as a scan bound into a paper would be. Run once, with a real screen's fonts.
+    void writeMixedSampleWhenAsked()
+    {
+        const QString path = qEnvironmentVariable("PAPERTRAIL_WRITE_MIXED_SAMPLE");
+        if (path.isEmpty())
+            QSKIP("Only when PAPERTRAIL_WRITE_MIXED_SAMPLE is set");
+        constexpr int kDpi = 200;
+        QImage scan(int(8.27 * kDpi), int(11.69 * kDpi), QImage::Format_Grayscale8);
+        scan.fill(255);
+        {
+            QPainter painter(&scan);
+            painter.setRenderHint(QPainter::TextAntialiasing);
+            painter.setPen(Qt::black);
+            QFont heading(QStringLiteral("Arial"));
+            heading.setPixelSize(64);
+            heading.setBold(true);
+            painter.setFont(heading);
+            painter.drawText(QPoint(160, 300), QStringLiteral("Appendix: Made-Up Beams"));
+            QFont body(QStringLiteral("Arial"));
+            body.setPixelSize(40);
+            painter.setFont(body);
+            const QStringList lines = {QStringLiteral("A made-up beam bends under a made-up load."),
+                                       QStringLiteral("The deflection grows with the cube of its length."),
+                                       QStringLiteral("Nothing here is real, and it is only for testing.")};
+            for (int i = 0; i < lines.size(); ++i)
+                painter.drawText(QPoint(160, 420 + i * 64), lines.at(i));
+        }
+        QPdfWriter writer(path);
+        writer.setPageSize(QPageSize(QPageSize::A4));
+        writer.setResolution(kDpi);
+        writer.setPageMargins(QMarginsF(0, 0, 0, 0));
+        writer.setCreator(QStringLiteral("Papertrail tests"));
+        QPainter pdf(&writer);
+        QFont text(QStringLiteral("Arial"));
+        text.setPointSize(12);
+        pdf.setFont(text);
+        const QStringList paragraphs = {
+            QStringLiteral("This made-up paper is about steel, concrete and timber, and none of it is real."),
+            QStringLiteral("Its pages have text of their own, as most papers do, so they are searched as they are."),
+            QStringLiteral("Only its last page is a picture of words, which has to be recognised before it is searched."),
+        };
+        for (int page = 0; page < 3; ++page) {
+            if (page > 0)
+                writer.newPage();
+            pdf.drawText(QPoint(300, 400), QStringLiteral("Page %1 of a made-up paper").arg(page + 1));
+            for (int i = 0; i < paragraphs.size(); ++i)
+                pdf.drawText(QPoint(300, 600 + i * 120), paragraphs.at(i));
+        }
+        writer.newPage();
+        pdf.drawImage(QRect(0, 0, writer.width(), writer.height()), scan);
         pdf.end();
     }
 

@@ -27,8 +27,10 @@ struct RecognitionReport {
     QString problem; // Such as a language that's missing, which stops the run.
 };
 
-// Recognises the words on the pages of scanned documents, those whose files have no text of their own, a page at a
-// time through the worker, at the worker's low priority. Where it's got to is kept beside the full-text index, so
+// Recognises the words on the pages of scanned documents, those whose files have no text of their own, and the pages
+// of other documents with little or no text of their own, which may be scanned among the rest, a page at a time
+// through the worker, at the worker's low priority. Which pages of a document with its own text to look at is noted
+// once from the full-text index (fulltext.mixed_pages), and the worker's looksScanned decides which of them are scans. Where it's got to is kept beside the full-text index, so
 // stopping is safe and it carries on where it left off. A document with pages recognised is read into the index
 // again, with its words. The database connection needs the index attached.
 //
@@ -51,6 +53,9 @@ public:
     static bool isWanted(core::Database &db, const QString &sha256);
 
 private:
+    // Notes, for each document with text of its own read into the index in full, which pages have little or none.
+    void noteMixedPages();
+
     core::Database &m_db;
     RecognitionOptions m_options;
 };

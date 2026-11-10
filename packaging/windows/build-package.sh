@@ -22,9 +22,9 @@ mkdir -p "$out"
 
 if [ -n "${PAPERTRAIL_CONFIGURE_WITHOUT_PRESET:-}" ]; then
     # CI's MSYS2 isn't at C:/msys64, which the preset names.
-    cmake -S "$src" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+    cmake -S "$src" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DPAPERTRAIL_PACKAGE=ON
 else
-    cmake --preset windows-release -B "$build" -DBUILD_TESTING=OFF
+    cmake --preset windows-release -B "$build" -DBUILD_TESTING=OFF -DPAPERTRAIL_PACKAGE=ON
 fi
 cmake --build "$build"
 version="$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' "$build/CMakeCache.txt")"

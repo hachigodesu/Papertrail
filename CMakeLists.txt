@@ -41,6 +41,8 @@ add_compile_definitions(PAPERTRAIL_SOURCE_URL="${PAPERTRAIL_SOURCE_URL}")
 install(FILES LICENSE packaging/THIRD-PARTY.md DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/papertrail)
 # Declared before anything uses it, since a first configure has nothing in its cache yet.
 option(PAPERTRAIL_WITH_OCR "Recognise text in scanned pages with Tesseract" ON)
+# A package to give out, whose self-test fails if anything optional, such as recognising text, isn't in it.
+option(PAPERTRAIL_PACKAGE "Build a package, whose self-test requires every optional feature" OFF)
 
 # English, for recognising text, found beside the program by ui::bundledTessdata.
 if(PAPERTRAIL_WITH_OCR)

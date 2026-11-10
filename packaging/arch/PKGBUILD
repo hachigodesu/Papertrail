@@ -41,6 +41,7 @@ build() {
         -DCMAKE_BUILD_TYPE=None \
         -DCMAKE_INSTALL_PREFIX=/usr \
         -DBUILD_TESTING=OFF \
+        -DPAPERTRAIL_PACKAGE=ON \
         -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
         -DFETCHCONTENT_SOURCE_DIR_SQLITE="$srcdir/deps/sqlite" \
         -DFETCHCONTENT_SOURCE_DIR_LIBMOBI="$srcdir/deps/libmobi" \

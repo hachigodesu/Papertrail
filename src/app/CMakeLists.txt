@@ -11,6 +11,9 @@ target_link_libraries(papertrail PRIVATE papertrail_ui Qt6::Network)
 add_dependencies(papertrail papertrail-worker)
 target_compile_definitions(papertrail PRIVATE
     PAPERTRAIL_VERSION="${PROJECT_VERSION}")
+if(PAPERTRAIL_PACKAGE)
+    target_compile_definitions(papertrail PRIVATE PAPERTRAIL_PACKAGE)
+endif()
 
 # The window's icon, drawn by packaging/make_icons.py.
 qt_add_resources(papertrail icons
