@@ -71,6 +71,8 @@ add_library(papertrail_ui STATIC
     ApiKeyStore.h
     KeyField.cpp
     KeyField.h
+    LibraryCheckDialog.cpp
+    LibraryCheckDialog.h
     SummaryDialog.cpp
     SummaryDialog.h
     VolumeDialogs.cpp

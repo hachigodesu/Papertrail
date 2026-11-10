@@ -814,6 +814,20 @@ END;
 //
 // Related papers are only a copy of what OpenAlex said, kept so the list opens again without asking. `record` is the
 // paper's details as JSON.
+// Publications the user has said aren't the same work, though they share an identifier, so checking the library
+// doesn't offer to combine them again. Pairs by id, smaller first, gone with either.
+const char *const kMigration22 = R"sql(
+CREATE TABLE IF NOT EXISTS distinct_publications (
+    first_id    INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    second_id   INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (first_id, second_id),
+    CHECK (first_id < second_id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS distinct_publications_second ON distinct_publications(second_id);
+CREATE INDEX IF NOT EXISTS publication_pmid ON publication(pmid);
+)sql";
+
 const char *const kMigration21 = R"sql(
 CREATE TABLE IF NOT EXISTS bookmark (
     id              INTEGER PRIMARY KEY,
@@ -919,6 +933,7 @@ const std::vector<Migration> &libraryMigrations()
         {19, kMigration19},
         {20, nullptr, addCaseLaw, true},
         {21, kMigration21},
+        {22, kMigration22},
     };
     return migrations;
 }

@@ -21,6 +21,7 @@
 #include "ui/Labels.h"
 #include "ui/LibraryFoldersDialog.h"
 #include "ui/LibrarySession.h"
+#include "ui/LibraryCheckDialog.h"
 #include "ui/LookupThread.h"
 #include "ui/OnlineLookupDialog.h"
 #include "core/repo/VolumeArticles.h"
@@ -838,15 +839,7 @@ void MainWindow::buildCentre()
     connect(m_details, &DetailsPanel::summarizeRequested, this, &MainWindow::showSummaryDialog);
     connect(m_details, &DetailsPanel::relatedRequested, this, &MainWindow::showRelatedPapers);
     connect(m_details, &DetailsPanel::summariesRequested, this, [this](qint64 id) { showSummariesDialog(id); });
-    connect(m_details, &DetailsPanel::findFileRequested, this, [this](qint64 id) {
-        QString start;
-        const QList<LibraryRoot> roots = m_session.files().roots();
-        if (!roots.isEmpty())
-            start = roots.first().path;
-        const QString path = QFileDialog::getOpenFileName(this, tr("Find its file"), start);
-        if (!path.isEmpty())
-            linkFileByHand(id, path);
-    });
+    connect(m_details, &DetailsPanel::findFileRequested, this, &MainWindow::findFileFor);
     connect(m_details, &DetailsPanel::citeMenuRequested, this, [this](QMenu *menu, qint64 id) {
         bool isCase = false;
         guarded(tr("Reading the publication"), [&] {
@@ -1023,6 +1016,8 @@ void MainWindow::buildMenus()
         ->setToolTip(tr("Details and tags from another reference manager's export, such as Zotero's or Mendeley's"));
     m_checkSuggestedFiles = file->addAction(tr("Check suggested files..."), this, &MainWindow::showSuggestedFiles);
     updateSuggestedFilesAction();
+    file->addAction(tr("Check the &library..."), this, &MainWindow::showLibraryCheck)
+        ->setToolTip(tr("Missing and unreadable files, publications waiting for files, and identifiers shared by two"));
     file->addSeparator();
     file->addAction(tr("&Backups..."), this, &MainWindow::showBackupsDialog);
     file->addAction(tr("Look up details for the whole library..."), this, &MainWindow::askAndLookUpLibrary);
@@ -2916,10 +2911,56 @@ void MainWindow::askToAddSelectedToNewCollection()
     });
 }
 
+void MainWindow::findFileFor(qint64 id)
+{
+    QString start;
+    const QList<LibraryRoot> roots = m_session.files().roots();
+    if (!roots.isEmpty())
+        start = roots.first().path;
+    const QString path = QFileDialog::getOpenFileName(this, tr("Find its file"), start);
+    if (!path.isEmpty())
+        linkFileByHand(id, path);
+}
+
+LibraryCheckDialog *MainWindow::libraryCheck() const
+{
+    return qobject_cast<LibraryCheckDialog *>(m_libraryCheck.data());
+}
+
+void MainWindow::showLibraryCheck()
+{
+    if (LibraryCheckDialog *open = libraryCheck()) {
+        open->raise();
+        open->activateWindow();
+        open->recheck();
+        return;
+    }
+    auto *dialog = new LibraryCheckDialog(m_session, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_libraryCheck = dialog;
+    connect(dialog, &LibraryCheckDialog::findFileRequested, this, &MainWindow::findFileFor);
+    connect(dialog, &LibraryCheckDialog::scanRequested, this, &MainWindow::rescanAll);
+    connect(dialog, &LibraryCheckDialog::suggestedFilesRequested, this, &MainWindow::showSuggestedFiles);
+    connect(dialog, &LibraryCheckDialog::removeRequested, this, &MainWindow::removePublications);
+    connect(dialog, &LibraryCheckDialog::deleteDetailsRequested, this, [this](const QList<qint64> &ids) {
+        deletePublications(ids);
+        afterFoldersChanged();
+    });
+    connect(dialog, &LibraryCheckDialog::combineRequested, this, &MainWindow::combinePublications);
+    connect(dialog, &LibraryCheckDialog::showRequested, this, [this](qint64 id) { m_details->showPublication(id); });
+    connect(dialog, &LibraryCheckDialog::showInFolderRequested, this, &MainWindow::showPublicationInFolder);
+    connect(dialog, &LibraryCheckDialog::libraryChanged, this, &MainWindow::refreshNow);
+    dialog->show();
+}
+
 void MainWindow::combineSelected()
 {
+    combinePublications(selectedIds());
+}
+
+void MainWindow::combinePublications(const QList<qint64> &ids)
+{
     guarded(tr("Combining the publications"), [&] {
-        const QList<qint64> ids = selectedIds();
         if (ids.size() < 2)
             return;
         Transaction transaction(m_session.database());

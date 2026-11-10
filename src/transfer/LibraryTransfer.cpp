@@ -416,6 +416,18 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
         });
     report.bookmarks = bookmarkArray.size();
 
+    // Pairs said not to be the same work, though they share an identifier, so checking doesn't offer them again.
+    const QJsonArray distinctArray = rows(
+        db,
+        "SELECT a.uuid, b.uuid, d.created_at FROM distinct_publications d JOIN publication a ON a.id = d.first_id "
+        "JOIN publication b ON b.id = d.second_id WHERE " PAPERTRAIL_IN_LIBRARY("a") " AND " PAPERTRAIL_IN_LIBRARY("b")
+        " ORDER BY d.first_id, d.second_id",
+        [](Statement &s) {
+            return QJsonObject{{QStringLiteral("first"), s.textAt(0)},
+                               {QStringLiteral("second"), s.textAt(1)},
+                               {QStringLiteral("createdAt"), double(s.int64At(2))}};
+        });
+
     const QJsonArray readingArray = rows(
         db,
         "SELECT p.uuid, r.location, r.zoom, r.last_opened FROM reading_state r JOIN publication p ON p.id = r.publication_id "
@@ -500,6 +512,7 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
     zip.add(QStringLiteral("saved_searches.json"), json(savedSearchArray));
     zip.add(QStringLiteral("annotations.json"), json(annotationArray));
     zip.add(QStringLiteral("bookmarks.json"), json(bookmarkArray));
+    zip.add(QStringLiteral("distinct.json"), json(distinctArray));
     zip.add(QStringLiteral("reading.json"), json(readingArray));
     zip.add(QStringLiteral("provenance.json"), json(provenanceArray));
     zip.add(QStringLiteral("summaries.json"), json(summaryArray));
@@ -573,6 +586,8 @@ std::optional<Bundle> readBundle(const QByteArray &data, QString *error)
     // Later parts, which an earlier export doesn't have.
     if (zip.contains(QStringLiteral("bookmarks.json")) && !array(QStringLiteral("bookmarks.json"), bundle.bookmarks))
         return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
+    if (zip.contains(QStringLiteral("distinct.json")) && !array(QStringLiteral("distinct.json"), bundle.distinctPublications))
+        return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
     if (zip.contains(QStringLiteral("settings.json"))) {
         const std::optional<QByteArray> part = zip.read(QStringLiteral("settings.json"));
         if (!part)
@@ -626,6 +641,7 @@ public:
         if (m_options.parts.details) {
             importProvenance();
             importSummaries();
+            importDistinct();
         }
         if (m_options.parts.settings)
             m_report.settings = core::SettingsStore(m_db).importAll(m_bundle.settings);
@@ -1121,6 +1137,24 @@ private:
         }
     }
 
+    // ---- Pairs said not to be the same work. Only adds, and only where both are here.
+    void importDistinct()
+    {
+        auto insert = m_db.prepare("INSERT OR IGNORE INTO distinct_publications (first_id, second_id, created_at) VALUES (?, ?, ?)");
+        for (const QJsonValue &value : m_bundle.distinctPublications) {
+            const QJsonObject pair = value.toObject();
+            const std::optional<qint64> first = localPublication(pair.value(QStringLiteral("first")).toString());
+            const std::optional<qint64> second = localPublication(pair.value(QStringLiteral("second")).toString());
+            if (!first || !second || *first == *second)
+                continue;
+            insert->reset();
+            insert->bind(1, qMin(*first, *second));
+            insert->bind(2, qMax(*first, *second));
+            insert->bind(3, int64Value(pair.value(QStringLiteral("createdAt"))));
+            insert->step();
+        }
+    }
+
     // ---- Bookmarks, matched by uuid like highlights, and the later change wins.
     void importBookmarks()
     {
@@ -1329,6 +1363,7 @@ void clearLibrary(Database &db)
     db.exec("DELETE FROM publication_summary");
     db.exec("DELETE FROM annotation");
     db.exec("DELETE FROM bookmark");
+    db.exec("DELETE FROM distinct_publications");
     db.exec("DELETE FROM reading_state");
     db.exec("DELETE FROM metadata_provenance");
     db.exec("DELETE FROM publication_tag");

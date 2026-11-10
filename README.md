@@ -201,6 +201,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Edit any detail,** with the fields that suit each kind of publication and suggestions from the rest of your library.
 - **Import references** from Zotero, Mendeley, JabRef, EndNote or anything else that exports BibTeX or RIS, with **File > Import references...**. Each entry is matched to your publications by its file, DOI, ISBN, arXiv number or title, and brings its details, tags and notes. You see what will happen first, and details you've set yourself are never changed.
 - **Journal issues and books split into articles and chapters,** from their table of contents or, for an issue without one, from the DOIs on its pages. Each article opens at its own pages, is searched, tagged and cited on its own, and follows its issue into collections. Right-click an issue and choose **Show its articles** to list them in the library, in the order they're in it.
+- **Checking the library:** **File > Check the library...** lists files that are missing or can't be read, publications waiting for their files, files in no publication, and publications sharing a DOI, ISBN or arXiv number, with a fix for each, such as finding a file, reading one again, combining two, or saying they aren't the same.
 - **Related papers:** what a publication cites, and the most cited papers citing it, from OpenAlex, with those already in your library marked and the others ready to add without a file.
 
 ### Reading

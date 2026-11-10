@@ -12,6 +12,7 @@
 #include "core/query/LibraryQuery.h"
 #include "core/repo/CollectionRepository.h"
 #include "core/repo/FullTextIndex.h"
+#include "core/repo/LibraryCheck.h"
 #include "core/repo/TagRepository.h"
 
 #include <QElapsedTimer>
@@ -303,6 +304,20 @@ private slots:
         collections.remove(id);
         if (!reportOnly())
             QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(", "))));
+    }
+
+    void checkingTheLibraryIsQuickEnough()
+    {
+        // It runs on a thread of its own, so the window never waits, but it shouldn't keep anyone waiting either.
+        constexpr double kTargetMs = 1000;
+        m_out << "Checking the library (target " << kTargetMs << " ms)\n";
+        LibraryCheckResult result;
+        const double ms = medianMs([&] { result = checkLibrary(*m_db); });
+        report("check the library", ms, kTargetMs);
+        m_out << "  found " << result.problems() << " things\n\n";
+        m_out.flush();
+        if (!reportOnly())
+            QVERIFY2(ms <= kTargetMs, qPrintable(QStringLiteral("%1 ms").arg(ms)));
     }
 
     void hiddenPublicationsDontSlowResults()

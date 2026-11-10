@@ -14,6 +14,8 @@
 #include "ui/GridView.h"
 #include "ui/ImportThread.h"
 #include "ui/Labels.h"
+#include "core/repo/LibraryCheck.h"
+#include "ui/LibraryCheckDialog.h"
 #include "ui/LibrarySession.h"
 #include "ui/LibraryFoldersDialog.h"
 #include "ui/MainWindow.h"
@@ -123,6 +125,70 @@ private slots:
         m_window.reset();
         m_session.reset();
         m_dir.reset();
+    }
+
+    // ---- Checking the library ----
+
+    void checkingTheLibraryOffersToCombineOrKeepApart()
+    {
+        PublicationRepository &publications = m_session->publications();
+        Publication a;
+        a.title = QStringLiteral("A Made-Up Study");
+        a.doi = QStringLiteral("10.1000/made.up.twice");
+        const qint64 first = publications.create(a);
+        Publication b;
+        b.title = QStringLiteral("A Made-Up Study Entered Twice");
+        b.doi = a.doi;
+        const qint64 second = publications.create(b);
+        Publication c;
+        c.title = QStringLiteral("Another Made-Up Study");
+        c.doi = QStringLiteral("10.1000/made.up.apart");
+        const qint64 third = publications.create(c);
+        Publication d;
+        d.title = QStringLiteral("A Different Study With The Same DOI");
+        d.doi = c.doi;
+        const qint64 fourth = publications.create(d);
+        openWindow();
+
+        m_window->showLibraryCheck();
+        LibraryCheckDialog *check = m_window->libraryCheck();
+        QVERIFY(check);
+        QTRY_VERIFY_WITH_TIMEOUT(!check->isChecking() && check->result().shared.size() == 2, kLongWaitMs);
+        QCOMPARE(check->list()->topLevelItemCount(), 5);
+        QTreeWidgetItem *sharedSection = check->list()->topLevelItem(4);
+        QCOMPARE(sharedSection->childCount(), 2);
+
+        // Two that differ are said to, and aren't offered again.
+        QTreeWidgetItem *apart = nullptr;
+        QTreeWidgetItem *twice = nullptr;
+        for (int i = 0; i < sharedSection->childCount(); ++i)
+            (sharedSection->child(i)->text(0).contains(QStringLiteral("apart")) ? apart : twice) = sharedSection->child(i);
+        QVERIFY(apart && twice);
+        check->list()->setCurrentItem(apart);
+        QVERIFY(check->button(QStringLiteral("notSame"))->isVisibleTo(check));
+        QVERIFY(!check->button(QStringLiteral("findFile"))->isVisibleTo(check));
+        check->button(QStringLiteral("notSame"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(!check->isChecking() && check->result().shared.size() == 1, kLongWaitMs);
+        QVERIFY(areDistinct(m_session->database(), third, fourth));
+
+        // The others are combined, once that's confirmed.
+        m_boxWatcher->stop();
+        QString asked;
+        QTimer::singleShot(100, this, [&] {
+            auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            QVERIFY(box);
+            asked = box->text();
+            QCOMPARE(box->textFormat(), Qt::PlainText);
+            box->findChild<QPushButton *>(QStringLiteral("confirm"))->click();
+        });
+        sharedSection = check->list()->topLevelItem(4);
+        check->list()->setCurrentItem(sharedSection->child(0));
+        check->button(QStringLiteral("combine"))->click();
+        m_boxWatcher->start(100);
+        QVERIFY2(asked.contains(QStringLiteral("A Made-Up Study")), qPrintable(asked));
+        QTRY_VERIFY_WITH_TIMEOUT(!check->isChecking() && check->result().shared.isEmpty(), kLongWaitMs);
+        QCOMPARE(publications.get(first).has_value() + publications.get(second).has_value(), 1);
+        check->close();
     }
 
     // ---- The list ----

@@ -18,6 +18,8 @@ add_library(papertrail_core STATIC
     query/SearchParser.h
     repo/FileRepository.cpp
     repo/FileRepository.h
+    repo/LibraryCheck.cpp
+    repo/LibraryCheck.h
     repo/LookupRepository.cpp
     repo/LookupRepository.h
     repo/NoticeRepository.cpp

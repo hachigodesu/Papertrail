@@ -146,3 +146,9 @@ What its tests can't vouch for. The packages are on the release's page.
 - **Settings > Scanned documents:** turning it off stops it, and on again carries on. Choosing a language that isn't here asks before fetching it, says how large it is, and the language is ticked once it's arrived. With lookups offline it says it can't. Choosing another language recognises scanned documents again with it.
 - **How busy the computer is** while a large scanned book is recognised: the window stays responsive, and other programs aren't slowed much.
 - **Packages:** the installer, the portable zip, the AppImage and the Flatpak each recognise a scanned page, and their self-test says so. The licences folder has Tesseract's, Leptonica's and the English model's.
+
+## For 1.4.0
+
+- **An OpenAlex key:** a free key from openalex.org, saved under **Settings > Online lookups**, is used for lookups and related papers, and a wrong one is reported in the status bar and dropped for the session. The key isn't in an export, and isn't shown again once saved.
+- **Court cases:** **Look up details** on a real UK judgment you've chosen fills in its court and date from Find Case Law, but importing one, or looking up the whole library, never asks Find Case Law. An EU judgment with its case number or ECLI is filled in from EUR-Lex. With a CourtListener token, a US case with its law report is filled in, and with a CanLII key, a Canadian case with its neutral citation. A case is never changed into a paper by a lookup, and a paper never into a case.
+- **Checking the library:** **File > Check the library...** on a real library lists what needs attention, a moment after it opens, and each fix does what it says: a missing file found again, an unreadable one read again, two copies of a paper combined, two different works said not to be the same and left out next time. The window stays responsive while it checks.

@@ -59,6 +59,7 @@ struct Bundle {
     QJsonArray provenance;
     QJsonArray summaries;
     QJsonArray removed; // Files of publications removed by hand, by contents, so they stay out here too.
+    QJsonArray distinctPublications; // From 1.4.0 on: pairs said not to be the same work, by uuid.
     QJsonObject settings;
 };
 

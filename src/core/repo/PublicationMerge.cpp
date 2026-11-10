@@ -89,6 +89,10 @@ void mergePublications(Database &db, qint64 keepId, qint64 otherId, const QStrin
     move("UPDATE bookmark SET publication_id = ?1 WHERE publication_id = ?2");
     move("UPDATE metadata_provenance SET publication_id = ?1 WHERE publication_id = ?2");
     move("UPDATE publication SET parent_id = ?1 WHERE parent_id = ?2");
+    // Said to differ from something else, so is the one kept. The pair of these two goes with the other.
+    move("INSERT OR IGNORE INTO distinct_publications (first_id, second_id, created_at) "
+         "SELECT min(?1, other), max(?1, other), created_at FROM (SELECT CASE WHEN first_id = ?2 THEN second_id ELSE first_id END "
+         "AS other, created_at FROM distinct_publications WHERE ?2 IN (first_id, second_id)) WHERE other <> ?1");
 
     publications.recordProvenance(keepId, {QStringLiteral("merged"), source, std::nullopt, other->title, keep->title, 0});
     publications.remove(otherId);

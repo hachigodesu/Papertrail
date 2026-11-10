@@ -162,6 +162,13 @@ public:
 
     // Makes everything selected into one publication.
     void combineSelected();
+    // Combines these into the first.
+    void combinePublications(const QList<qint64> &ids);
+    // Asks where a publication's file is, and links it.
+    void findFileFor(qint64 publicationId);
+    // File > Check the library. Open until closed; see libraryCheck().
+    void showLibraryCheck();
+    class LibraryCheckDialog *libraryCheck() const;
 
     // Changes for everything selected, in the background like the others.
     void addSelectedToCollection(qint64 id);
@@ -402,6 +409,7 @@ private:
     QAction *m_checkSuggestedFiles = nullptr;
     QWidget *m_libraryPage = nullptr; // Always the first tab.
     ArticleCoverThread *m_articleCovers = nullptr;
+    QPointer<QDialog> m_libraryCheck; // A LibraryCheckDialog.
     std::unique_ptr<ApiKeyStore> m_keys;
     std::unique_ptr<ApiKeyStore> m_openAlexKeys;
     std::unique_ptr<ApiKeyStore> m_courtListenerKeys;

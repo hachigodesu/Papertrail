@@ -642,6 +642,39 @@ private slots:
         QCOMPARE(to.text("SELECT label FROM bookmark"), QStringLiteral("A made-up bookmark"));
     }
 
+    void anExportWithPairsSaidToDifferStillImports()
+    {
+        // Made once by 1.4.0, the first to keep them, and kept for the same reason.
+        QString error;
+        const std::optional<Bundle> bundle
+            = readBundleFile(QStringLiteral(PAPERTRAIL_TEST_FIXTURES "/transfer/library-v1-distinct.papertrail"), &error);
+        QVERIFY2(bundle, qPrintable(error));
+        QCOMPARE(bundle->distinctPublications.size(), 1);
+        Library to;
+        for (qsizetype i = 0; i < kSamples.size(); ++i)
+            to.put(kSamples.at(i), QStringLiteral("Anywhere/%1").arg(i) + u'.' + QFileInfo(kSamples.at(i)).suffix());
+        importBundle(*to.db, *bundle, {});
+        to.scan();
+        QCOMPARE(to.scalar("SELECT count(*) FROM distinct_publications"), qint64(1));
+        // Importing it again adds nothing more.
+        importBundle(*to.db, *bundle, {});
+        QCOMPARE(to.scalar("SELECT count(*) FROM distinct_publications"), qint64(1));
+    }
+
+    void pairsSaidToDifferGoWithTheLibrary()
+    {
+        ExportReport report;
+        QString error;
+        const std::optional<Bundle> bundle = readBundle(buildBundle(*m_from->db, report), &error);
+        QVERIFY2(bundle, qPrintable(error));
+        QCOMPARE(bundle->distinctPublications.size(), 1);
+        Library to;
+        importBundle(*to.db, *bundle, {});
+        QCOMPARE(to.scalar("SELECT count(*) FROM distinct_publications"), qint64(1));
+        QCOMPARE(to.scalar("SELECT count(*) FROM distinct_publications d JOIN publication a ON a.id = d.first_id "
+                           "JOIN publication b ON b.id = d.second_id WHERE a.uuid <> b.uuid"), qint64(1));
+    }
+
     // Writes the fixture above, when asked. Only run by hand, when the format changes in a new version.
     void writeFixtureWhenAsked()
     {
@@ -706,6 +739,11 @@ private:
         bookmark->bind(1, volume);
         bookmark->bind(2, volumeHash);
         bookmark->step();
+        // Said not to be the same work, as checking the library might have offered.
+        auto distinct = db.prepare("INSERT INTO distinct_publications (first_id, second_id, created_at) VALUES (?, ?, 7)");
+        distinct->bind(1, qMin(article, book));
+        distinct->bind(2, qMax(article, book));
+        distinct->step();
         auto place = db.prepare("INSERT INTO reading_state (publication_id, location, zoom, last_opened) VALUES (?, '{\"pdf\":{\"page\":3}}', 1.5, 5)");
         place->bind(1, volume);
         place->step();

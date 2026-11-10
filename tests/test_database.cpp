@@ -352,9 +352,9 @@ private slots:
         migrateLibrary(db);
         QCOMPARE(db.userVersion(), all.back().version);
         QCOMPARE(everything(), before);
-        // Later migrations add sorting indexes of their own.
+        // Later migrations add indexes of their own: for sorting by rating, and for PubMed ids.
         QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'index' "
-                       "AND name NOT LIKE '%rating%'"),
+                       "AND name NOT LIKE '%rating%' AND name <> 'publication_pmid'"),
                  indexes);
         QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'trigger'"), triggers);
         QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE name = 'publication_new'"), qint64(0));
@@ -405,12 +405,12 @@ private slots:
     {
         Database db(path());
         const std::vector<Migration> &all = libraryMigrations();
-        QCOMPARE(all.back().version, 21);
-        migrate(db, std::vector<Migration>(all.begin(), all.end() - 1));
+        QCOMPARE(all.back().version, 22);
+        migrate(db, std::vector<Migration>(all.begin(), all.end() - 2));
         db.exec("INSERT INTO publication (id, uuid, type, title, rating, title_sort, created_at, updated_at) VALUES "
                 "(1, 'u1', 'book', 'A Made-Up Book', 4, 'a made-up book', 1, 1)");
         migrateLibrary(db);
-        QCOMPARE(db.userVersion(), 21);
+        QCOMPARE(db.userVersion(), 22);
         const auto count = [&](const char *sql) {
             auto select = db.prepare(sql);
             select->step();
@@ -440,6 +440,36 @@ private slots:
         QCOMPARE(count("SELECT count(*) FROM bookmark"), qint64(0));
         QCOMPARE(count("SELECT count(*) FROM related_fetch"), qint64(0));
         QCOMPARE(count("SELECT count(*) FROM related_work"), qint64(0));
+    }
+
+    void publicationsSaidToDifferAreKeptAndCanBeAddedAgain()
+    {
+        Database db(path());
+        const std::vector<Migration> &all = libraryMigrations();
+        migrate(db, std::vector<Migration>(all.begin(), all.end() - 1));
+        for (int id = 1; id <= 3; ++id) {
+            db.exec(QStringLiteral("INSERT INTO publication (id, uuid, type, title, title_sort, created_at, updated_at) VALUES "
+                                   "(%1, 'u%1', 'book', 'A Made-Up Book', 'a made-up book', 1, 1)").arg(id).toUtf8().constData());
+        }
+        migrateLibrary(db);
+        QCOMPARE(db.userVersion(), 22);
+        const auto count = [&](const char *sql) {
+            auto select = db.prepare(sql);
+            select->step();
+            return select->int64At(0);
+        };
+        db.exec("INSERT INTO distinct_publications (first_id, second_id, created_at) VALUES (1, 2, 5), (2, 3, 5)");
+        QVERIFY_THROWS_EXCEPTION(DbError, db.exec("INSERT INTO distinct_publications (first_id, second_id, created_at) VALUES (3, 1, 5)"));
+
+        // Running it again keeps what's there.
+        db.setUserVersion(21);
+        migrateLibrary(db);
+        QCOMPARE(count("SELECT count(*) FROM distinct_publications"), qint64(2));
+        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE name = 'publication_pmid'"), qint64(1));
+
+        // A pair goes with either of them.
+        db.exec("DELETE FROM publication WHERE id = 3");
+        QCOMPARE(count("SELECT count(*) FROM distinct_publications"), qint64(1));
     }
 
     void anUpgradeIsBackedUpFirst()
