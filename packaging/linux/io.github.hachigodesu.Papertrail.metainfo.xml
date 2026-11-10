@@ -59,6 +59,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.1.0" date="2026-11-10">
+      <description>
+        <p>Smart Jump to the figures, tables, equations and references a document mentions, its contents at Ctrl+G, two documents side by side, areas of a page kept as highlights, case law cited in the Bluebook's or OSCOLA's form, references imported from BibTeX and RIS, and new retractions pointed out.</p>
+      </description>
+    </release>
     <release version="1.0.2" date="2026-11-10">
       <description>
         <p>Saved searches, a Settings window with a light or dark theme, pictures left in their colours on dark pages, and retracted publications marked on their covers.</p>

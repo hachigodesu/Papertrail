@@ -88,3 +88,25 @@ What its tests can't vouch for. The packages are on the release's page.
 - **Upgrading:** opening a library from 1.0.1 adds saved searches to it, after a backup in its `backups` folder. 1.0.1 can't open it afterwards.
 - **Windows 11's style,** which draws selected rows itself, in the Notes and Articles lists.
 - **Theme switching on a Linux desktop,** KDE or GNOME on Wayland.
+
+## For 1.1.0
+
+What its tests can't vouch for. The packages are on the release's page.
+
+**Reader**
+
+- **Smart Jump:** in real papers, Ctrl+clicking figures, tables, equations, sections and numbered and author-year citations previews the right thing, and the preview fits on the screen near the click. The pointing hand shows while Ctrl is held. A reference to something the paper doesn't have says so in the status bar. A large book answers within a couple of seconds.
+- **Contents (Ctrl+G):** the popup appears over the page, starts at the section being read, and finds entries in a long book's contents as you type. Escape and a click elsewhere close it.
+- **Side by side:** opening beside from the library and from a tab's menu, the same document twice, closing either side with its ×, and Separate. Ctrl+F and Ctrl+G go to the side last clicked. Both sides scroll smoothly, and memory stays reasonable with two long documents.
+- **Areas:** Shift and a drag, and **Mark an area**, on a PDF and a DjVu file. The outline shows in each page colour, the Notes panel's picture is a sensible size, **Copy picture** pastes into a word processor, and a marked copy opened in another PDF reader shows a rectangle. An EPUB says areas need fixed pages.
+
+**Library**
+
+- **Retractions:** with lookups on, a new retraction brings up the message once, while you're in the library rather than reading. The status bar's count stays after a restart, and clicking it shows them.
+- **Case law:** a real judgment from the UK and one from the US are recognised on import and marked for review, with sensible names, courts and citations. Switching **Cite as** in the editor changes the copied reference. A summary from Claude of each reads as a brief.
+- **Import references:** a real Zotero, Mendeley or EndNote export, with accents and attached files. The preview's counts look right, and the import changes what you'd expect. Undo from the details panel takes an entry's changes back. Folders outside the library are named in the preview.
+
+**Elsewhere**
+
+- **Upgrading:** opening a library from 1.0.2 adds case law to it, after a backup in its `backups` folder, keeping every publication, file, tag, collection, highlight and note. 1.0.2 can't open it afterwards.
+- **The release:** the tag's workflow takes each package from the commit's own CI runs rather than building them again.

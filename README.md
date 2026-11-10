@@ -174,7 +174,7 @@ Moving from another computer? Choose **Import a library from another computer...
 
 - **Indexes files where they are,** in any number of folders, including on other drives. Folders are watched for new and changed files, and scanned again when Papertrail opens.
 - **Formats:** PDF, EPUB, DjVu, MOBI, AZW3 (Kindle KF8), XPS, CBZ and FB2.
-- **Kinds of publication,** each with its own tab: journal issues, journal articles, preprints, conference papers and proceedings, textbooks and books, theses and dissertations, technical reports, standards, and others.
+- **Kinds of publication,** each with its own tab: journal issues, journal articles, preprints, conference papers and proceedings, textbooks and books, theses and dissertations, technical reports, standards, case law, and others.
 - **Details from your files:** titles, authors, DOIs, ISBNs and arXiv numbers are read from each document's metadata and first pages, and its kind is worked out from its first page. Anything guessed is marked for you to check.
 - **Duplicates join up:** the same file in two folders is one publication with two locations, matched by its contents. Another format of the same work, such as a PDF and an EPUB, can join it too, and be separated again.
 - **Covers** from each document's first page.
@@ -199,13 +199,16 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Changes to many at once:** tag, add to a collection, set read status, look up details, cite, or summarise a whole selection.
 - **Read status, rating and personal notes** for each publication.
 - **Edit any detail,** with the fields that suit each kind of publication and suggestions from the rest of your library.
+- **Import references** from Zotero, Mendeley, JabRef, EndNote or anything else that exports BibTeX or RIS, with **File > Import references...**. Each entry is matched to your publications by its file, DOI, ISBN, arXiv number or title, and brings its details, tags and notes. You see what will happen first, and details you've set yourself are never changed.
 - **Journal issues and books split into articles and chapters,** from their table of contents or, for an issue without one, from the DOIs on its pages. Each article opens at its own pages, is searched, tagged and cited on its own, and follows its issue into collections. Right-click an issue and choose **Show its articles** to list them in the library, in the order they're in it.
 
 ### Reading
 
 - **A built-in reader** with each document in its own tab, opening where you left off.
 - **Continuous, single-page or two-page** layouts, with fit to width, fit to page or any zoom.
-- **Contents and page thumbnails** in a side panel.
+- **Contents and page thumbnails** in a side panel, and the contents at **Ctrl+G**, searched as you type, or with a page number to go to.
+- **Smart Jump:** Ctrl+click a reference such as "Figure 3", "Eq. (4)", "[12]" or "Smith et al. (2020)" for a preview of the figure, equation or reference it points at, even in a PDF without links, then go there and back.
+- **Two documents side by side** in one tab, or the same one twice at different pages.
 - **Search within a document,** stepping through every match.
 - **Select and copy text,** across pages.
 - **Light, dark and sepia pages,** with pictures left in their own colours on dark pages, and larger or smaller text for EPUB and other reflowable books. **File > Settings...** sets what documents open with.
@@ -214,6 +217,7 @@ Moving from another computer? Choose **Import a library from another computer...
 ### Highlights and notes
 
 - **Highlight or underline** in four colours, and add notes to what you've selected, by right-clicking it.
+- **Mark an area,** such as a figure or an equation, with Shift and a drag. It's kept and listed like a highlight, with a picture of it, and can be copied as a picture.
 - **They survive** restarts, moving or renaming the file, and text size changes in EPUBs. They're kept in Papertrail's library, never in your files.
 - **The Notes panel** lists a document's highlights and notes, and goes to each. Choose several at once to change their colour, copy, export or delete them together.
 - **Every highlight and note in your library** in one searchable list, under **View > Highlights and notes...**.
@@ -226,17 +230,18 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Three modes:** check each change before it's made, apply them all automatically, or stay offline.
 - **A review tab** shows each suggested change side by side, and anything you've edited by hand is never overwritten.
 - **Undo** any lookup, from the details panel.
-- **Retraction warnings:** publications with a DOI are checked with Crossref about once a month for retractions, corrections and expressions of concern, which are shown on the publication and in a filter.
+- **Retraction warnings:** publications with a DOI are checked with Crossref about once a month for retractions, corrections and expressions of concern, which are shown on the publication and in a filter. A new one is pointed out, and counted in the status bar until you've looked.
 
 ### Citing
 
 - **Copy references and in-text citations** in Harvard, APA (7th edition), IEEE or Chicago (author-date, 18th edition), with italics that paste into a word processor.
 - **Reference lists** for any selection, in the style's order, with 2020a and 2020b where needed.
 - **Export** BibTeX, RIS (for Zotero, Mendeley and EndNote) or CSL-JSON.
+- **Case law** is cited in the Bluebook's form, or OSCOLA's if you choose it for a case, in every style.
 
 ### Summaries from Claude
 
-- **Optional summaries** of a paper's aim, methods, results, limitations and conclusions, using your own Claude API key and paid to Anthropic by you.
+- **Optional summaries** of a paper's aim, methods, results, limitations and conclusions, or of a case's facts, issues, decision and reasoning, using your own Claude API key and paid to Anthropic by you.
 - **You see what will be sent, and an estimate of the cost,** before anything is sent. Only identifying details are sent, and Claude finds the paper online. Sending the paper itself needs its own confirmation.
 - **Straight away, or at half price** in batches, which usually arrive within the hour. They're kept for you to review whenever you open Papertrail.
 - **What you've spent,** this month and altogether, under **View > Summaries from Claude...**.

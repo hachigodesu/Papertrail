@@ -442,6 +442,7 @@ OCR for scanned documents, Zotero/Mendeley/BibTeX import, full CSL citation styl
 
 - **1.0.1:** the reader's Notes panel shows a highlight's words and its note apart.
 - **1.0.2:** saved searches, a Settings window with a theme separate from page colours and the reader's defaults, `in:` searches and **Show its articles** in page order, pictures left alone on dark pages, a red bar on retracted publications' covers, number-only contents entries left out, and highlighting by right-click only.
+- **1.1.0:** Smart Jump (Ctrl+click a reference for a preview of what it points at, even without links), contents searched at Ctrl+G, two documents side by side, areas of a page as highlights, case law as a type cited in the Bluebook's or OSCOLA's form, with summaries as case briefs, BibTeX and RIS import, new retractions pointed out, and the release workflow taking its packages from CI.
 
 Considered and declined: **publication types of the user's own,** and removing the built-in ones, because citations, exports and article splitting depend on the fixed types.
 
@@ -449,18 +450,13 @@ Considered and declined: **publication types of the user's own,** and removing t
 
 Candidates for 1.1.0 and after. Sizes are rough.
 
-- **BibTeX and RIS import:** details and tags from other managers' exports, including Zotero's and Mendeley's, matched to files by DOI or title. Medium to large.
 - **Related papers:** references and cited-by from OpenAlex, marking those already in the library. Medium to large, and uses up OpenAlex's anonymous allowance.
 - **Open-access copies:** PDFs fetched through Unpaywall for publications with no file, saved to a folder the user chooses. Unpaywall requires an email address with each request, so it would only work once one is entered.
 - **Sentence-case titles** where a citation style asks for them, such as APA. Risky with names and acronyms.
 - **OCR** for scanned documents, so they can be searched and highlighted. Large.
 - **Full CSL styles** alongside the four hand-written ones. Large, as there's no mature CSL processor in C++.
 - **A browser connector** for adding what's open in the browser. Large.
-- **Warning of new retractions:** say when a notice check finds a new retraction for something in the library, rather than only marking it. Small.
 - **One issue chosen exactly:** **Show its articles** searches `in:` by title, so an issue whose title is inside another's shows both. A filter chosen by the issue itself would be exact. Small.
-- **Areas as highlights:** a rectangle drawn over a figure or equation, kept and listed like a highlight. Medium.
-- **Two documents side by side** in the reader. Medium.
 - **Translations** of the window: the text already goes through `tr()`, so what's missing is the translation files and choosing a language. Medium, plus translators.
 - **Keeping two computers in step** through a shared folder, built on the library export. Medium to large.
 - **Flathub and winget,** so Papertrail installs from the usual stores. Medium, mostly packaging and review.
-- **The release workflow reusing CI's packages** for the tagged commit, rather than building them again. Small, for development only.
