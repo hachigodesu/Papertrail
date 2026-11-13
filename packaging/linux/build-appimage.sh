@@ -11,15 +11,15 @@ src="$(cd "$(dirname "$0")/../.." && pwd)"
 out="${1:-$PWD/appimage-output}"
 qt="${QT_ROOT:?Set QT_ROOT to the Qt install, for example /opt/Qt/6.12.0/gcc_64}"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
-
-# The natural voices play through Qt Multimedia's own audio output, which is in the library itself, so none of its
-# media plugins are needed. linuxdeploy would bundle every one it finds, and the FFmpeg one brings X and video
-# libraries with it, so a Qt install for this mustn't have them.
-if ls "$qt/plugins/multimedia/"*.so >/dev/null 2>&1; then
-    echo "FAILED: remove Qt Multimedia's media plugins from $qt/plugins/multimedia first, as appimage.yml does" >&2
-    exit 1
-fi
+# Qt Multimedia's media plugins are moved aside while linuxdeploy runs (see below), and always put back.
+media="$qt/plugins/multimedia"
+finish() {
+    if [ -d "$work/multimedia-plugins" ]; then
+        mv "$work/multimedia-plugins/"* "$media/" 2>/dev/null || true
+    fi
+    rm -rf "$work"
+}
+trap finish EXIT
 
 tools="${APPIMAGE_TOOLS_DIR:-$HOME/.cache/papertrail-appimage-tools}"
 mkdir -p "$tools" "$out"
@@ -57,6 +57,15 @@ export OUTPUT="$LDAI_OUTPUT"
 com_err="$(ldconfig -p | awk '/libcom_err\.so\.2 / {print $NF; exit}')"
 [ -n "$com_err" ] || { echo "FAILED: libcom_err.so.2 isn't installed here" >&2; exit 1; }
 
+# The natural voices, and flite's engine, play through Qt Multimedia's own audio output, which is in the library
+# itself and works without a media plugin, as the Windows package does. linuxdeploy bundles every plugin it finds, and
+# the FFmpeg one needs X and video libraries that a bare build image hasn't got, so they're kept out of its sight.
+# They can't simply be deleted: Qt's CMake files check for them, so building needs them there. Their folder stays, empty.
+mkdir -p "$work/multimedia-plugins"
+if ls "$media/"*.so >/dev/null 2>&1; then
+    mv "$media/"*.so "$work/multimedia-plugins/"
+fi
+
 cd "$work"
 linuxdeploy-x86_64.AppImage \
     --appdir "$work/AppDir" \
@@ -88,6 +97,11 @@ for library in libsherpa-onnx-c-api.so libonnxruntime.so; do
         exit 1
     fi
 done
+
+if ls "$work/AppDir/usr/plugins/multimedia/"*.so >/dev/null 2>&1; then
+    echo "FAILED: the AppImage has Qt Multimedia's media plugins, which it doesn't need" >&2
+    exit 1
+fi
 
 # Online lookups can't work without this, and nothing else would notice it was missing.
 if ! ls "$work/AppDir/usr/plugins/tls/"*.so >/dev/null 2>&1; then

@@ -36,9 +36,6 @@ jobs:
           key: mupdf-ubuntu-22.04-1.28.5
       - run: bash packaging/linux/install-mupdf.sh /opt/mupdf-cache
       - run: aqt install-qt linux desktop 6.12.0 linux_gcc_64 --outputdir /opt/Qt -m qtspeech qtmultimedia
-      # Sound goes through Qt Multimedia's own audio output, so none of its media plugins are wanted: see
-      # build-appimage.sh.
-      - run: rm -f /opt/Qt/6.12.0/gcc_64/plugins/multimedia/*.so
       - run: bash packaging/linux/build-qt-flite.sh
         env:
           QT_ROOT: /opt/Qt/6.12.0/gcc_64
