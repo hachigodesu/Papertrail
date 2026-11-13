@@ -18,6 +18,12 @@ extern "C" {
 #include <flite/flite.h>
 cst_voice *register_cmu_us_slt(const char *voxdir);
 }
+namespace {
+// A use of the voice's library that the compiler must keep, so linking records it even where only libraries in use are
+// linked (`--as-needed`, as Ubuntu's linker does by default), and packages bundle it. A reference nothing read was
+// optimised away in release builds, so the AppImage had no voice.
+[[gnu::used]] cst_voice *(*const keepVoiceLinked)(const char *) = &register_cmu_us_slt;
+} // namespace
 #endif
 
 namespace papertrail::ui {
@@ -49,9 +55,6 @@ void registerBundledVoice()
         cst_voice *listed = new_voice();
         listed->name = "slt";
         flite_add_voice(listed);
-        // A use of the library, so linking keeps it even where only what's used is linked.
-        static cst_voice *(*const linked)(const char *) = &register_cmu_us_slt;
-        Q_UNUSED(linked);
         return true;
     }();
     Q_UNUSED(registered);

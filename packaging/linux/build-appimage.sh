@@ -88,6 +88,13 @@ if ! [ -f "$work/AppDir/usr/plugins/texttospeech/libqtexttospeech_flite.so" ]; t
     echo "FAILED: the AppImage has no flite engine for reading aloud" >&2
     exit 1
 fi
+# The engine loads the voice by its name, so nothing would notice it missing until a system without flite read aloud.
+for library in libflite_cmu_us_slt.so.1 libflite_usenglish.so.1 libflite_cmulex.so.1; do
+    if ! [ -e "$work/AppDir/usr/lib/$library" ]; then
+        echo "FAILED: the AppImage has no $library, flite's US English voice" >&2
+        exit 1
+    fi
+done
 
 # The natural voices run in the worker through sherpa-onnx and ONNX Runtime, which the install puts in a folder of
 # Papertrail's own. Its self-test checks they load; this checks they're there at all.

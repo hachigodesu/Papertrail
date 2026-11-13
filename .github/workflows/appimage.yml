@@ -55,19 +55,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Each desktop has ALSA's libasound, which Qt Multimedia needs, so AppImages leave it out for the system's.
           - image: ubuntu:22.04
-            install: apt-get update && apt-get install -y --no-install-recommends libgl1 libegl1 libopengl0 libfontconfig1 libdbus-1-3 libglib2.0-0 tar gzip
+            install: apt-get update && apt-get install -y --no-install-recommends libgl1 libegl1 libopengl0 libfontconfig1 libdbus-1-3 libglib2.0-0 libasound2 tar gzip
           - image: ubuntu:24.04
-            install: apt-get update && apt-get install -y --no-install-recommends libgl1 libegl1 libopengl0 libfontconfig1 libdbus-1-3 libglib2.0-0t64 tar gzip
+            install: apt-get update && apt-get install -y --no-install-recommends libgl1 libegl1 libopengl0 libfontconfig1 libdbus-1-3 libglib2.0-0t64 libasound2t64 tar gzip
           # A desktop always has OpenSSL, which the AppImage uses for secure connections, but Debian's image doesn't.
           - image: debian:12
-            install: apt-get update && apt-get install -y --no-install-recommends libgl1 libegl1 libopengl0 libfontconfig1 libdbus-1-3 libglib2.0-0 libssl3 tar gzip
+            install: apt-get update && apt-get install -y --no-install-recommends libgl1 libegl1 libopengl0 libfontconfig1 libdbus-1-3 libglib2.0-0 libssl3 libasound2 tar gzip
           - image: fedora:latest
-            install: dnf install -y libglvnd-glx libglvnd-egl libglvnd-opengl fontconfig dbus-libs glib2 tar gzip
+            install: dnf install -y libglvnd-glx libglvnd-egl libglvnd-opengl fontconfig dbus-libs glib2 alsa-lib tar gzip
           - image: opensuse/tumbleweed
-            install: zypper --non-interactive install libglvnd fontconfig libdbus-1-3 libglib-2_0-0 tar gzip
+            install: zypper --non-interactive install libglvnd fontconfig libdbus-1-3 libglib-2_0-0 libasound2 tar gzip
           - image: archlinux:latest
-            install: pacman -Syu --noconfirm libglvnd fontconfig dbus glib2 tar gzip
+            install: pacman -Syu --noconfirm libglvnd fontconfig dbus glib2 alsa-lib tar gzip
     container: ${{ matrix.image }}
     steps:
       - name: Install the libraries a desktop system already has
