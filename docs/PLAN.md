@@ -445,32 +445,29 @@ OCR for scanned documents, Zotero/Mendeley/BibTeX import, full CSL citation styl
 - **1.1.0:** Smart Jump (Ctrl+click a reference for a preview of what it points at, even without links), contents searched at Ctrl+G, two documents side by side, areas of a page as highlights, case law as a type cited in the Bluebook's or OSCOLA's form, with summaries as case briefs, BibTeX and RIS import, new retractions pointed out, and the release workflow taking its packages from CI.
 - **1.2.0:** related papers from OpenAlex, added without a file if wanted; Smart Jump from a table of contents, and to a section's or appendix's heading by way of the contents however far away, passing over contents pages and running heads; bookmarks; full screen; pages turned a quarter at a time; forward history; sorting by rating and last opened, a rating filter, recently opened, and Rating, Last opened and Progress columns; and Show its articles by the issue itself.
 - **1.3.0:** the words of scanned documents recognised with Tesseract, in the background and as they're read, with English included and 26 more languages fetched when chosen, and an old paper whose own text is poor recognised again in full when asked.
+- **1.4.0:** reading aloud, marking each sentence, with the system's voices or Kokoro's natural voices fetched when asked; a reading ruler taking a figure or a table whole; every highlight in a window of its own; checking the library, with publications marked as not the same (migration 22); court cases looked up in Find Case Law, EUR-Lex, CourtListener and CanLII, and never in sources of papers; the scanned pages of partly scanned documents recognised in the background; and an OpenAlex key of the user's own.
 
 Considered and declined: **publication types of the user's own,** and removing the built-in ones, because citations, exports and article splitting depend on the fixed types.
 
 ### Ideas to explore later
 
-Candidates for 1.4.0 and after. Sizes are rough.
+Candidates for 1.5.0 and after. Sizes are rough.
 
 - **Open-access copies:** PDFs fetched through Unpaywall for publications with no file, saved to a folder the user chooses. Unpaywall requires an email address with each request, so it would only work once one is entered.
 - **Sentence-case titles** where a citation style asks for them, such as APA. Risky with names and acronyms.
-- **Recognising mixed documents in the background:** only wholly scanned files are recognised in the background now, and pages of others as they're read. Small.
 - **Full CSL styles** alongside the four hand-written ones. Large, as there's no mature CSL processor in C++.
 - **A browser connector** for adding what's open in the browser. Large.
-- **An OpenAlex API key,** kept like the Claude key, for its own $1 a day rather than the $0.10 a day shared by everyone on the same address without one. Small.
 - **Printed page numbers:** PDFs' page labels, so page boxes and Smart Jump from contents can go by the numbers printed on the pages. Small to medium, in the engine.
 - **A duplicate finder,** citation keys kept and edited, and Markdown notes exported to a folder for Obsidian and the like. Each small to medium.
 - **Translations** of the window: the text already goes through `tr()`, so what's missing is the translation files and choosing a language. Medium, plus translators.
 - **Keeping two computers in step** through a shared folder, built on the library export. Medium to large.
 - **Flathub and winget,** so Papertrail installs from the usual stores. Medium, mostly packaging and review.
 
-Gathered on 11 November 2026 from calibre, Zotero, KOReader, Sioyek, JabRef and others, keeping to the rules: nothing changes the user's files, and nothing goes online unless chosen. A suggested 1.4.0 is the first four of "The library" and "Getting things in and out" together: the Zotero import, every highlight in one place, fields of the user's own and checking the library. Read aloud and pinned figures would suit a release about reading after that.
+Gathered on 11 November 2026 from calibre, Zotero, KOReader, Sioyek, JabRef and others, keeping to the rules: nothing changes the user's files, and nothing goes online unless chosen. 1.4.0 took read aloud, the reading ruler, every highlight in one place and checking the library from these. Pinned figures, the Zotero import and fields of the user's own are still to come.
 
 #### Reading
 
-- **Read aloud** from the page being read, with Qt's text-to-speech, marking each sentence as it's read. Built on the worker's text lines, so recognised scans work too. Check Qt TextToSpeech's backends on each platform, and in the Flatpak. Like calibre's viewer and KOReader. Medium.
 - **Pinned figures:** an area, or a Smart Jump target, kept floating beside the page while the text about it is read. Like Sioyek's portals. Medium.
-- **A reading ruler** that dims all but the current line or paragraph, moved with the keys. Like Sioyek. Small.
 - **Looking up a selection:** first in the library (other papers that mention it), and if chosen, on Wikipedia or in a dictionary, only with lookups online. Like calibre's lookup panel. Small.
 - **Asking Claude about a selection or area:** explaining an equation, translating a paragraph, defining a term, each request confirmed and costed as summaries are. Medium.
 - **A table to a spreadsheet:** an area over a table copied as CSV, from the character boxes the worker already has. Like Tabula. Medium.
@@ -479,8 +476,6 @@ Gathered on 11 November 2026 from calibre, Zotero, KOReader, Sioyek, JabRef and 
 
 - **Fields of the user's own** (text, number, yes or no, date, or one of a list), shown, sorted, searched, saved in searches and exported. Like calibre's custom columns. Medium, with a migration. Not to be confused with publication types of the user's own, which were declined.
 - **Search and replace across many publications:** a field changed in many at once, with or without patterns, previewed first, undoable through provenance. Like calibre's bulk editing and JabRef's cleanups (page ranges, months, DOI forms). Small to medium.
-- **Checking the library:** missing and unreadable files, publications waiting for files, files in no publication and identifiers shared by two, with a fix offered for each. Like calibre's Check library. Small.
-- **Every highlight in one place:** all highlights and notes across the library, filtered by colour, collection or tag, each opening where it is. Like calibre's annotations browser. Medium.
 - **Reading time** per document and per day, kept only on this computer, building on reading at a glance. Like KOReader's statistics. Medium.
 - **Switching libraries from the window,** with a list of recent ones, since `--library` already works. Like calibre. Small.
 

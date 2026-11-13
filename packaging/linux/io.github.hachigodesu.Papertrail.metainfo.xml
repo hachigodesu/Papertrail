@@ -59,6 +59,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.4.0" date="2026-11-14">
+      <description>
+        <p>Documents read aloud, sentence by sentence, with the computer's own voices or natural voices fetched when chosen, a reading ruler, every highlight in a window of its own, a check of the library for what needs attention, court cases looked up in sources of judgments for the UK, the EU, the US and Canada, the scanned pages of partly scanned documents recognised, and an OpenAlex key of the user's own.</p>
+      </description>
+    </release>
     <release version="1.3.0" date="2026-11-10">
       <description>
         <p>The words in scanned documents are recognised, in the background and as they're read, so they can be searched, selected and highlighted, and an old paper whose own text is poor can be recognised again in full. English comes with it, and 26 more languages can be fetched when chosen.</p>
