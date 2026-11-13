@@ -835,11 +835,17 @@ private slots:
         bar->volumeSlider()->setValue(4);
         QTRY_COMPARE_WITH_TIMEOUT(audio->volume, 0.4, kWaitMs);
 
-        // On through the pages, and it stops at the end.
+        // On through the pages, and it stops at the end. Sounds this short can read a page between two looks, so
+        // each sentence's page is noted as it starts.
+        QList<int> pagesRead;
+        connect(natural, &Speaker::sentenceStarted, reader, [&] { pagesRead << reader->readingPage(); });
         audio->playMs = 20;
-        QTRY_COMPARE_WITH_TIMEOUT(reader->readingPage(), 1, kWaitMs);
-        QTRY_COMPARE_WITH_TIMEOUT(reader->readingPage(), 2, kWaitMs);
         QTRY_VERIFY_WITH_TIMEOUT(!reader->isReadingAloud(), kWaitMs);
+        QStringList pagesSaid;
+        for (const int page : std::as_const(pagesRead))
+            pagesSaid << QString::number(page);
+        QVERIFY2(pagesRead.contains(1) && pagesRead.contains(2) && std::is_sorted(pagesRead.cbegin(), pagesRead.cend()),
+                 qPrintable(pagesSaid.join(u' ')));
         QCOMPARE(view->spokenPage(), -1);
     }
 

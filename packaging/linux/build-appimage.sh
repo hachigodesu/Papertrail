@@ -13,6 +13,14 @@ qt="${QT_ROOT:?Set QT_ROOT to the Qt install, for example /opt/Qt/6.12.0/gcc_64}
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# The natural voices play through Qt Multimedia's own audio output, which is in the library itself, so none of its
+# media plugins are needed. linuxdeploy would bundle every one it finds, and the FFmpeg one brings X and video
+# libraries with it, so a Qt install for this mustn't have them.
+if ls "$qt/plugins/multimedia/"*.so >/dev/null 2>&1; then
+    echo "FAILED: remove Qt Multimedia's media plugins from $qt/plugins/multimedia first, as appimage.yml does" >&2
+    exit 1
+fi
+
 tools="${APPIMAGE_TOOLS_DIR:-$HOME/.cache/papertrail-appimage-tools}"
 mkdir -p "$tools" "$out"
 for tool in \
