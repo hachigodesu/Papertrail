@@ -10,6 +10,7 @@
 #include "metadata/LookupEngine.h"
 #include "metadata/Matching.h"
 #include "metadata/NoticeChecker.h"
+#include "metadata/NaturalVoices.h"
 #include "metadata/OcrLanguages.h"
 #include "metadata/RelatedFinder.h"
 #include "ui/RelatedPapersDialog.h"
@@ -44,6 +45,8 @@
 #include <QSignalSpy>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QMap>
+#include <QSet>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -173,6 +176,57 @@ protected:
             socket->disconnectFromHost();
         });
         connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+    }
+};
+
+// Answers by the path asked for, for following redirects.
+class RoutedServer : public QTcpServer {
+public:
+    QMap<QString, QByteArray> routes;
+    QStringList asked;
+
+protected:
+    void incomingConnection(qintptr handle) override
+    {
+        auto *socket = new QTcpSocket(this);
+        socket->setSocketDescriptor(handle);
+        connect(socket, &QTcpSocket::readyRead, socket, [this, socket] {
+            const QString request = QString::fromLatin1(socket->readAll());
+            const QString path = request.section(QLatin1Char(' '), 1, 1);
+            asked << request;
+            socket->write(routes.value(path, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+            socket->disconnectFromHost();
+        });
+        connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+    }
+};
+
+// Pretends to fetch each file, writing a stand-in, and fails or stops where it's told to.
+class FakeDownloads : public Transport {
+public:
+    QList<DownloadRequest> asked;
+    int failAt = -1;
+    int stopAfter = -1;
+
+    void get(const QUrl &, const Callback &callback) override { callback(TransportReply{}); }
+    void download(const DownloadRequest &request, const std::function<void(const QString &)> &done) override
+    {
+        asked << request;
+        const int index = int(asked.size()) - 1;
+        if (index == failAt) {
+            done(QStringLiteral("the server said 500"));
+            return;
+        }
+        QFile file(request.path);
+        if (!file.open(QIODevice::WriteOnly)) {
+            done(QStringLiteral("couldn't write"));
+            return;
+        }
+        file.write("stand-in");
+        file.close();
+        if (index == stopAfter && request.stop)
+            *request.stop = true;
+        done(QString());
     }
 };
 
@@ -1563,6 +1617,204 @@ private slots:
         QVERIFY(refused.contains(QStringLiteral("securely")));
     }
 
+    void aDownloadOnlyFollowsRedirectsToHostsAllowed()
+    {
+        RoutedServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const QString here = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        const QByteArray body = "A made-up voice, standing in for Kokoro's.";
+        const QByteArray hash = QCryptographicHash::hash(body, QCryptographicHash::Sha256).toHex();
+        const auto redirect = [](const char *code, const QString &to) {
+            // With a body of its own, which must never end up in the file.
+            return QByteArray("HTTP/1.1 ") + code + "\r\nLocation: " + to.toLatin1()
+                   + "\r\nContent-Length: 4\r\nConnection: close\r\n\r\njunk";
+        };
+        server.routes[QStringLiteral("/start")] = redirect("302 Found", QStringLiteral("/middle"));
+        server.routes[QStringLiteral("/middle")] = redirect("307 Temporary Redirect", here + QStringLiteral("/file"));
+        server.routes[QStringLiteral("/file")] = "HTTP/1.1 200 OK\r\nContent-Length: " + QByteArray::number(body.size())
+                                                 + "\r\nConnection: close\r\n\r\n" + body;
+        server.routes[QStringLiteral("/loop")] = redirect("302 Found", QStringLiteral("/loop"));
+        server.routes[QStringLiteral("/insecure")] = redirect("302 Found", QStringLiteral("http://localhost:%1/file").arg(server.serverPort()));
+        NetworkTransport transport;
+        const QString path = m_dir->filePath(QStringLiteral("voice.bin"));
+
+        qint64 lastProgress = 0;
+        const auto fetch = [&](const QString &from, const QStringList &hosts, std::shared_ptr<bool> stop = {}) {
+            DownloadRequest request;
+            request.url = QUrl(here + from);
+            request.path = path;
+            request.maxBytes = body.size();
+            request.sha256 = hash;
+            request.redirectHosts = hosts;
+            request.stop = std::move(stop);
+            request.progress = [&](qint64 received) { lastProgress = received; };
+            QString error = QStringLiteral("never answered");
+            QEventLoop loop;
+            transport.download(request, [&](const QString &result) {
+                error = result;
+                loop.quit();
+            });
+            loop.exec();
+            return error;
+        };
+
+        // Not to a host it doesn't list.
+        QVERIFY(fetch(QStringLiteral("/start"), {}).contains(QStringLiteral("somewhere else")));
+        QVERIFY(fetch(QStringLiteral("/start"), {QStringLiteral("example.org")}).contains(QStringLiteral("somewhere else")));
+        QVERIFY(!QFile::exists(path));
+        // Never anywhere but securely, even to a host it lists.
+        QVERIFY(fetch(QStringLiteral("/insecure"), {QStringLiteral("localhost")}).contains(QStringLiteral("somewhere else")));
+        // Not round and round.
+        QVERIFY(fetch(QStringLiteral("/loop"), {QStringLiteral("127.0.0.1")}).contains(QStringLiteral("too many")));
+        QVERIFY(!QFile::exists(path));
+        // Stopped, it keeps nothing.
+        QCOMPARE(fetch(QStringLiteral("/file"), {}, std::make_shared<bool>(true)), kDownloadStopped);
+        QVERIFY(!QFile::exists(path));
+
+        // Through two redirects, by a name's ending, keeping only the file itself.
+        QCOMPARE(fetch(QStringLiteral("/start"), {QStringLiteral(".0.0.1")}), QString());
+        QFile kept(path);
+        QVERIFY(kept.open(QIODevice::ReadOnly));
+        QCOMPARE(kept.readAll(), body);
+        QCOMPARE(lastProgress, qint64(body.size()));
+        // Nothing went with the redirects but the address.
+        QVERIFY(!server.asked.last().contains(QStringLiteral("Cookie"), Qt::CaseInsensitive));
+    }
+
+    void naturalVoicesComeFromOnePlaceAndAreChecked()
+    {
+        QSet<QString> paths;
+        qint64 total = 0;
+        for (const NaturalVoiceFile &file : naturalVoiceFiles()) {
+            const QUrl url = naturalVoiceFileUrl(file);
+            QCOMPARE(url.scheme(), QStringLiteral("https"));
+            QCOMPARE(url.host(), QStringLiteral("huggingface.co"));
+            QVERIFY(url.path().startsWith(
+                QStringLiteral("/csukuangfj/kokoro-multi-lang-v1_0/resolve/f7b96bb6bef5c5da4d3aa4f4e0498fbbf62dc78b/")));
+            QCOMPARE(QByteArray(file.sha256).size(), 64);
+            QVERIFY(file.bytes > 0);
+            QVERIFY(!QString::fromLatin1(file.path).contains(QStringLiteral("..")));
+            paths << QString::fromLatin1(file.path);
+            total += file.bytes;
+        }
+        QCOMPARE(paths.size(), naturalVoiceFiles().size());
+        QCOMPARE(naturalVoicesBytes(), total);
+        QVERIFY(total > 360000000 && total < 380000000);
+        // Only Hugging Face's own hosts.
+        QCOMPARE(naturalVoiceHosts(), QStringList({QStringLiteral("huggingface.co"), QStringLiteral(".hf.co")}));
+
+        // English's 28, numbered as the model numbers them.
+        QCOMPARE(naturalVoices().size(), 28);
+        for (int i = 0; i < naturalVoices().size(); ++i) {
+            const NaturalVoice &voice = naturalVoices().at(i);
+            QCOMPARE(voice.speaker, i);
+            QCOMPARE(voice.british, QByteArray(voice.id).startsWith('b'));
+            QCOMPARE(voice.male, QByteArray(voice.id).at(1) == 'm');
+            QCOMPARE(naturalVoice(QLatin1StringView(voice.id)), &voice);
+        }
+        QCOMPARE(QLatin1StringView(usualNaturalVoice(true).id), QLatin1StringView("bf_emma"));
+        QCOMPARE(QLatin1StringView(usualNaturalVoice(false).id), QLatin1StringView("af_heart"));
+        QVERIFY(!naturalVoice(QStringLiteral("ef_dora")));
+    }
+
+    void naturalVoicesAreKeptWholeOrNotAtAll()
+    {
+        const QString voices = m_dir->filePath(QStringLiteral("voices"));
+        const QString folder = naturalVoicesFolder(voices);
+        QDir().mkpath(voices);
+        // Something else in the voices' folder is never touched.
+        QFile other(QDir(voices).filePath(QStringLiteral("other.txt")));
+        QVERIFY(other.open(QIODevice::WriteOnly));
+        other.close();
+        const auto fetch = [&](FakeDownloads &transport) {
+            QString error = QStringLiteral("never answered");
+            downloadNaturalVoices(transport, voices, {}, [&](const QString &result) { error = result; });
+            return error;
+        };
+        const auto nothingKept = [&] {
+            const QStringList left = QDir(voices).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+            return left == QStringList{QStringLiteral("other.txt")};
+        };
+
+        // A file that fails keeps nothing, and says which.
+        FakeDownloads failing;
+        failing.failAt = 2;
+        const QString failed = fetch(failing);
+        QVERIFY2(failed.contains(QStringLiteral("tokens.txt")), qPrintable(failed));
+        QCOMPARE(failing.asked.size(), 3);
+        QVERIFY(nothingKept());
+
+        // Stopped, it keeps nothing either.
+        FakeDownloads stopping;
+        stopping.stopAfter = 1;
+        QCOMPARE(fetch(stopping), kDownloadStopped);
+        QCOMPARE(stopping.asked.size(), 2);
+        QVERIFY(nothingKept());
+
+        // Every file, each from its own address, sent on only to Hugging Face's hosts.
+        FakeDownloads fine;
+        QCOMPARE(fetch(fine), QString());
+        QCOMPARE(fine.asked.size(), naturalVoiceFiles().size());
+        for (int i = 0; i < fine.asked.size(); ++i) {
+            const NaturalVoiceFile &file = naturalVoiceFiles().at(i);
+            QCOMPARE(fine.asked.at(i).url, naturalVoiceFileUrl(file));
+            QCOMPARE(fine.asked.at(i).maxBytes, file.bytes);
+            QCOMPARE(fine.asked.at(i).sha256, QByteArray(file.sha256));
+            QCOMPARE(fine.asked.at(i).redirectHosts, naturalVoiceHosts());
+            QVERIFY(QFile::exists(QDir(folder).filePath(QString::fromLatin1(file.path))));
+        }
+        QCOMPARE(QDir(voices).entryList(QDir::AllEntries | QDir::NoDotAndDotDot),
+                 QStringList({QFileInfo(folder).fileName(), QStringLiteral("other.txt")}));
+        // Stand-ins aren't the files' sizes, so they don't count as the voices being here.
+        QVERIFY(!naturalVoicesPresent(voices));
+
+        // Removing them leaves the rest alone.
+        QVERIFY(removeNaturalVoices(voices));
+        QVERIFY(nothingKept());
+    }
+
+    void naturalVoicesArentFetchedWhileOffline()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        openWindow(&server);
+        // Never offered on reading aloud while offline, and not counted as offered either.
+        m_window->offerNaturalVoices();
+        QTest::qWait(300);
+        QVERIFY(m_unexpectedBoxes.isEmpty());
+        QVERIFY(!m_session->settings().value(QStringLiteral("speech.natural_offered")).toBool());
+        // Asked for, it says why not.
+        bool ready = true;
+        m_window->getNaturalVoices([&](bool result) { ready = result; });
+        QVERIFY(!ready);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_unexpectedBoxes.isEmpty(), kWaitMs);
+        QVERIFY(m_unexpectedBoxes.first().contains(QStringLiteral("offline")));
+        m_unexpectedBoxes.clear();
+        QCOMPARE(server.connections.load(), 0);
+        QVERIFY(!QFileInfo::exists(m_session->paths().voicesDirectory));
+    }
+
+    void naturalVoicesAreOfferedOnce()
+    {
+        LocalServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        openWindow(&server);
+        m_session->settings().setValue(QStringLiteral("metadata.mode_chosen"), true);
+        m_session->settings().setValue(QStringLiteral("metadata.mode"), QStringLiteral("online_review"));
+        // Offered, and turned down, which fetches nothing.
+        m_window->offerNaturalVoices();
+        QTRY_VERIFY_WITH_TIMEOUT(!m_unexpectedBoxes.isEmpty(), kWaitMs);
+        QVERIFY(m_unexpectedBoxes.first().contains(QStringLiteral("Hugging Face")));
+        m_unexpectedBoxes.clear();
+        QVERIFY(m_session->settings().value(QStringLiteral("speech.natural_offered")).toBool());
+        QVERIFY(!m_window->isFetchingNaturalVoices());
+        // Never again on this computer.
+        m_window->offerNaturalVoices();
+        QTest::qWait(300);
+        QVERIFY(m_unexpectedBoxes.isEmpty());
+        QCOMPARE(server.connections.load(), 0);
+    }
+
     void languagesComeFromOnePlaceAndAreChecked()
     {
         QVERIFY(ocrLanguages().size() > 20);
@@ -2312,6 +2564,7 @@ private:
         paths.cacheDirectory = m_dir->filePath(QStringLiteral("cache"));
         paths.workerPath = QStringLiteral(PAPERTRAIL_WORKER_PATH);
         paths.settleMs = 0;
+        paths.voicesDirectory = m_dir->filePath(QStringLiteral("voices"));
         paths.providerUrls = urls;
         if (fake)
             paths.transportFactory = [fake] { return std::make_unique<FakeTransport>(fake); };

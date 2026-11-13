@@ -72,6 +72,15 @@ if ! [ -f "$work/AppDir/usr/plugins/texttospeech/libqtexttospeech_flite.so" ]; t
     exit 1
 fi
 
+# The natural voices run in the worker through sherpa-onnx and ONNX Runtime, which the install puts in a folder of
+# Papertrail's own. Its self-test checks they load; this checks they're there at all.
+for library in libsherpa-onnx-c-api.so libonnxruntime.so; do
+    if ! find "$work/AppDir/usr/lib" -name "$library" | grep -q .; then
+        echo "FAILED: the AppImage has no $library for the natural voices" >&2
+        exit 1
+    fi
+done
+
 # Online lookups can't work without this, and nothing else would notice it was missing.
 if ! ls "$work/AppDir/usr/plugins/tls/"*.so >/dev/null 2>&1; then
     echo "FAILED: the AppImage has no TLS plugin" >&2

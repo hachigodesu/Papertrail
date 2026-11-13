@@ -1,5 +1,9 @@
 #include "ui/Speaker.h"
 
+#include "metadata/NaturalVoices.h"
+
+#include <QCoreApplication>
+
 #ifdef PAPERTRAIL_WITH_SPEECH
 #include <QAudioBuffer>
 #include <QEventLoop>
@@ -114,12 +118,19 @@ public:
         }
         // One sentence at a time, the next once the engine's ready again. Engines say they're about to make each queued
         // sentence into sound well before it's heard, so that can't say which is being read.
+        // A sentence is only done once it's been heard: stopping one to start another says the engine is ready a moment
+        // later, after the next has been given to it, and taking that for the next's end ran the marking ahead of the
+        // voice.
         connect(m_speech.get(), &QTextToSpeech::stateChanged, this, [this](QTextToSpeech::State state) {
             if (state == QTextToSpeech::Error) {
                 m_saying = false;
                 emit problem(m_speech->errorString());
-            } else if (state == QTextToSpeech::Ready && m_saying && !m_stopping) {
+            } else if (state == QTextToSpeech::Speaking || state == QTextToSpeech::Synthesizing) {
+                if (m_saying)
+                    m_heard = true;
+            } else if (state == QTextToSpeech::Ready && m_saying && m_heard && !m_stopping) {
                 m_saying = false;
+                m_heard = false;
                 ++m_next;
                 // After this has returned, so whoever's told can stop or start again.
                 QTimer::singleShot(0, this, &SystemSpeaker::sayNext);
@@ -156,6 +167,7 @@ public:
     {
         m_sentences.clear();
         m_saying = false;
+        m_heard = false;
         m_stopping = true;
         if (m_speech)
             m_speech->stop();
@@ -168,6 +180,12 @@ public:
     {
         if (m_speech)
             m_speech->setRate(qBound(-1.0, rate, 1.0));
+    }
+
+    void setVolume(double volume) override
+    {
+        if (m_speech)
+            m_speech->setVolume(qBound(0.0, volume, 1.0));
     }
 
 private:
@@ -185,6 +203,7 @@ private:
         if (round != m_round || m_sentences.isEmpty())
             return; // Stopped, or given others, by whoever was told.
         m_saying = true;
+        m_heard = false;
         m_speech->say(m_sentences.at(m_next));
     }
 
@@ -193,6 +212,7 @@ private:
     int m_next = 0;
     int m_round = 0;
     bool m_saying = false;
+    bool m_heard = false; // The sentence being said has been heard speaking, so its engine being ready means it's done.
     bool m_stopping = false;
 };
 
@@ -262,5 +282,37 @@ QString checkSpeech(QString *)
 }
 
 #endif
+
+bool canSpeakNaturally()
+{
+#ifdef PAPERTRAIL_WITH_NATURAL_VOICE
+    return true;
+#else
+    return false;
+#endif
+}
+
+QString naturalVoiceFor(const QString &setting, bool voicesHere, const QLocale &locale)
+{
+    if (!canSpeakNaturally() || !voicesHere)
+        return QString();
+    if (setting.isEmpty())
+        return QLatin1StringView(metadata::usualNaturalVoice(locale.territory() == QLocale::UnitedKingdom).id);
+    if (setting.startsWith(kNaturalVoicePrefix)) {
+        const QString id = setting.mid(kNaturalVoicePrefix.size());
+        if (metadata::naturalVoice(id))
+            return id;
+    }
+    return QString();
+}
+
+QString naturalVoiceLabel(const QString &id)
+{
+    const metadata::NaturalVoice *voice = metadata::naturalVoice(id);
+    if (!voice)
+        return QString();
+    return voice->british ? QCoreApplication::translate("Speaker", "%1 (British English, natural)").arg(QLatin1StringView(voice->name))
+                          : QCoreApplication::translate("Speaker", "%1 (American English, natural)").arg(QLatin1StringView(voice->name));
+}
 
 } // namespace papertrail::ui

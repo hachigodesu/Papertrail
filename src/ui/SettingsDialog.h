@@ -14,6 +14,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QListWidget;
 class QListWidgetItem;
+class QPushButton;
 
 namespace papertrail::ui {
 
@@ -33,6 +34,10 @@ struct SettingsActions {
     std::function<void(const QString &code, std::function<void(bool ready)> done)> getLanguage;
     // Recognising text was turned on or off, or its languages changed.
     std::function<void()> recognitionChanged;
+    // Fetches the natural voices, after asking, and says whether they're here now.
+    std::function<void(std::function<void(bool ready)> done)> getNaturalVoices;
+    // Deletes them from this computer, after asking.
+    std::function<bool()> removeNaturalVoices;
 };
 
 class SettingsDialog : public QDialog {
@@ -48,6 +53,8 @@ public:
     QDoubleSpinBox *textSizeBox() const { return m_textSize; }
     QCheckBox *recogniseBox() const { return m_recognise; }
     QListWidget *languageList() const { return m_languages; }
+    QComboBox *voiceBox() const { return m_voice; }
+    QPushButton *naturalVoicesButton() const { return m_naturalVoices; }
 
 private:
     QCheckBox *boxFor(QAction *action, const QString &text, const QString &explanation);
@@ -63,6 +70,8 @@ private:
     QComboBox *m_ruler = nullptr;
     QComboBox *m_voice = nullptr;
     QSlider *m_speechRate = nullptr;
+    QPushButton *m_naturalVoices = nullptr;
+    void fillVoices();
     QDoubleSpinBox *m_textSize = nullptr;
     QCheckBox *m_recognise = nullptr;
     QListWidget *m_languages = nullptr;

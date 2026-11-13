@@ -410,6 +410,46 @@ public:
         return areas;
     }
 
+    QList<Drawing> drawings(int page) override
+    {
+        layoutIfNeeded();
+        if (page < 0 || page >= pageCount())
+            return {};
+        fz_stext_options options{};
+        options.flags = FZ_STEXT_PRESERVE_IMAGES | FZ_STEXT_COLLECT_VECTORS;
+        fz_stext_page *text = nullptr;
+        fz_var(text);
+        fz_try(m_ctx) {
+            text = fz_new_stext_page_from_page_number(m_ctx, m_doc, page, &options);
+        }
+        fz_catch(m_ctx) {
+            return {};
+        }
+        // A page drawn with a great many shapes, such as a map, has enough of them to tell where they are.
+        constexpr qsizetype kMostDrawings = 5000;
+        constexpr uint32_t kMarksText = FZ_STEXT_VECTOR_IS_HIGHLIGHT | FZ_STEXT_VECTOR_IS_UNDERLINE | FZ_STEXT_VECTOR_IS_STRIKEOUT;
+        QList<Drawing> drawings;
+        for (fz_stext_block *block = text->first_block; block && drawings.size() < kMostDrawings; block = block->next) {
+            if (fz_is_empty_rect(block->bbox) || fz_is_infinite_rect(block->bbox))
+                continue;
+            Drawing drawing;
+            drawing.rect = QRectF(block->bbox.x0, block->bbox.y0, block->bbox.x1 - block->bbox.x0, block->bbox.y1 - block->bbox.y0);
+            if (block->type == FZ_STEXT_BLOCK_IMAGE) {
+                drawing.picture = true;
+            } else if (block->type == FZ_STEXT_BLOCK_VECTOR) {
+                // Marks on text, such as an underline, aren't drawings.
+                if (block->u.v.flags & kMarksText)
+                    continue;
+                drawing.rectangle = (block->u.v.flags & FZ_STEXT_VECTOR_IS_RECTANGLE) != 0;
+            } else {
+                continue;
+            }
+            drawings << drawing;
+        }
+        fz_drop_stext_page(m_ctx, text);
+        return drawings;
+    }
+
     QList<QRectF> search(int page, const QString &query) override
     {
         layoutIfNeeded();

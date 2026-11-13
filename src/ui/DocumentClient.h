@@ -54,8 +54,10 @@ struct ReaderTextLine {
     QList<QRectF> chars;
     double size = 0;
     bool bold = false;
-    bool margin = false;    // A running head or page number in the page's margin.
+    bool margin = false;    // A running head or page number in the page's margin, or anything else not read along.
     bool paragraph = false; // The first line of a paragraph.
+    bool figure = false;    // A whole figure, with its labels, and no text: `margin` too.
+    int table = -1;         // Which of the page's tables it's a row of, or -1.
 };
 
 // Where a reference in a document's text points: see DocumentClient::requestReference.

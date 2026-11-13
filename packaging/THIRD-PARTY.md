@@ -17,8 +17,12 @@ Packages of Papertrail include other free software. Each package includes the li
 | Tesseract | Recognising the text of scanned pages | Apache-2.0 | https://github.com/tesseract-ocr/tesseract |
 | Leptonica | Tesseract's handling of page images | BSD-2-Clause | http://www.leptonica.org |
 | Tesseract's English model (tessdata_fast 4.1.0) | Recognising English. Other languages are fetched when chosen, from the same collection | Apache-2.0 | https://github.com/tesseract-ocr/tessdata_fast |
+| sherpa-onnx 1.13.8 | Natural voices for reading aloud, run by Papertrail's worker | Apache-2.0 | https://github.com/k2-fsa/sherpa-onnx |
+| ONNX Runtime | Running the natural voices' model, for sherpa-onnx | MIT | https://github.com/microsoft/onnxruntime |
+| espeak-ng | Saying words the natural voices' word lists lack, such as numbers and names. Built into sherpa-onnx | GPL-3.0-or-later | https://github.com/espeak-ng/espeak-ng |
+| Kokoro-82M | The natural voices themselves. Not in any package: fetched from Hugging Face when the user asks | Apache-2.0 | https://huggingface.co/hexgrad/Kokoro-82M |
 | OpenSSL | Secure connections for online lookups and summaries, in Linux packages. Windows uses its own | Apache-2.0 | https://www.openssl.org |
 
-MuPDF, Qt and Tesseract bring in others, such as FreeType, HarfBuzz, libjpeg-turbo, OpenJPEG, jbig2dec, Gumbo, libpng, ICU, Brotli, libarchive, libcurl, the GCC OpenMP runtime and, in Linux packages, the FFmpeg that Qt Multimedia plays speech through, whose licences are included the same way.
+MuPDF, Qt and Tesseract bring in others, such as FreeType, HarfBuzz, libjpeg-turbo, OpenJPEG, jbig2dec, Gumbo, libpng, ICU, Brotli, libarchive, libcurl, the GCC OpenMP runtime and, in Linux packages, the FFmpeg that Qt Multimedia plays speech through, whose licences are included the same way. sherpa-onnx brings in piper-phonemize, uni-algo, kaldi-native-fbank, kaldi-decoder, OpenFst, simple-sentencepiece, hclust-cpp, Eigen and JSON for Modern C++, whose licences are in `sherpa-onnx` among the licence texts, with ONNX Runtime's notices for what it contains.
 
-Qt is used under the LGPL, so you may replace the Qt libraries in a package with your own build of the same version. DjVuLibre is used under GPL version 3, as its "or later" allows, which section 13 of the GNU GPL and AGPL lets be combined with Papertrail.
+Qt is used under the LGPL, so you may replace the Qt libraries in a package with your own build of the same version. DjVuLibre is used under GPL version 3, as its "or later" allows, which section 13 of the GNU GPL and AGPL lets be combined with Papertrail, as is espeak-ng under GPL version 3.

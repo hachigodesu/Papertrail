@@ -131,15 +131,88 @@ void splitParagraph(const QList<SentenceLine> &lines, const QList<int> &which, Q
 
 } // namespace
 
+QString spokenForm(const QString &sentence)
+{
+    struct Replacement {
+        QRegularExpression pattern;
+        QString with;
+    };
+    static const QList<Replacement> replacements = [] {
+        const auto rule = [](const char *pattern, const char *with) {
+            return Replacement{QRegularExpression(QString::fromUtf8(pattern)), QString::fromUtf8(with)};
+        };
+        return QList<Replacement>{
+            // Reference markers, with the space before them: "as shown [12, 14-16]." is "as shown."
+            rule("\\s*\\[\\s*\\d+(?:\\s*[,;\\x{2013}-]\\s*\\d+)*\\s*\\]", ""),
+            // Ranges of pages, before the abbreviations that name them.
+            rule("\\b(pp?\\.)\\s*(\\d+)\\s*[\\x{2013}-]\\s*(\\d+)\\b", "\\1 \\2 to \\3"),
+            rule("\\b(\\d+)\\s*\\x{2013}\\s*(\\d+)\\b", "\\1 to \\2"),
+            rule("\\bpp\\.\\s*(?=\\d)", "pages "),
+            rule("\\bp\\.\\s*(?=\\d)", "page "),
+            rule("\\bFigs\\.\\s*", "Figures "),
+            rule("\\bFig\\.\\s*", "Figure "),
+            rule("\\bfigs\\.\\s*", "figures "),
+            rule("\\bfig\\.\\s*", "figure "),
+            rule("\\bEqs\\.\\s*", "Equations "),
+            rule("\\bEq\\.\\s*", "Equation "),
+            rule("\\beqs\\.\\s*", "equations "),
+            rule("\\beq\\.\\s*", "equation "),
+            rule("\\bTab\\.\\s*(?=\\d)", "Table "),
+            rule("\\bSec\\.\\s*(?=\\d)", "Section "),
+            rule("\\bCh\\.\\s*(?=\\d)", "Chapter "),
+            rule("\\be\\.\\s?g\\.", "for example"),
+            rule("\\bi\\.\\s?e\\.", "that is"),
+            rule("\\bcf\\.", "compare"),
+            rule("\\bvs\\.?(?=\\s)", "versus"),
+            rule("\\bet al\\.?", "and others"),
+        };
+    }();
+    QString said = sentence;
+    for (const Replacement &replacement : replacements)
+        said.replace(replacement.pattern, replacement.with);
+    return said.simplified();
+}
+
+bool endsSentence(const QString &sentence)
+{
+    qsizetype end = sentence.size();
+    while (end > 0 && (sentence.at(end - 1).isSpace() || QStringView(u"\"')]}\u2019\u201d").contains(sentence.at(end - 1))))
+        --end;
+    return end > 0 && QStringView(u".?!\u2026").contains(sentence.at(end - 1));
+}
+
+QString joinedAcrossPages(const QString &before, const QString &after)
+{
+    const QString first = before.trimmed();
+    const QString second = after.trimmed();
+    if (first.isEmpty() || second.isEmpty())
+        return first + second;
+    if (first.size() > 1 && first.endsWith(u'-') && first.at(first.size() - 2).isLetter() && second.at(0).isLower())
+        return first.chopped(1) + second;
+    return first + u' ' + second;
+}
+
 QList<Sentence> sentencesOf(const QList<SentenceLine> &lines)
 {
     QList<Sentence> sentences;
     QList<int> paragraph;
+    // Whether a line is the next piece of the row before it, such as a heading's words after its number, which a file
+    // can keep apart: that doesn't start a paragraph.
+    const auto sameRow = [&lines](int before, int line) {
+        const QList<QRectF> &a = lines.at(before).chars;
+        const QList<QRectF> &b = lines.at(line).chars;
+        if (a.isEmpty() || b.isEmpty())
+            return false;
+        const QRectF last = a.last();
+        const QRectF first = b.first();
+        const double overlap = qMin(last.bottom(), first.bottom()) - qMax(last.top(), first.top());
+        return overlap > qMin(last.height(), first.height()) * 0.5 && first.left() >= last.left();
+    };
     for (int i = 0; i < lines.size(); ++i) {
         const SentenceLine &line = lines.at(i);
         if (line.margin || line.text.trimmed().isEmpty())
             continue;
-        if (line.paragraph && !paragraph.isEmpty()) {
+        if (line.paragraph && !paragraph.isEmpty() && !sameRow(paragraph.last(), i)) {
             splitParagraph(lines, paragraph, sentences);
             paragraph.clear();
         }

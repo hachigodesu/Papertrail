@@ -2,10 +2,12 @@
 //
 // Reads one JSON request per line on stdin, and writes one JSON reply per line on stdout. It never
 // writes to the documents themselves, only to the cover paths it's given. With --reader, it instead
-// serves one open document to the reader: see ReaderHost.h.
+// serves one open document to the reader: see ReaderHost.h. With --voice, it says sentences with the natural voices:
+// see VoiceHost.h.
 
 #include "ReaderHost.h"
 #include "RecognisedText.h"
+#include "VoiceHost.h"
 
 #include "engine/Document.h"
 #include "engine/Ocr.h"
@@ -472,6 +474,9 @@ int main(int argc, char *argv[])
         std::cout << "papertrail-worker " << PAPERTRAIL_VERSION << std::endl;
         return 0;
     }
+
+    if (arguments.contains(QStringLiteral("--voice")))
+        return worker::runVoiceHost();
 
     engine::Engine engine;
 

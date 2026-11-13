@@ -81,10 +81,16 @@ add_library(papertrail_ui STATIC
     ReviewTab.h
     SettingsDialog.cpp
     SettingsDialog.h
+    NaturalSpeaker.cpp
+    NaturalSpeaker.h
+    ReadAloudBar.cpp
+    ReadAloudBar.h
     Speaker.cpp
     Speaker.h
     Theme.cpp
-    Theme.h)
+    Theme.h
+    VoiceClient.cpp
+    VoiceClient.h)
 
 target_include_directories(papertrail_ui PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(papertrail_ui PUBLIC papertrail_summary papertrail_citation papertrail_transfer Papertrail::Keychain papertrail_core papertrail_import papertrail_metadata Qt6::Widgets)
@@ -100,6 +106,9 @@ endif()
 if(PAPERTRAIL_WITH_SPEECH)
     target_link_libraries(papertrail_ui PRIVATE Qt6::TextToSpeech Qt6::Multimedia)
     target_compile_definitions(papertrail_ui PRIVATE PAPERTRAIL_WITH_SPEECH)
+    if(PAPERTRAIL_WITH_NATURAL_VOICE)
+        target_compile_definitions(papertrail_ui PRIVATE PAPERTRAIL_WITH_NATURAL_VOICE)
+    endif()
     if(UNIX AND NOT APPLE)
         find_path(FLITE_INCLUDE_DIR flite/flite.h)
         find_library(FLITE_LIBRARY flite)

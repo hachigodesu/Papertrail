@@ -414,16 +414,21 @@ def judgment_pdf(path):
 
 
 def reading_ruler_pdf(path):
-    """Two made-up pages for the reading ruler: a running head and a page number in the margins, then three paragraphs,
-    the first two set apart by a gap and the third only by its first line being set in, and a second page."""
+    """Three made-up pages for the reading ruler: a running head and a page number in the margins, a notice running up
+    the side of the page, as publishers' downloads have, a heading set in two pieces on one row, then three paragraphs,
+    the first two set apart by a gap and the third only by its first line being set in; a second page; and a third
+    with a figure's labels scattered between its text, and a footer set above the bottom margin."""
 
     def placed(items):
         """`items` is a list of (size, x, y, text), in points from the bottom left."""
         return "\n".join(f"BT /F1 {size} Tf {x} {y} Td ({escape_pdf(text)}) Tj ET"
                          for size, x, y, text in items).encode("latin-1")
 
+    sideways = b"\nBT /F1 8 Tf 0 1 -1 0 30 250 Tm (Downloaded from a made-up journal, for testing only) Tj ET"
     pages = [
         placed([(9, 50, 815, "A Made-Up Journal of Reading, Volume 1"),
+                (14, 50, 770, "2.3"),
+                (14, 110, 770, "Made-up measures"),
                 (11, 50, 740, "The first paragraph of a made-up page begins here and"),
                 (11, 50, 726, "carries on over a second line of words that mean nothing,"),
                 (11, 50, 712, "and ends on a third."),
@@ -431,13 +436,172 @@ def reading_ruler_pdf(path):
                 (11, 50, 666, "and has two lines."),
                 (11, 70, 652, "A third is only set in from the line before it,"),
                 (11, 50, 638, "as some books set them."),
-                (9, 290, 30, "1")]),
+                (9, 290, 30, "1")]) + sideways,
         placed([(9, 50, 815, "A Made-Up Journal of Reading, Volume 1"),
                 (11, 50, 740, "The second page has one paragraph of its own,"),
                 (11, 50, 726, "over two lines."),
                 (9, 290, 30, "2")]),
+        placed([(11, 50, 760, "A third page has a made-up figure in the middle of it,"),
+                (11, 50, 746, "with labels scattered around a drawing, which are not read"),
+                (11, 50, 732, "along with the text around them."),
+                (11, 230, 690, "A made-up label above"),
+                (11, 60, 640, "Left label"),
+                (11, 400, 640, "Right label"),
+                (11, 220, 590, "Two lines of a"),
+                (11, 235, 576, "made-up label:"),
+                (11, 50, 520, "After the figure the text carries on as it did before it,"),
+                (11, 50, 506, "and the footer at the bottom of the page is not read either."),
+                (9, 50, 70, "Made-up month 2026"),
+                (9, 200, 70, "MADE-UP JOURNAL"),
+                (9, 520, 70, "3")]),
     ]
     path.write_bytes(build_pdf(pages))
+
+
+def reading_figures_pdf(path):
+    """Two made-up pages with figures for the reading ruler. The first has three panels of small filled boxes side by
+    side, as a heat map has, with a colour bar, numbers along their axes, the axes' names, and labels inside each panel
+    lining up across them as a table's cells do, then a caption, and a table drawn with its cells' lines. The second
+    has a plot drawn with a line in a box, with numbers along its axes."""
+
+    def placed(items):
+        """`items` is a list of (size, x, y, text), in points from the bottom left."""
+        return "\n".join(f"BT /F1 {size} Tf {x} {y} Td ({escape_pdf(text)}) Tj ET"
+                         for size, x, y, text in items).encode("latin-1")
+
+    def upwards(size, x, y, text):
+        return f"BT /F1 {size} Tf 0 1 -1 0 {x} {y} Tm ({escape_pdf(text)}) Tj ET"
+
+    # The first page's figure: three panels, 8 boxes of 15 points across at the foot, one fewer each row up.
+    shapes = []
+    words = []
+    for panel in range(3):
+        left = 90 + panel * 134
+        words.append((9, left + 25, 710, f"max delay: {panel * 10}.0%"))
+        for row in range(8):
+            for column in range(row + 1):
+                shade = 0.2 + 0.08 * ((row + column + panel) % 8)
+                shapes.append(f"{shade:.2f} 0.1 0.3 rg {left + 15 * column} {705 - 15 * (row + 1)} 15 15 re f")
+        for n, label in enumerate(["min:0.0", f"max:0.{panel + 6}", f"mean:0.{panel + 2}"]):
+            words.append((9, left + 62, 680 - 12 * n, label))
+        for column, label in enumerate(["365", "730", "1460", "2920", "4380", "8760", "17520", "35040"]):
+            shapes.append(upwards(7, left + 15 * column + 11, 556, label))
+        words.append((9, left + 25, 543, "Frequency (/year)"))
+    for row, label in enumerate(["24.0", "12.0", "6.0", "3.0", "2.0", "1.0", "0.5", "0.25"]):
+        words.append((8, 70, 705 - 15 * (row + 1) + 4, label))
+    shapes.append(upwards(9, 62, 600, "Duration (hour)"))
+    for step in range(8):
+        shapes.append(f"{0.1 + 0.1 * step:.2f} 0.2 0.3 rg 495 {585 + 15 * step} 10 15 re f")
+    for n, label in enumerate(["0.0", "0.4", "0.8"]):
+        words.append((8, 509, 585 + 55 * n, label))
+    # A table drawn with its cells' lines, as one shape.
+    grid = ["0 0 0 RG 0.6 w"]
+    for y in (432, 412, 392, 372, 352):
+        grid.append(f"55 {y} m 420 {y} l")
+    for x in (55, 190, 330, 420):
+        grid.append(f"{x} 352 m {x} 432 l")
+    grid.append("S")
+    cells = [["Made-up", "First", "Second"], ["Alpha", "12", "30"], ["Beta", "8", "20"], ["Gamma", "5", "11"]]
+    table = [(10, [60, 200, 340][c], 418 - 20 * r, cell) for r, row in enumerate(cells) for c, cell in enumerate(row)]
+    first = (placed([(11, 50, 790, "A made-up page with a figure drawn as many small boxes,"),
+                     (11, 50, 776, "with labels around and inside it, which the ruler takes"),
+                     (11, 50, 762, "whole, and which are not read along with the text.")]
+                    + words
+                    + [(10, 50, 518, "Figure 1: A made-up figure of boxes, for testing the ruler."),
+                       (11, 50, 490, "After the figure the text carries on, and then comes a"),
+                       (11, 50, 476, "table drawn with its cells' lines, which is one stop too,"),
+                       (11, 50, 462, "while each of its rows is still read a row at a time.")]
+                    + table
+                    + [(9, 290, 30, "1")])
+             + ("\n" + "\n".join(shapes + grid)).encode("latin-1"))
+
+    # The second page's plot: a line in a box, with numbers along its axes.
+    plot = ["0 0 0 RG 0.8 w 100 550 300 180 re S", "0.2 0.4 0.2 RG 1 w 100 600 m"]
+    for n in range(1, 31):
+        plot.append(f"{100 + 10 * n} {600 + (37 * n) % 120} l")
+    plot.append("S")
+    second = (placed([(11, 50, 790, "The second made-up page has a plot drawn with a line, its"),
+                      (11, 50, 776, "numbers set around it, and nothing else in it at all, so"),
+                      (11, 50, 762, "that it is one stop for the ruler, and none of it is read."),
+                      (11, 200, 738, "Made-up utilisation"),
+                      (8, 80, 548, "0.0"), (8, 80, 638, "0.5"), (8, 80, 726, "1.0"),
+                      (8, 98, 538, "0"), (8, 196, 538, "10"), (8, 296, 538, "20"), (8, 394, 538, "30"),
+                      (9, 240, 524, "Day"),
+                      (10, 50, 496, "Figure 2: A made-up plot."),
+                      (11, 50, 466, "After it, the text ends with one more line to read here,"),
+                      (11, 50, 452, "and then the page ends with its number at the foot of it."),
+                      (9, 290, 30, "2")])
+              + ("\n" + "\n".join(plot)).encode("latin-1"))
+    path.write_bytes(build_pdf([first, second]))
+
+
+def reading_page_ends_pdf(path):
+    """Two made-up pages set with narrow margins, so their text reaches where running heads and footers usually are,
+    with a footer and a running head set apart from it that aren't read. The first page's last sentence carries on
+    over the page, broken in the middle of a word."""
+
+    def placed(items):
+        """`items` is a list of (size, x, y, text), in points from the bottom left."""
+        return "\n".join(f"BT /F1 {size} Tf {x} {y} Td ({escape_pdf(text)}) Tj ET"
+                         for size, x, y, text in items).encode("latin-1")
+
+    first = ["A made-up page whose text runs on almost to the foot",
+             "of the page, as some papers set it, with no more than",
+             "a narrow margin below its last line. Its last lines",
+             "are still read with the rest, and a footer set apart",
+             "below them is not. This sentence, though, does not",
+             "end on this page, but carries on over it, broken in",
+             "the middle of a word as it goes onto the next, exam-"]
+    second = ["ple of one, and ends here on the second page. Then the",
+              "second page carries on with a sentence of its own, over",
+              "two lines, and that is all it has to say about it.",
+              "Nothing here means anything at all, and the words were",
+              "made up for testing, as were the pages they are on."]
+    pages = [
+        placed([(11, 50, 110 - 12 * n, line) for n, line in enumerate(first)]
+               + [(9, 50, 14, "Made-up footer, not read"), (9, 290, 14, "1")]),
+        placed([(9, 50, 826, "A Made-Up Journal of Reading, Volume 1")]
+               + [(11, 50, 794 - 12 * n, line) for n, line in enumerate(second)]
+               + [(9, 290, 14, "2")]),
+    ]
+    path.write_bytes(build_pdf(pages))
+
+
+def reading_table_pdf(path):
+    """A made-up page in two columns for the reading ruler, with a table in the first beside running text in the
+    second: a caption, a row of column headings, rows of a label and numbers, a row that only heads the rows after it,
+    a label wrapped onto a second line, and notes below. The table is drawn a column at a time, as some files keep
+    them, so its rows have to be put back together."""
+
+    def placed(items):
+        """`items` is a list of (x, y, text), in points from the bottom left, all set in 9 points."""
+        return "\n".join(f"BT /F1 9 Tf {x} {y} Td ({escape_pdf(text)}) Tj ET" for x, y, text in items).encode("latin-1")
+
+    labels = [(48, 700, "Number"), (40, 686, "Made-up section"), (48, 672, "First"), (48, 658, "Second"),
+              (48, 644, "Mean size of"), (52, 633, "the measure"), (48, 618, "Other")]
+    columns = [
+        [(140, 715, "Group A"), (140, 700, "30 (60%)"), (140, 672, "12 (40%)"), (140, 658, "18 (60%)"),
+         (140, 644, "3.1 (0.4)"), (140, 618, "1 (3%)")],
+        [(190, 715, "Group B"), (190, 700, "20 (40%)"), (190, 672, "8 (40%)"), (190, 658, "12 (60%)"),
+         (190, 644, "3.3 (0.5)"), (190, 618, "2 (10%)")],
+        [(240, 715, "Total"), (240, 700, "50"), (240, 672, "20 (40%)"), (240, 658, "30 (60%)"),
+         (240, 644, "3.2 (0.4)"), (240, 618, "3 (6%)")],
+    ]
+    running = ["The second column has running text of its own, set",
+               "beside the table in the first, and it is read after",
+               "the table, a line at a time, as the rest of a page",
+               "is. None of the words here mean anything at all, and",
+               "the numbers in the table beside them were made up",
+               "for testing the ruler, which should go through the",
+               "whole table a row at a time rather than skipping",
+               "most of it, and then carry on with this column."]
+    items = [(40, 740, "Table 1 Made-up measures of made-up people, n (%)")] + labels
+    for column in columns:
+        items += column
+    items += [(40, 596, "a Made-up test: U = 12, z = 0.5, for testing only."),
+              (40, 584, "b A short note.")]
+    items += [(310, 740 - 12 * n, line) for n, line in enumerate(running)]
+    path.write_bytes(build_pdf([placed(items)]))
 
 
 def smart_jump_headings_pdf(path):
@@ -885,6 +1049,9 @@ def main():
     smart_jump_pdf(out / "smart_jump.pdf")
     smart_jump_headings_pdf(out / "smart_jump_headings.pdf")
     reading_ruler_pdf(out / "reading_ruler.pdf")
+    reading_table_pdf(out / "reading_table.pdf")
+    reading_page_ends_pdf(out / "reading_page_ends.pdf")
+    reading_figures_pdf(out / "reading_figures.pdf")
     smart_jump_contents_pdf(out / "smart_jump_contents.pdf")
     judgment_pdf(out / "judgment.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))

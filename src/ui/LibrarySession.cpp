@@ -47,6 +47,7 @@ LibraryPaths LibraryPaths::standard()
     paths.cacheDirectory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     paths.workerPath = installedWorker();
     paths.tessdataDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("tessdata"));
+    paths.voicesDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("voices"));
     return paths;
 }
 
@@ -58,6 +59,7 @@ LibraryPaths LibraryPaths::inFolder(const QString &folder)
     paths.cacheDirectory = dir.filePath(QStringLiteral("cache"));
     paths.workerPath = installedWorker();
     paths.tessdataDirectory = dir.filePath(QStringLiteral("tessdata"));
+    paths.voicesDirectory = dir.filePath(QStringLiteral("voices"));
     return paths;
 }
 

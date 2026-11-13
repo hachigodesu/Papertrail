@@ -299,6 +299,8 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
             line.bold = item.value(QStringLiteral("bold")).toBool();
             line.margin = item.value(QStringLiteral("margin")).toBool();
             line.paragraph = item.value(QStringLiteral("paragraph")).toBool();
+            line.figure = item.value(QStringLiteral("figure")).toBool();
+            line.table = item.value(QStringLiteral("table")).toInt(-1);
             lines << line;
         }
         emit linesReady(request.page, lines);

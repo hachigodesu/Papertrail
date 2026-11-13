@@ -632,11 +632,33 @@ bool containsAny(const QString &text, const QStringList &needles)
     return std::any_of(needles.begin(), needles.end(), [&](const QString &needle) { return text.contains(needle); });
 }
 
+// A name with words in capitals, as headings set them, the way a title has it: "References re SAMPLE ACT, 2018"
+// reads "References re Sample Act, 2018". A word of one letter, such as "R.", is left as it is.
+QString fromCapitals(const QString &name)
+{
+    static const QStringList small = {QStringLiteral("v"), QStringLiteral("v."), QStringLiteral("of"), QStringLiteral("and"),
+                                      QStringLiteral("the"), QStringLiteral("for"), QStringLiteral("in"), QStringLiteral("on"),
+                                      QStringLiteral("re"), QStringLiteral("et"), QStringLiteral("al.")};
+    QStringList words = name.split(u' ', Qt::SkipEmptyParts);
+    for (qsizetype i = 0; i < words.size(); ++i) {
+        QString &word = words[i];
+        const auto letters = std::count_if(word.cbegin(), word.cend(), [](QChar c) { return c.isLetter(); });
+        if (letters < 2 || word != word.toUpper())
+            continue;
+        word = word.toLower();
+        if (i > 0 && small.contains(word))
+            continue;
+        const auto first = std::find_if(word.begin(), word.end(), [](QChar c) { return c.isLetter(); });
+        *first = first->toUpper();
+    }
+    return words.join(u' ');
+}
+
 } // namespace
 
 // This never answers "preprint". Published papers carry too much of the same wording and the same
 // identifiers, such as an arXiv number or "accepted for publication", so that's for the user to say.
-std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, const QString &title)
+std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, const QString &title, const QString &laterPages)
 {
     const QString text = firstPage.left(6000);
     const QString lower = text.toLower();
@@ -697,6 +719,15 @@ std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, cons
     static const QRegularExpression ecli(QStringLiteral("\\bECLI:EU:([CT]):((?:19|20)\\d\\d):(\\d{1,6})\\b"));
     const QRegularExpressionMatch canadianMatch = canadian.match(text);
     const QRegularExpressionMatch ecliMatch = ecli.match(text);
+    // The Supreme Court Reports head each page with the report and its volume, "[2021] 1 S.C.R." (in French "R.C.S."),
+    // and the page, with the parties below it.
+    static const QRegularExpression scr(QStringLiteral("\\[((?:19|20)\\d\\d)\\]\\s+(\\d{1,2})\\s+(?:S\\.C\\.R\\.|R\\.C\\.S\\.)"));
+    const QString firstLine = text.trimmed().section(u'\n', 0, 0).left(300);
+    const QRegularExpressionMatch scrMatch = scr.match(firstLine);
+    const bool scrReport = scrMatch.hasMatch()
+        && containsAny(lower, {QStringLiteral("appellant"), QStringLiteral("respondent"), QStringLiteral("intervener"),
+                               QStringLiteral("appelant"), QStringLiteral("intimé"), QStringLiteral("in the matter of"),
+                               QStringLiteral("supreme court of canada")});
     bool courtHeading = false;
     // A Canadian or EU judgment's first page needn't name its parties as "X v Y" on a line of their own.
     bool nameOptional = false;
@@ -715,17 +746,68 @@ std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, cons
                                            QStringLiteral("before:"), QStringLiteral("before :"), QStringLiteral("lord justice"),
                                            QStringLiteral("lady justice"), QStringLiteral("mr justice"),
                                            QStringLiteral("mrs justice"), QStringLiteral("judgment given on")});
-    } else if (canadianMatch.hasMatch()
-               && containsAny(lower, {QStringLiteral("supreme court of canada"), QStringLiteral("court of appeal for "),
-                                      QStringLiteral("court of appeal of "), QStringLiteral("reasons for judgment"),
-                                      QStringLiteral("coram"), QStringLiteral("court of king's bench"),
-                                      QStringLiteral("court of queen's bench"), QStringLiteral("superior court of justice"),
-                                      QStringLiteral("federal court"), QStringLiteral("tax court of canada")})) {
-        details.neutralCitation = canadianMatch.captured(0).simplified();
-        details.year = canadianMatch.captured(1).toInt();
-        for (const CanadianCourt &court : canadianCourts) {
-            if (canadianMatch.captured(2) == QLatin1StringView(court.code))
-                details.court = QString::fromLatin1(court.court);
+    } else if (scrReport
+               || (canadianMatch.hasMatch()
+                   && containsAny(lower, {QStringLiteral("supreme court of canada"), QStringLiteral("court of appeal for "),
+                                          QStringLiteral("court of appeal of "), QStringLiteral("reasons for judgment"),
+                                          QStringLiteral("coram"), QStringLiteral("court of king's bench"),
+                                          QStringLiteral("court of queen's bench"), QStringLiteral("superior court of justice"),
+                                          QStringLiteral("federal court"), QStringLiteral("tax court of canada")}))) {
+        QRegularExpressionMatch citation = canadianMatch;
+        if (scrReport) {
+            details.court = QStringLiteral("Supreme Court of Canada");
+            details.report = QStringLiteral("S.C.R.");
+            details.reportVolume = QString::number(scrMatch.captured(2).toInt());
+            details.year = scrMatch.captured(1).toInt();
+            // The page is at the heading's far end from the report: after it on a right-hand page, before it on a left.
+            QString heading = firstLine;
+            heading.remove(scrMatch.capturedStart(0), scrMatch.capturedLength(0));
+            static const QRegularExpression pageAtAnEnd(QStringLiteral("^\\s*(\\d{1,4})\\s|\\s(\\d{1,4})\\s*$"));
+            if (const QRegularExpressionMatch page = pageAtAnEnd.match(heading); page.hasMatch())
+                details.reportPage = page.captured(1).isEmpty() ? page.captured(2) : page.captured(1);
+
+            // Its own name and neutral citation come a few pages on, after the parties: "Indexed as: R. v. Sample",
+            // then "2021 SCC 99". The pages after that cite other cases, so only these are believed.
+            const QString front = text + u'\n' + laterPages.left(40000);
+            static const QRegularExpression indexedAs(
+                QStringLiteral("Indexed\\s+as\\s*:\\s*(\\S.{1,300}?)\\s+((?:19|20)\\d\\d)\\s+SCC\\s+(\\d{1,4})\\b"),
+                QRegularExpression::DotMatchesEverythingOption);
+            const QRegularExpressionMatch indexed = indexedAs.match(front);
+            if (indexed.hasMatch()) {
+                details.name = fromCapitals(indexed.captured(1).simplified());
+                citation = canadian.match(front, indexed.capturedStart(2));
+                // Then when it was heard and decided, the decision last: "2020: September 22, 23; 2021: March 25."
+                static const QRegularExpression heard(
+                    QStringLiteral("((?:19|20)\\d\\d)\\s*:\\s*(January|February|March|April|May|June|July|August|September|"
+                                   "October|November|December)\\s+(\\d{1,2})\\b"));
+                const QString after = front.mid(indexed.capturedEnd(0), 400);
+                if (const QRegularExpressionMatch first = heard.match(after); first.hasMatch()) {
+                    const qsizetype lineEnd = after.indexOf(u'\n', first.capturedStart(0));
+                    const QString line = after.mid(first.capturedStart(0), lineEnd < 0 ? -1 : lineEnd - first.capturedStart(0));
+                    QRegularExpressionMatch last;
+                    for (QRegularExpressionMatchIterator each = heard.globalMatch(line); each.hasNext();)
+                        last = each.next();
+                    static const QStringList months = {QStringLiteral("January"), QStringLiteral("February"), QStringLiteral("March"),
+                                                       QStringLiteral("April"), QStringLiteral("May"), QStringLiteral("June"),
+                                                       QStringLiteral("July"), QStringLiteral("August"), QStringLiteral("September"),
+                                                       QStringLiteral("October"), QStringLiteral("November"), QStringLiteral("December")};
+                    details.year = last.captured(1).toInt();
+                    details.month = int(months.indexOf(last.captured(2))) + 1;
+                    details.day = last.captured(3).toInt();
+                }
+            } else if (!citation.hasMatch() || citation.captured(2) != QLatin1StringView("SCC")
+                       || std::abs(citation.captured(1).toInt() - *details.year) > 1) {
+                citation = {}; // One on the first page that isn't this court's, or not from about then, is one it cites.
+            }
+        }
+        if (citation.hasMatch()) {
+            details.neutralCitation = citation.captured(0).simplified();
+            if (!details.month)
+                details.year = citation.captured(1).toInt();
+            for (const CanadianCourt &court : canadianCourts) {
+                if (citation.captured(2) == QLatin1StringView(court.code))
+                    details.court = QString::fromLatin1(court.court);
+            }
         }
         details.jurisdiction = QStringLiteral("Canada");
         courtHeading = true;
@@ -811,10 +893,15 @@ std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, cons
     static const QRegularExpression parties(
         QStringLiteral("^\\s*(\\p{Lu}[\\p{L}\\d.,'’&()\\- ]{0,120}?)\\s+(?:v|vs|V)\\.?\\s+(\\p{Lu}[\\p{L}\\d.,'’&()\\- ]{0,120}?)\\s*$"),
         QRegularExpression::MultilineOption);
-    QRegularExpressionMatch match = parties.match(title.simplified());
-    if (!match.hasMatch())
-        match = parties.match(text);
-    if (match.hasMatch()) {
+    QRegularExpressionMatch match;
+    if (details.name.isEmpty()) {
+        match = parties.match(title.simplified());
+        if (!match.hasMatch())
+            match = parties.match(text);
+    }
+    if (!details.name.isEmpty()) {
+        // Already named, as the Supreme Court Reports index it.
+    } else if (match.hasMatch()) {
         const QString parties = match.captured(1).simplified() + u' ' + match.captured(2).simplified();
         details.name = match.captured(1).simplified() + QStringLiteral(" v ") + match.captured(2).simplified();
         // Headings are often all capitals, which reads better as a title.
@@ -854,7 +941,7 @@ Classification classify(const ClassificationInput &input)
     const bool longEnoughForThesis = pages == 0 || pages >= 30;
 
     // A judgment says so on its first page, though never so plainly that it's certain.
-    if (caseDetailsOnFirstPage(input.firstPage, input.title))
+    if (caseDetailsOnFirstPage(input.firstPage, input.title, input.laterPages))
         return {PublicationType::CaseLaw, false};
 
     static const QRegularExpression standardNumber(

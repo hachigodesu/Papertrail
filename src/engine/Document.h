@@ -71,6 +71,13 @@ struct TextLine {
     bool bold = false; // Most of it in a bold face.
 };
 
+// Something drawn on a page besides its text, in points: a picture, or a shape drawn with lines and fills.
+struct Drawing {
+    QRectF rect;
+    bool picture = false;
+    bool rectangle = false; // A shape that's only a rectangle, filled or outlined.
+};
+
 // A highlight, underline, note or area to write into a copy of a document. Rectangles are in points in the page's
 // own space, as a selection gives them. An area is drawn as a rectangle's outline, so what's under it still shows.
 struct MarkToWrite {
@@ -118,6 +125,8 @@ public:
     virtual QList<PageLink> links(int) { return {}; }
     // Where a page's pictures are, in points, so dark pages can leave them as they are.
     virtual QList<QRectF> imageAreas(int) { return {}; }
+    // What's drawn on a page besides its text, so that a figure can be told from the labels around it.
+    virtual QList<Drawing> drawings(int) { return {}; }
     virtual QList<QRectF> search(int, const QString &) { return {}; }
 
     // The text between two points on a page, as a reader would select it by dragging.

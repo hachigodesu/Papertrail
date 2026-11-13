@@ -4,9 +4,11 @@
 #include <QList>
 #include <QPair>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
 #include <functional>
+#include <memory>
 
 class QNetworkAccessManager;
 
@@ -32,14 +34,22 @@ struct HttpRequest {
 };
 
 // A file to fetch and keep, such as a language's model for recognising text. It's written to a temporary file as it
-// arrives, and only kept at `path` if it's exactly `sha256`, no larger than `maxBytes`. Redirects aren't followed.
+// arrives, and only kept at `path` if it's exactly `sha256`, no larger than `maxBytes`. Redirects aren't followed,
+// except up to three, securely, to the hosts in `redirectHosts`: an entry starting with a dot allows any name ending in
+// it. Nothing goes with a redirect but the address it gives.
 struct DownloadRequest {
     QUrl url;
     QString path;
     qint64 maxBytes = 0;
     QByteArray sha256; // In hex.
     int timeoutMs = 120000; // Without anything arriving.
+    QStringList redirectHosts;
+    std::function<void(qint64 received)> progress; // As the file arrives, if set.
+    std::shared_ptr<bool> stop; // Set it to stop, which ends with kDownloadStopped.
 };
+
+// What a download ends with when its `stop` was set.
+inline const QString kDownloadStopped = QStringLiteral("it was stopped");
 
 // The only way anything in Papertrail reaches the network. Offline mode never queues any work that
 // would call this, and tests swap it to prove that.
@@ -66,6 +76,9 @@ public:
     static bool canUseTls();
 
 private:
+    struct Download;
+    void fetch(const std::shared_ptr<Download> &download, const QUrl &url);
+
     QNetworkAccessManager *m_network;
 };
 

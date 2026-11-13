@@ -1,0 +1,67 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+5 0 obj
+<< /Length 1872 >>
+stream
+BT /F1 9 Tf 40 740 Td (Table 1 Made-up measures of made-up people, n \(%\)) Tj ET
+BT /F1 9 Tf 48 700 Td (Number) Tj ET
+BT /F1 9 Tf 40 686 Td (Made-up section) Tj ET
+BT /F1 9 Tf 48 672 Td (First) Tj ET
+BT /F1 9 Tf 48 658 Td (Second) Tj ET
+BT /F1 9 Tf 48 644 Td (Mean size of) Tj ET
+BT /F1 9 Tf 52 633 Td (the measure) Tj ET
+BT /F1 9 Tf 48 618 Td (Other) Tj ET
+BT /F1 9 Tf 140 715 Td (Group A) Tj ET
+BT /F1 9 Tf 140 700 Td (30 \(60%\)) Tj ET
+BT /F1 9 Tf 140 672 Td (12 \(40%\)) Tj ET
+BT /F1 9 Tf 140 658 Td (18 \(60%\)) Tj ET
+BT /F1 9 Tf 140 644 Td (3.1 \(0.4\)) Tj ET
+BT /F1 9 Tf 140 618 Td (1 \(3%\)) Tj ET
+BT /F1 9 Tf 190 715 Td (Group B) Tj ET
+BT /F1 9 Tf 190 700 Td (20 \(40%\)) Tj ET
+BT /F1 9 Tf 190 672 Td (8 \(40%\)) Tj ET
+BT /F1 9 Tf 190 658 Td (12 \(60%\)) Tj ET
+BT /F1 9 Tf 190 644 Td (3.3 \(0.5\)) Tj ET
+BT /F1 9 Tf 190 618 Td (2 \(10%\)) Tj ET
+BT /F1 9 Tf 240 715 Td (Total) Tj ET
+BT /F1 9 Tf 240 700 Td (50) Tj ET
+BT /F1 9 Tf 240 672 Td (20 \(40%\)) Tj ET
+BT /F1 9 Tf 240 658 Td (30 \(60%\)) Tj ET
+BT /F1 9 Tf 240 644 Td (3.2 \(0.4\)) Tj ET
+BT /F1 9 Tf 240 618 Td (3 \(6%\)) Tj ET
+BT /F1 9 Tf 40 596 Td (a Made-up test: U = 12, z = 0.5, for testing only.) Tj ET
+BT /F1 9 Tf 40 584 Td (b A short note.) Tj ET
+BT /F1 9 Tf 310 740 Td (The second column has running text of its own, set) Tj ET
+BT /F1 9 Tf 310 728 Td (beside the table in the first, and it is read after) Tj ET
+BT /F1 9 Tf 310 716 Td (the table, a line at a time, as the rest of a page) Tj ET
+BT /F1 9 Tf 310 704 Td (is. None of the words here mean anything at all, and) Tj ET
+BT /F1 9 Tf 310 692 Td (the numbers in the table beside them were made up) Tj ET
+BT /F1 9 Tf 310 680 Td (for testing the ruler, which should go through the) Tj ET
+BT /F1 9 Tf 310 668 Td (whole table a row at a time rather than skipping) Tj ET
+BT /F1 9 Tf 310 656 Td (most of it, and then carry on with this column.) Tj ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000185 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2235
+%%EOF

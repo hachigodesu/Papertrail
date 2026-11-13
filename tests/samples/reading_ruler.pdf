@@ -3,7 +3,7 @@
 << /Type /Catalog /Pages 2 0 R >>
 endobj
 2 0 obj
-<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R] /Count 3 >>
 endobj
 3 0 obj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
@@ -12,9 +12,11 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>
 endobj
 5 0 obj
-<< /Length 593 >>
+<< /Length 768 >>
 stream
 BT /F1 9 Tf 50 815 Td (A Made-Up Journal of Reading, Volume 1) Tj ET
+BT /F1 14 Tf 50 770 Td (2.3) Tj ET
+BT /F1 14 Tf 110 770 Td (Made-up measures) Tj ET
 BT /F1 11 Tf 50 740 Td (The first paragraph of a made-up page begins here and) Tj ET
 BT /F1 11 Tf 50 726 Td (carries on over a second line of words that mean nothing,) Tj ET
 BT /F1 11 Tf 50 712 Td (and ends on a third.) Tj ET
@@ -23,6 +25,7 @@ BT /F1 11 Tf 50 666 Td (and has two lines.) Tj ET
 BT /F1 11 Tf 70 652 Td (A third is only set in from the line before it,) Tj ET
 BT /F1 11 Tf 50 638 Td (as some books set them.) Tj ET
 BT /F1 9 Tf 290 30 Td (1) Tj ET
+BT /F1 8 Tf 0 1 -1 0 30 250 Tm (Downloaded from a made-up journal, for testing only) Tj ET
 endstream
 endobj
 6 0 obj
@@ -37,18 +40,41 @@ BT /F1 11 Tf 50 726 Td (over two lines.) Tj ET
 BT /F1 9 Tf 290 30 Td (2) Tj ET
 endstream
 endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 9 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+9 0 obj
+<< /Length 780 >>
+stream
+BT /F1 11 Tf 50 760 Td (A third page has a made-up figure in the middle of it,) Tj ET
+BT /F1 11 Tf 50 746 Td (with labels scattered around a drawing, which are not read) Tj ET
+BT /F1 11 Tf 50 732 Td (along with the text around them.) Tj ET
+BT /F1 11 Tf 230 690 Td (A made-up label above) Tj ET
+BT /F1 11 Tf 60 640 Td (Left label) Tj ET
+BT /F1 11 Tf 400 640 Td (Right label) Tj ET
+BT /F1 11 Tf 220 590 Td (Two lines of a) Tj ET
+BT /F1 11 Tf 235 576 Td (made-up label:) Tj ET
+BT /F1 11 Tf 50 520 Td (After the figure the text carries on as it did before it,) Tj ET
+BT /F1 11 Tf 50 506 Td (and the footer at the bottom of the page is not read either.) Tj ET
+BT /F1 9 Tf 50 70 Td (Made-up month 2026) Tj ET
+BT /F1 9 Tf 200 70 Td (MADE-UP JOURNAL) Tj ET
+BT /F1 9 Tf 520 70 Td (3) Tj ET
+endstream
+endobj
 xref
-0 8
+0 10
 0000000000 65535 f 
 0000000009 00000 n 
 0000000058 00000 n 
-0000000121 00000 n 
-0000000191 00000 n 
-0000000317 00000 n 
-0000000961 00000 n 
-0000001087 00000 n 
+0000000127 00000 n 
+0000000197 00000 n 
+0000000323 00000 n 
+0000001142 00000 n 
+0000001268 00000 n 
+0000001543 00000 n 
+0000001669 00000 n 
 trailer
-<< /Size 8 /Root 1 0 R >>
+<< /Size 10 /Root 1 0 R >>
 startxref
-1362
+2500
 %%EOF

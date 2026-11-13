@@ -99,6 +99,9 @@ const QList<SettingDefinition> &settingDefinitions()
         // Reading aloud, with a voice of this computer's.
         {QStringLiteral("reader.voice"), QStringLiteral(""), K::ThisComputer, {}},
         {QStringLiteral("reader.speech_rate"), 0.0, K::ThisComputer, {}},
+        {QStringLiteral("reader.speech_volume"), 1.0, K::ThisComputer, {}},
+        // Whether the natural voices have been offered on the first reading aloud, which happens once.
+        {QStringLiteral("speech.natural_offered"), false, K::ThisComputer, {}},
         // What the reading ruler marks.
         {QStringLiteral("reader.ruler"), QStringLiteral("line"), K::Value, {QStringLiteral("line"), QStringLiteral("paragraph")}},
         {QStringLiteral("citation.style"), QStringLiteral("harvard"), K::Value,

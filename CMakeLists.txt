@@ -47,8 +47,18 @@ if(PAPERTRAIL_WITH_SPEECH)
     # Here, since every program linking the static papertrail_ui needs to see these targets.
     find_package(Qt6 ${PAPERTRAIL_QT_MINIMUM} REQUIRED COMPONENTS TextToSpeech Multimedia)
 endif()
+# Kokoro's natural voices for reading aloud, made by sherpa-onnx in the worker, with the voices fetched when asked for.
+option(PAPERTRAIL_WITH_NATURAL_VOICE "Read aloud with Kokoro's natural voices, through sherpa-onnx" ON)
+if(PAPERTRAIL_WITH_NATURAL_VOICE AND NOT PAPERTRAIL_WITH_SPEECH)
+    message(FATAL_ERROR "Natural voices need reading aloud: configure with -DPAPERTRAIL_WITH_NATURAL_VOICE=OFF too")
+endif()
 # A package to give out, whose self-test fails if anything optional, such as recognising text, isn't in it.
 option(PAPERTRAIL_PACKAGE "Build a package, whose self-test requires every optional feature" OFF)
+
+# sherpa-onnx's licence, and those of what's built into it and into ONNX Runtime, which its releases don't include.
+if(PAPERTRAIL_WITH_NATURAL_VOICE)
+    install(DIRECTORY packaging/licenses/sherpa-onnx DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/papertrail)
+endif()
 
 # English, for recognising text, found beside the program by ui::bundledTessdata.
 if(PAPERTRAIL_WITH_OCR)
@@ -68,6 +78,9 @@ option(PAPERTRAIL_BUILD_FORMAT_PROBE "Build the document format probe tool" OFF)
 include(SQLite)
 include(Mobi)
 include(Keychain)
+if(PAPERTRAIL_WITH_NATURAL_VOICE)
+    include(SherpaOnnx)
+endif()
 
 add_subdirectory(src)
 add_subdirectory(tools/gen_library)

@@ -127,15 +127,21 @@ struct CaseDetails {
     QString jurisdiction;    // "United Kingdom", "England and Wales", "United States", and so on.
     QString neutralCitation; // Such as "[2020] UKSC 5".
     QString caseNumber;      // Such as "No. 19-123" or "A2/2019/1234".
+    QString report;          // The law report it's printed in, such as "S.C.R.", with its volume and first page.
+    QString reportVolume;
+    QString reportPage;
     std::optional<int> year;
     std::optional<int> month;
     std::optional<int> day;
 };
 
 // A first page that reads as a judgment: a UK-style neutral citation or a court's heading, with a case's name or its
-// parties, and not an article's abstract. Only the first page is looked at, since articles and reference lists cite
+// parties, and not an article's abstract. Only the first page decides, since articles and reference lists cite
 // cases all the time. Never certain, so a publication found this way is marked for review. `title` is what the page's
 // largest text or the file says it's called, which is often the case's name when the text runs its lines together.
-std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, const QString &title = QString());
+// `laterPages` are only read for a judgment printed in the Supreme Court Reports, whose first page heads it with the
+// report and whose neutral citation and name come a few pages on, under "Indexed as:".
+std::optional<CaseDetails> caseDetailsOnFirstPage(const QString &firstPage, const QString &title = QString(),
+                                                  const QString &laterPages = QString());
 
 } // namespace papertrail::import

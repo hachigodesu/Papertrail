@@ -26,4 +26,16 @@ struct Sentence {
 // with no letters, such as a lone reference marker, isn't a sentence.
 QList<Sentence> sentencesOf(const QList<SentenceLine> &lines);
 
+// Whether a sentence ends as one does: with a full stop, a question or exclamation mark, or an ellipsis, perhaps
+// followed by closing quotes or brackets. A page's last sentence that doesn't carries on over the page.
+bool endsSentence(const QString &sentence);
+// A sentence carried on over a page, from its words on the one page and the other, with a word broken across them
+// joined again.
+QString joinedAcrossPages(const QString &before, const QString &after);
+
+// A sentence as a voice should be given it: abbreviations that voices misread said in full ("Fig. 3" as "Figure 3",
+// "pp. 113-118" as "pages 113 to 118", "e.g." as "for example"), and reference markers such as "[12]" left out. What's
+// marked on the page stays as it is.
+QString spokenForm(const QString &sentence);
+
 } // namespace papertrail::core

@@ -110,13 +110,20 @@ public:
     // Reading aloud, from the start of the selection, else the ruler's line, else the top of the page being read, a
     // sentence at a time, marking each, and on through the pages shown.
     void startReadingAloud();
+    // From the sentence at this point of a page, as from the page's menu, or a click while reading.
+    void startReadingAloudAt(int page, const QPointF &point);
     void pauseOrResumeReadingAloud();
     void stopReadingAloud();
+    void nextSentence();
+    void previousSentence();
+    class ReadAloudBar *readAloudBar() const { return m_bar; }
     bool isReadingAloud() const { return m_reading; }
     bool isReadingPaused() const;
     // Where it's got to, for tests: the page, and which sentence of those on it.
     int readingPage() const { return m_reading ? m_readingPage : -1; }
     int readingSentence() const { return m_readingIndex; }
+    // The lines of a page read so far, as the ruler and reading aloud have them.
+    QList<ReaderTextLine> pageLines(int page) const { return m_pageLines.value(page); }
     // Where it is, for tests: the page, and which line or paragraph of it.
     int rulerPage() const { return m_rulerPage; }
     int rulerIndex() const { return m_rulerIndex; }
@@ -124,6 +131,9 @@ public:
     struct RulerStop {
         QRectF rect;
         QString text;
+        bool figure = false; // A whole figure, which nothing joins.
+        // Which table it is, all of whose rows it is, or -1.
+        int table = -1;
     };
     QList<RulerStop> rulerStops(int page) const;
     bool isShowingProblem() const;
@@ -388,21 +398,45 @@ private:
     std::optional<QPointF> m_rulerWaitingPoint;
     QString m_rulerText; // Where it was, to find again after a new layout.
 
-    void readPage(int page, double fromY);
+    // Where on a page to start: a point, the top of the page down to a height, or its last sentence.
+    struct ReadingStart {
+        double fromY = 0;
+        std::optional<QPointF> at;
+        bool fromEnd = false;
+        bool carriedOver = false; // Its first sentence was said with the last of the page before.
+    };
+    bool ensureSpeaker();
+    void beginReading(int page, const ReadingStart &start);
+    void readPage(int page, const ReadingStart &start);
+    // Reads a page once its lines, and the next page's, are here.
+    void readWhenReady(int page, const ReadingStart &start);
+    bool linesReadyFor(int page) const;
+    void sayFrom(int index);
     void onSentenceStarted(int index);
+    // Marks a sentence of the page being read as the one being read, and follows it.
+    void showReading(int sentence);
+    QList<core::Sentence> sentencesOfPage(int page) const;
+    // Tells the speaker how the next page starts, once its lines are here, so a voice can make it ahead.
+    void prepareNextPage();
     void onReadingFinished();
+    void updateReadingBar();
     std::unique_ptr<class Speaker> m_speaker;
+    bool m_naturalUnavailable = false; // The natural voice couldn't work here, so the system's reads.
+    QString m_speakerChoice;           // Which voice m_speaker is.
     bool m_reading = false;
     int m_readingPage = -1;
-    double m_readingFrom = 0;    // Where on the page to start, in points from its top.
-    bool m_readingWaiting = false; // For the page's lines.
-    QList<core::Sentence> m_readingSentences; // From where it started on the page.
-    int m_readingFirst = 0;       // How many of the page's sentences came before those.
-    int m_readingIndex = -1;      // Of the page's sentences.
-    bool m_followReading = true;  // Until the user scrolls away from it.
-    QAction *m_readPauseAction = nullptr;
-    QAction *m_readStopAction = nullptr;
-    class QToolButton *m_readPause = nullptr;
+    ReadingStart m_readingStart;
+    bool m_readingWaiting = false;          // For the page's lines.
+    QList<core::Sentence> m_pageSentences;  // All of those on the page being read.
+    // The page's last sentence carries on over the page, into the next page's first, which is said with it.
+    bool m_carriesOn = false;
+    core::Sentence m_nextFirst;
+    bool m_carriedOver = false;             // Its first sentence was said with the page before's last.
+    int m_sayFrom = 0;                      // Which of them was first in what the speaker was last given.
+    int m_readingIndex = -1;                // Which of them is being said.
+    bool m_followReading = true;            // Until the user scrolls away from it.
+    class ReadAloudBar *m_bar = nullptr;
+    class QToolButton *m_readAloudButton = nullptr;
     std::function<void(const QUrl &)> m_openLink;
 
     QList<Hit> m_hits;

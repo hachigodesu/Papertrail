@@ -7,6 +7,7 @@
 //   papertrail-lookup --title "A title to search for"
 //   papertrail-lookup --case "[2021] UKSC 5"            (a neutral citation, ECLI, EU case number or US report)
 //   papertrail-lookup --case-name "A v B" --jurisdiction uk
+//   papertrail-lookup --natural-voices FOLDER           (fetches the natural voices, 367 MB, as the app does)
 //
 // CourtListener and CanLII need keys of the user's own, read from PAPERTRAIL_COURTLISTENER_TOKEN and
 // PAPERTRAIL_CANLII_KEY, never from the command line. Use public records only.
@@ -14,11 +15,13 @@
 #include "core/model/PublicationFields.h"
 #include "metadata/CaseLaw.h"
 #include "metadata/Matching.h"
+#include "metadata/NaturalVoices.h"
 #include "metadata/Providers.h"
 #include "metadata/Transport.h"
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QDir>
 #include <QEventLoop>
 #include <QRegularExpression>
 #include <QTextStream>
@@ -76,6 +79,9 @@ int main(int argc, char *argv[])
     parser.addOption({QStringLiteral("case-name"), QStringLiteral("A case's name to search for."), QStringLiteral("name")});
     parser.addOption({QStringLiteral("jurisdiction"), QStringLiteral("uk, us, eu or ca, for a case's name alone."),
                       QStringLiteral("where")});
+    parser.addOption({QStringLiteral("natural-voices"),
+                      QStringLiteral("Fetches the natural voices into this folder, as the app does, checking every file."),
+                      QStringLiteral("folder")});
     parser.process(app);
 
     out << "Secure connections available: " << (NetworkTransport::canUseTls() ? "yes" : "NO") << '\n';
@@ -197,6 +203,34 @@ int main(int argc, char *argv[])
             out << "No source covers this case. Give --jurisdiction for a name alone.\n";
             allOk = false;
             break;
+        }
+    }
+    if (parser.isSet(QStringLiteral("natural-voices"))) {
+        const QString folder = parser.value(QStringLiteral("natural-voices"));
+        out << "Natural voices from Hugging Face, " << naturalVoicesBytes() / 1000000 << " MB: ";
+        out.flush();
+        QEventLoop loop;
+        QString error = QStringLiteral("never answered");
+        qint64 shown = 0;
+        downloadNaturalVoices(
+            transport, folder,
+            [&](qint64 received) {
+                if (received - shown >= 50000000) {
+                    shown = received;
+                    out << received / 1000000 << " MB... ";
+                    out.flush();
+                }
+            },
+            [&](const QString &result) {
+                error = result;
+                loop.quit();
+            });
+        loop.exec();
+        if (error.isEmpty() && naturalVoicesPresent(folder)) {
+            out << "all there, in " << QDir::toNativeSeparators(naturalVoicesFolder(folder)) << '\n';
+        } else {
+            out << "FAILED: " << error << '\n';
+            allOk = false;
         }
     }
     return allOk ? 0 : 1;

@@ -803,7 +803,7 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
     p.type = classification.type;
     p.needsReview = !titleIsReliable || !classification.confident;
     if (p.type == PublicationType::CaseLaw) {
-        if (const std::optional<CaseDetails> details = caseDetailsOnFirstPage(firstPage, p.title)) {
+        if (const std::optional<CaseDetails> details = caseDetailsOnFirstPage(firstPage, p.title, laterPages)) {
             // A judgment's largest text is usually its court or "JUDGMENT", so the parties make a better title.
             if (!details->name.isEmpty() && titleSource != QLatin1StringView("embedded")) {
                 p.title = details->name;
@@ -813,6 +813,11 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
             p.jurisdiction = details->jurisdiction;
             p.neutralCitation = details->neutralCitation;
             p.caseNumber = details->caseNumber;
+            if (!details->report.isEmpty() && !details->reportVolume.isEmpty() && !details->reportPage.isEmpty()) {
+                p.containerTitle = details->report;
+                p.volume = details->reportVolume;
+                p.pages = details->reportPage;
+            }
             if (details->year) {
                 p.year = details->year;
                 p.month = details->month;

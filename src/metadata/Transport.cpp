@@ -30,7 +30,35 @@ int secondsToWait(const QByteArray &header)
     return int(qBound<qint64>(0, value, kLongestWaitSeconds));
 }
 
+// Whether a download may be sent on to `to`: securely, to a host it allows, or here for tests.
+bool mayRedirectTo(const QUrl &to, const QStringList &hosts)
+{
+    const QString host = to.host().toLower();
+    if (to.scheme() != QLatin1StringView("https") && host != QLatin1StringView("127.0.0.1"))
+        return false;
+    if (!to.userInfo().isEmpty())
+        return false;
+    for (const QString &allowed : hosts) {
+        if (allowed.startsWith(QLatin1Char('.')) ? host.endsWith(allowed.toLower()) : host == allowed.toLower())
+            return true;
+    }
+    return false;
+}
+
+constexpr int kMostRedirects = 3;
+
 } // namespace
+
+// One download as it goes, carried from request to request as redirects are followed.
+struct NetworkTransport::Download {
+    DownloadRequest request;
+    std::function<void(const QString &)> done;
+    std::unique_ptr<QSaveFile> file;
+    QCryptographicHash hash{QCryptographicHash::Sha256};
+    qint64 received = 0;
+    QString problem;
+    int redirects = 0;
+};
 
 void Transport::send(const HttpRequest &, const Callback &callback)
 {
@@ -57,64 +85,92 @@ void Transport::download(const DownloadRequest &, const std::function<void(const
     done(QStringLiteral("this can't fetch files"));
 }
 
-void NetworkTransport::download(const DownloadRequest &download, const std::function<void(const QString &)> &done)
+void NetworkTransport::download(const DownloadRequest &request, const std::function<void(const QString &)> &done)
 {
-    if (download.url.scheme() != QLatin1StringView("https") && download.url.host() != QLatin1StringView("127.0.0.1")) {
+    if (request.url.scheme() != QLatin1StringView("https") && request.url.host() != QLatin1StringView("127.0.0.1")) {
         done(QStringLiteral("files are only fetched securely"));
         return;
     }
-    auto file = std::make_shared<QSaveFile>(download.path);
-    if (!file->open(QIODevice::WriteOnly)) {
-        done(QStringLiteral("it couldn't be saved: %1").arg(file->errorString()));
+    auto download = std::make_shared<Download>();
+    download->request = request;
+    download->done = done;
+    download->file = std::make_unique<QSaveFile>(request.path);
+    if (!download->file->open(QIODevice::WriteOnly)) {
+        done(QStringLiteral("it couldn't be saved: %1").arg(download->file->errorString()));
         return;
     }
-    QNetworkRequest request(download.url);
+    fetch(download, request.url);
+}
+
+void NetworkTransport::fetch(const std::shared_ptr<Download> &download, const QUrl &url)
+{
+    QNetworkRequest request(url);
     const QString version = QCoreApplication::applicationVersion();
     request.setHeader(QNetworkRequest::UserAgentHeader,
                       QStringLiteral("Papertrail/%1 (https://github.com/hachigodesu/Papertrail)").arg(version.isEmpty() ? QStringLiteral("dev") : version));
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    request.setTransferTimeout(download.timeoutMs);
+    request.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);
+    request.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
+    request.setTransferTimeout(download->request.timeoutMs);
 
     QNetworkReply *reply = m_network->get(request);
-    auto hash = std::make_shared<QCryptographicHash>(QCryptographicHash::Sha256);
-    auto received = std::make_shared<qint64>(0);
-    auto problem = std::make_shared<QString>();
-    const qint64 limit = download.maxBytes;
-    QObject::connect(reply, &QNetworkReply::readyRead, reply, [reply, file, hash, received, problem, limit] {
+    const auto stopped = [download] { return download->request.stop && *download->request.stop; };
+    QObject::connect(reply, &QNetworkReply::readyRead, reply, [reply, download, stopped] {
         const QByteArray chunk = reply->readAll();
-        *received += chunk.size();
-        if (*received > limit) {
-            *problem = QStringLiteral("it was larger than it should be");
+        // Only the file itself is kept, never what a redirect says alongside it.
+        if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200 || !download->problem.isEmpty())
+            return;
+        if (stopped()) {
+            download->problem = kDownloadStopped;
             reply->abort();
             return;
         }
-        hash->addData(chunk);
-        if (file->write(chunk) != chunk.size()) {
-            *problem = QStringLiteral("it couldn't be saved: %1").arg(file->errorString());
+        download->received += chunk.size();
+        if (download->received > download->request.maxBytes) {
+            download->problem = QStringLiteral("it was larger than it should be");
             reply->abort();
+            return;
         }
+        download->hash.addData(chunk);
+        if (download->file->write(chunk) != chunk.size()) {
+            download->problem = QStringLiteral("it couldn't be saved: %1").arg(download->file->errorString());
+            reply->abort();
+            return;
+        }
+        if (download->request.progress)
+            download->request.progress(download->received);
     });
-    const QByteArray expected = download.sha256.toLower();
-    QObject::connect(reply, &QNetworkReply::finished, reply, [reply, file, hash, problem, expected, done] {
-        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        QString error = *problem;
-        if (error.isEmpty() && status != 200)
-            error = status >= 300 && status < 400 ? QStringLiteral("it was somewhere else, which isn't followed")
-                  : status > 0                    ? QStringLiteral("the server said %1").arg(status)
-                                                  : reply->errorString();
-        if (error.isEmpty() && hash->result().toHex() != expected)
-            error = QStringLiteral("it wasn't the file expected");
+    QObject::connect(reply, &QNetworkReply::finished, reply, [this, reply, download, stopped] {
         reply->deleteLater();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        QString error = download->problem;
+        if (error.isEmpty() && stopped())
+            error = kDownloadStopped;
+        if (error.isEmpty() && status >= 300 && status < 400) {
+            const QUrl to = reply->url().resolved(reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl());
+            if (!mayRedirectTo(to, download->request.redirectHosts)) {
+                error = QStringLiteral("it was somewhere else, which isn't followed");
+            } else if (++download->redirects > kMostRedirects) {
+                error = QStringLiteral("it was sent on too many times");
+            } else {
+                fetch(download, to);
+                return;
+            }
+        }
+        if (error.isEmpty() && status != 200)
+            error = status > 0 ? QStringLiteral("the server said %1").arg(status) : reply->errorString();
+        if (error.isEmpty() && download->hash.result().toHex() != download->request.sha256.toLower())
+            error = QStringLiteral("it wasn't the file expected");
         if (!error.isEmpty()) {
-            file->cancelWriting();
-            done(error);
+            download->file->cancelWriting();
+            download->done(error);
             return;
         }
-        if (!file->commit()) {
-            done(QStringLiteral("it couldn't be saved: %1").arg(file->errorString()));
+        if (!download->file->commit()) {
+            download->done(QStringLiteral("it couldn't be saved: %1").arg(download->file->errorString()));
             return;
         }
-        done(QString());
+        download->done(QString());
     });
 }
 

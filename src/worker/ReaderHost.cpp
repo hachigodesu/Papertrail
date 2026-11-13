@@ -28,6 +28,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
 
 #ifdef Q_OS_WIN
 #include <fcntl.h>
@@ -43,22 +44,6 @@ namespace {
 // Far larger than any screen needs. The reader asks for less, but a file could claim pages of any size.
 constexpr double kMaxPixelsAcross = 16000;
 constexpr double kMaxPixels = 100e6;
-
-// Replies carry binary data, so nothing else may reach them. Libraries sometimes print to stdout, so
-// this takes a private copy of it, and points the original somewhere harmless.
-FILE *claimStandardOutput()
-{
-#ifdef Q_OS_WIN
-    const int privateCopy = _dup(_fileno(stdout));
-    _dup2(_fileno(stderr), _fileno(stdout));
-    _setmode(privateCopy, _O_BINARY);
-    return _fdopen(privateCopy, "wb");
-#else
-    const int privateCopy = dup(STDOUT_FILENO);
-    dup2(STDERR_FILENO, STDOUT_FILENO);
-    return fdopen(privateCopy, "wb");
-#endif
-}
 
 QJsonArray rectToJson(const QRectF &rect)
 {
@@ -91,6 +76,22 @@ void applyOpenFaults(const QString &path)
 constexpr qint64 kKindleHeadBytes = 256 * 1024;
 
 } // namespace
+
+// Replies carry binary data, so nothing else may reach them. Libraries sometimes print to stdout, so
+// this takes a private copy of it, and points the original somewhere harmless.
+FILE *claimStandardOutput()
+{
+#ifdef Q_OS_WIN
+    const int privateCopy = _dup(_fileno(stdout));
+    _dup2(_fileno(stderr), _fileno(stdout));
+    _setmode(privateCopy, _O_BINARY);
+    return _fdopen(privateCopy, "wb");
+#else
+    const int privateCopy = dup(STDOUT_FILENO);
+    dup2(STDERR_FILENO, STDOUT_FILENO);
+    return fdopen(privateCopy, "wb");
+#endif
+}
 
 // For testing how the reader copes with a page that crashes or hangs. Only with this variable set,
 // which the app itself never does: a file named __crashpage3__.pdf crashes on page 3.
@@ -240,6 +241,575 @@ bool inMargin(const engine::TextLine &line, double pageHeight, double body)
     if (pageHeight <= 0 || line.size > body + 0.5)
         return false;
     return line.rect.bottom() < pageHeight * 0.075 || line.rect.top() > pageHeight * 0.93;
+}
+
+// A table's rows, top to bottom, each its lines left to right.
+using TableRows = QList<QList<int>>;
+
+// The tables among a page's shorter lines: rows of pieces set well apart, a few of them in a run, whose pieces line up
+// with those of the other rows, as a table's cells do. A figure's labels scattered around a drawing don't. Rows within
+// a table that only head the rows after it, or carry on a label from the row above, are part of it. `full` says which
+// lines are the running text's, which a table's rows never have beside them.
+QList<TableRows> tablesAmong(const QList<engine::TextLine> &lines, const QList<bool> &candidate, const QList<bool> &full)
+{
+    QList<int> order;
+    for (int i = 0; i < lines.size(); ++i) {
+        if (candidate.at(i) && !lines.at(i).rect.isEmpty())
+            order << i;
+    }
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return lines.at(a).rect.center().y() < lines.at(b).rect.center().y(); });
+
+    // The rows: lines side by side, whose heights mostly overlap the first's.
+    struct Row {
+        QList<int> pieces;
+        QRectF rect;
+        QRectF first;
+    };
+    QList<Row> rows;
+    for (int i : std::as_const(order)) {
+        const QRectF rect = lines.at(i).rect;
+        if (!rows.isEmpty()) {
+            Row &row = rows.last();
+            const double overlap = qMin(row.first.bottom(), rect.bottom()) - qMax(row.first.top(), rect.top());
+            if (overlap > qMin(row.first.height(), rect.height()) * 0.5) {
+                row.pieces << i;
+                row.rect = row.rect.united(rect);
+                continue;
+            }
+        }
+        rows << Row{{i}, rect, rect};
+    }
+    for (Row &row : rows)
+        std::sort(row.pieces.begin(), row.pieces.end(), [&](int a, int b) { return lines.at(a).rect.left() < lines.at(b).rect.left(); });
+
+    // A row's cells: its pieces, with those that touch, such as a superscript, taken together.
+    const auto cellsOf = [&](const QList<int> &pieces) {
+        QList<QRectF> cells;
+        for (int i : pieces) {
+            const QRectF rect = lines.at(i).rect;
+            if (!cells.isEmpty() && rect.left() - cells.last().right() < 0.5 * qMin(rect.height(), cells.last().height())) {
+                cells.last() = cells.last().united(rect);
+                continue;
+            }
+            cells << rect;
+        }
+        return cells;
+    };
+    const auto lineUp = [](const QRectF &a, const QRectF &b) {
+        return qAbs(a.left() - b.left()) <= 3 || qAbs(a.right() - b.right()) <= 3 || qAbs(a.center().x() - b.center().x()) <= 3;
+    };
+
+    QList<TableRows> tables;
+    qsizetype start = 0;
+    while (start < rows.size()) {
+        // A run of rows close together.
+        qsizetype end = start + 1;
+        while (end < rows.size()
+               && rows.at(end).rect.top() - rows.at(end - 1).rect.bottom()
+                      <= 2.5 * qMax(rows.at(end).first.height(), rows.at(end - 1).first.height()))
+            ++end;
+        const qsizetype runStart = start;
+        start = end;
+        if (end - runStart < 3)
+            continue;
+
+        // What's beside the running text isn't the table's: running text overlapping it within the run.
+        double top = 0;
+        double bottom = -1;
+        for (qsizetype r = runStart; r < end; ++r) {
+            if (cellsOf(rows.at(r).pieces).size() < 2)
+                continue;
+            if (bottom < top) {
+                top = rows.at(r).rect.top();
+            }
+            bottom = rows.at(r).rect.bottom();
+        }
+        if (bottom < top)
+            continue;
+        QList<QList<int>> kept;
+        QList<QList<QRectF>> cells;
+        for (qsizetype r = runStart; r < end; ++r) {
+            QList<int> pieces;
+            for (int i : rows.at(r).pieces) {
+                const QRectF rect = lines.at(i).rect;
+                bool besideText = false;
+                for (int j = 0; j < lines.size() && !besideText; ++j) {
+                    const QRectF other = lines.at(j).rect;
+                    besideText = full.at(j) && other.right() > rect.left() && other.left() < rect.right()
+                                 && other.center().y() > top && other.center().y() < bottom;
+                }
+                if (!besideText)
+                    pieces << i;
+            }
+            kept << pieces;
+            cells << cellsOf(pieces);
+        }
+
+        // Rows whose cells line up with other rows' cells, at least two of them each with at least two other rows.
+        const qsizetype n = end - runStart;
+        QList<bool> tabular(n, false);
+        int tabularRows = 0;
+        for (qsizetype r = 0; r < n; ++r) {
+            if (cells.at(r).size() < 2)
+                continue;
+            int aligned = 0;
+            for (const QRectF &cell : cells.at(r)) {
+                int others = 0;
+                for (qsizetype o = 0; o < n; ++o) {
+                    if (o != r && cells.at(o).size() >= 2
+                        && std::any_of(cells.at(o).cbegin(), cells.at(o).cend(), [&](const QRectF &c) { return lineUp(cell, c); }))
+                        ++others;
+                }
+                aligned += others >= 2 ? 1 : 0;
+            }
+            tabular[r] = aligned >= 2;
+            tabularRows += tabular.at(r) ? 1 : 0;
+        }
+        if (tabularRows < 3)
+            continue;
+        qsizetype first = tabular.indexOf(true);
+        qsizetype last = tabular.lastIndexOf(true);
+        QRectF box;
+        for (qsizetype r = first; r <= last; ++r) {
+            if (tabular.at(r)) {
+                for (const QRectF &cell : cells.at(r))
+                    box = box.united(cell);
+            }
+        }
+        // Rows of cells just before or after, such as the columns' headings, inside the table's width.
+        const auto within = [&](qsizetype r) {
+            if (cells.at(r).size() < 2)
+                return false;
+            const double slack = 2 * rows.at(runStart + r).first.height();
+            return std::all_of(cells.at(r).cbegin(), cells.at(r).cend(),
+                               [&](const QRectF &c) { return c.left() >= box.left() - slack && c.right() <= box.right() + slack; });
+        };
+        while (first > 0 && within(first - 1))
+            --first;
+        while (last + 1 < n && within(last + 1))
+            ++last;
+
+        TableRows table;
+        for (qsizetype r = first; r <= last; ++r) {
+            const double slack = rows.at(runStart + r).first.height();
+            QList<int> row;
+            for (int i : kept.at(r)) {
+                const double middle = lines.at(i).rect.center().x();
+                if (middle >= box.left() - slack && middle <= box.right() + slack)
+                    row << i;
+            }
+            if (!row.isEmpty())
+                table << row;
+        }
+        tables << table;
+    }
+    return tables;
+}
+
+
+// The gap between two boxes, across or down, whichever is more: nothing where they overlap.
+double gapBetween(const QRectF &a, const QRectF &b)
+{
+    const double across = qMax(0.0, qMax(a.left() - b.right(), b.left() - a.right()));
+    const double down = qMax(0.0, qMax(a.top() - b.bottom(), b.top() - a.bottom()));
+    return qMax(across, down);
+}
+
+// Whether a line starts a caption, such as "Figure 3:" or "Table 2.", which goes with the text rather than a figure.
+bool startsCaption(const QString &line)
+{
+    static const QRegularExpression caption(
+        QStringLiteral("^\\s*(fig(ure)?s?\\.?|table|tab\\.|scheme|chart|plate|exhibit|graph)\\s*[A-Z]?\\d"),
+        QRegularExpression::CaseInsensitiveOption);
+    return caption.match(line).hasMatch();
+}
+
+// Where a page's drawings are, in groups of those near each other: everything drawn but rules, page-sized
+// backgrounds, and boxes behind text, such as a table's shaded rows. A group is part of a figure only if it isn't all in
+// the top or bottom margin and has pictures or shapes besides boxes behind text, and it's a figure's drawing only if
+// it's large enough to be one: a smaller one, such as a colour bar, is only part of a figure it's beside.
+struct DrawnGroup {
+    QRectF rect;
+    bool large = false;
+};
+
+QList<DrawnGroup> drawnGroups(const QList<engine::TextLine> &lines, const QList<engine::Drawing> &drawings, const QSizeF &pageSize,
+                              double body)
+{
+    const double pageArea = pageSize.width() * pageSize.height();
+    if (pageArea <= 0 || drawings.isEmpty())
+        return {};
+    const QRectF page(QPointF(0, 0), pageSize);
+    const double near = qMax(6.0, body);
+    struct Group {
+        QRectF rect;
+        bool picture = false;
+        int shapes = 0;
+        int boxes = 0; // Rectangles with text inside them.
+        bool otherShapes = false;
+    };
+    QList<Group> groups;
+    const auto merge = [&](Group &into, const Group &from) {
+        into.rect = into.rect.united(from.rect);
+        into.picture = into.picture || from.picture;
+        into.shapes += from.shapes;
+        into.boxes += from.boxes;
+        into.otherShapes = into.otherShapes || from.otherShapes;
+    };
+    for (const engine::Drawing &drawing : drawings) {
+        const QRectF rect = drawing.rect.intersected(page);
+        // Rules, such as a table's or a running head's, and backgrounds, such as a scanned page's picture.
+        if (rect.isEmpty() || qMin(rect.width(), rect.height()) < 1.5 || rect.width() * rect.height() >= pageArea * 0.85)
+            continue;
+        Group group{rect, drawing.picture, drawing.picture ? 0 : 1, 0, !drawing.picture && !drawing.rectangle};
+        if (drawing.rectangle
+            && std::any_of(lines.cbegin(), lines.cend(), [&](const engine::TextLine &line) { return rect.contains(line.rect.center()); }))
+            group.boxes = 1;
+        // Into every group it's near, which become one.
+        qsizetype into = -1;
+        for (qsizetype g = 0; g < groups.size(); ++g) {
+            if (!groups.at(g).rect.adjusted(-near, -near, near, near).intersects(rect))
+                continue;
+            if (into < 0) {
+                into = g;
+                merge(groups[g], group);
+            } else {
+                merge(groups[into], groups.at(g));
+                groups.removeAt(g--);
+            }
+        }
+        if (into < 0)
+            groups << group;
+    }
+    // Groups grown into each other's reach.
+    for (bool merged = true; merged;) {
+        merged = false;
+        for (qsizetype a = 0; a < groups.size() && !merged; ++a) {
+            for (qsizetype b = a + 1; b < groups.size() && !merged; ++b) {
+                if (groups.at(a).rect.adjusted(-near, -near, near, near).intersects(groups.at(b).rect)) {
+                    merge(groups[a], groups.at(b));
+                    groups.removeAt(b);
+                    merged = true;
+                }
+            }
+        }
+    }
+    QList<DrawnGroup> drawn;
+    for (const Group &group : std::as_const(groups)) {
+        const QRectF &rect = group.rect;
+        if (rect.bottom() < pageSize.height() * 0.075 || rect.top() > pageSize.height() * 0.93)
+            continue; // A logo or ornament in the margin.
+        if (!group.picture && !group.otherShapes && group.boxes * 2 >= group.shapes)
+            continue; // Boxes behind text.
+        // An icon, or a sign drawn in a line of text, is smaller.
+        drawn << DrawnGroup{rect, rect.height() >= 3 * near && rect.width() >= pageSize.width() * 0.12};
+    }
+    return drawn;
+}
+
+// Which of a page's lines aren't part of its running text, so that reading along passes over them: running heads,
+// footers and page numbers, text running up or down the page or in its side margins, and a figure's labels. The
+// running text is found from the page itself: lines long enough to be a column's, whose left edges line up, and the
+// lines near them in those columns, and any tables, which `tables` gives a row at a time. A page with too little of
+// that, such as a title page, has only the plain margins passed over. A page whose own margins are narrow can have its
+// first or last lines where running heads and footers usually are: those carrying on a column at its usual spacing
+// are running text. `figures` gives where each figure is, with its labels, which are passed over too.
+QList<bool> besideTheText(const QList<engine::TextLine> &lines, const QList<engine::Drawing> &drawings, const QSizeF &pageSize,
+                          double body, QList<TableRows> *tables = nullptr, QList<QRectF> *figures = nullptr)
+{
+    const qsizetype count = lines.size();
+    QList<bool> aside(count, false);
+    QList<bool> fullLine(count, false);
+    QList<bool> margins;
+    QList<bool> topOrFoot(count, false); // Aside only for being in the top or bottom margin.
+    QList<bool> sideMargin(count, false);
+    constexpr qsizetype kLongLine = 25; // Characters. Labels and page numbers are shorter.
+    // Whatever else is found, a table's lines are its running text, and a figure's labels aren't.
+    const auto withTables = [&](QList<bool> result) {
+        QList<bool> candidate(count, false);
+        for (qsizetype i = 0; i < count; ++i)
+            candidate[i] = !margins.at(i) && !fullLine.at(i);
+        const QList<TableRows> before = tablesAmong(lines, candidate, fullLine);
+        // The figures: drawings that aren't a table's lines and boxes, nor a box around running text. A table drawn
+        // with its cells' lines fills the drawing, its words inside it. A figure's labels can look like a table's
+        // cells too, but most are set around the drawing, or across several drawings, its panels.
+        QList<QRectF> found;
+        QList<QRectF> parts; // Smaller drawings, part of a figure they're beside.
+        for (const DrawnGroup &group : drawnGroups(lines, drawings, pageSize, body)) {
+            const QRectF drawn = group.rect;
+            if (!group.large) {
+                parts << drawn;
+                continue;
+            }
+            const QRectF reach = drawn.adjusted(-2, -2, 2, 2);
+            const bool tableGrid = std::any_of(before.cbegin(), before.cend(), [&](const TableRows &table) {
+                QRectF box;
+                qsizetype pieces = 0;
+                qsizetype inside = 0;
+                for (const QList<int> &row : table) {
+                    for (int i : row) {
+                        box = box.united(lines.at(i).rect);
+                        ++pieces;
+                        inside += reach.contains(lines.at(i).rect.center()) ? 1 : 0;
+                    }
+                }
+                const QRectF both = box.intersected(drawn);
+                return inside * 5 >= pieces * 4 && both.width() >= drawn.width() * 0.6 && both.height() >= drawn.height() * 0.6;
+            });
+            qsizetype running = 0;
+            for (qsizetype i = 0; i < count; ++i)
+                running += fullLine.at(i) && drawn.contains(lines.at(i).rect.center()) ? 1 : 0;
+            if (!tableGrid && running < 2)
+                found << drawn;
+        }
+        QList<bool> labels(count, false);
+        const auto takeInside = [&]() {
+            for (qsizetype i = 0; i < count; ++i) {
+                if (fullLine.at(i) || labels.at(i) || startsCaption(lines.at(i).text))
+                    continue;
+                const QPointF middle = lines.at(i).rect.center();
+                labels[i] = std::any_of(found.cbegin(), found.cend(), [&](const QRectF &figure) { return figure.contains(middle); });
+            }
+        };
+        takeInside();
+
+        // The tables, among what isn't a figure's.
+        for (qsizetype i = 0; i < count; ++i)
+            candidate[i] = candidate.at(i) && !labels.at(i);
+        const QList<TableRows> kept = found.isEmpty() ? before : tablesAmong(lines, candidate, fullLine);
+        QList<bool> inTable(count, false);
+        for (const TableRows &table : kept) {
+            for (const QList<int> &row : table) {
+                for (int i : row)
+                    inTable[i] = true;
+            }
+        }
+
+        // A figure's labels set around its drawing, such as its axes' numbers and titles, and smaller drawings beside
+        // it, each found bringing in the next: lines that aren't the running text, or, on a page with no columns of it,
+        // short ones.
+        const bool noColumns = !fullLine.contains(true);
+        const double near = qMax(6.0, body);
+        for (bool grew = !found.isEmpty(); grew;) {
+            grew = false;
+            for (qsizetype p = 0; p < parts.size(); ++p) {
+                for (QRectF &figure : found) {
+                    if (gapBetween(figure, parts.at(p)) <= 2 * near) {
+                        figure = figure.united(parts.at(p));
+                        parts.removeAt(p--);
+                        grew = true;
+                        break;
+                    }
+                }
+            }
+            for (qsizetype i = 0; i < count; ++i) {
+                const engine::TextLine &line = lines.at(i);
+                if (labels.at(i) || inTable.at(i) || fullLine.at(i) || topOrFoot.at(i) || sideMargin.at(i)
+                    || line.text.trimmed().isEmpty() || startsCaption(line.text))
+                    continue;
+                if (!result.at(i) && !(noColumns && line.text.trimmed().size() < kLongLine))
+                    continue;
+                const double reach = qMax(line.rect.height(), qMax(6.0, body));
+                for (QRectF &figure : found) {
+                    if (gapBetween(figure, line.rect) <= reach) {
+                        labels[i] = true;
+                        figure = figure.united(line.rect);
+                        grew = true;
+                        break;
+                    }
+                }
+            }
+        }
+        // Figures grown into each other are one, and so are a figure's panels side by side.
+        const auto oneFigure = [&](const QRectF &a, const QRectF &b) {
+            if (a.intersects(b))
+                return true;
+            const double overlap = qMin(a.bottom(), b.bottom()) - qMax(a.top(), b.top());
+            return overlap > 0.5 * qMin(a.height(), b.height()) && gapBetween(a, b) <= 2 * near;
+        };
+        for (bool merged = true; merged;) {
+            merged = false;
+            for (qsizetype a = 0; a < found.size() && !merged; ++a) {
+                for (qsizetype b = a + 1; b < found.size() && !merged; ++b) {
+                    if (oneFigure(found.at(a), found.at(b))) {
+                        found[a] = found.at(a).united(found.at(b));
+                        found.removeAt(b);
+                        merged = true;
+                    }
+                }
+            }
+        }
+        takeInside();
+
+        for (qsizetype i = 0; i < count; ++i) {
+            if (labels.at(i) && !inTable.at(i))
+                result[i] = true;
+            if (inTable.at(i))
+                result[i] = false;
+        }
+        if (tables)
+            *tables = kept;
+        if (figures) {
+            figures->clear();
+            for (const QRectF &figure : std::as_const(found))
+                *figures << figure.adjusted(-2, -2, 2, 2);
+        }
+        return result;
+    };
+    const double width = pageSize.width();
+    for (qsizetype i = 0; i < count; ++i) {
+        const engine::TextLine &line = lines.at(i);
+        bool sideways = false;
+        if (line.chars.size() >= 2) {
+            const QPointF first = line.chars.first().center();
+            const QPointF last = line.chars.last().center();
+            sideways = qAbs(last.y() - first.y()) > qAbs(last.x() - first.x());
+        }
+        sideways = sideways || (line.text.size() > 3 && line.rect.height() > line.rect.width() * 2);
+        const bool inSideMargin = width > 0 && (line.rect.right() < width * 0.07 || line.rect.left() > width * 0.93);
+        sideMargin[i] = inSideMargin;
+        const bool other = line.text.trimmed().isEmpty() || sideways || inSideMargin;
+        topOrFoot[i] = !other && inMargin(line, pageSize.height(), body);
+        aside[i] = other || topOrFoot.at(i);
+    }
+    margins = aside;
+
+    // How wide a column's lines are: most of the longer lines' width.
+    QList<double> widths;
+    for (qsizetype i = 0; i < count; ++i) {
+        if (!aside.at(i) && lines.at(i).text.trimmed().size() >= kLongLine)
+            widths << lines.at(i).rect.width();
+    }
+    if (widths.size() < 3)
+        return withTables(aside);
+    std::sort(widths.begin(), widths.end());
+    const double full = widths.at(qMin(widths.size() - 1, qsizetype(widths.size() * 0.8))) * 0.6;
+    const auto isFull = [&](qsizetype i) {
+        return !aside.at(i) && lines.at(i).text.trimmed().size() >= kLongLine && lines.at(i).rect.width() >= full;
+    };
+
+    // The columns: where at least two full lines start, and how far they reach.
+    struct Column {
+        double left = 0;
+        double right = 0;
+        int lines = 0;
+    };
+    QList<Column> columns;
+    for (qsizetype i = 0; i < count; ++i) {
+        if (!isFull(i))
+            continue;
+        const QRectF rect = lines.at(i).rect;
+        auto found = std::find_if(columns.begin(), columns.end(), [&](const Column &c) { return qAbs(c.left - rect.left()) <= 4; });
+        if (found == columns.end()) {
+            columns << Column{rect.left(), rect.right(), 1};
+        } else {
+            found->right = qMax(found->right, rect.right());
+            ++found->lines;
+        }
+    }
+    columns.removeIf([](const Column &c) { return c.lines < 2; });
+    if (columns.isEmpty())
+        return withTables(aside);
+    // Within a column: from its left edge, or set in from it a little, as a paragraph's first line is.
+    const auto inColumn = [&](const QRectF &rect) {
+        const double height = rect.height();
+        return std::any_of(columns.cbegin(), columns.cend(), [&](const Column &c) {
+            return rect.left() >= c.left - 3 && rect.left() <= c.left + qMax(3 * height, 30.0)
+                   && rect.right() <= c.right + qMax(height, 6.0);
+        });
+    };
+
+    // Lines in the top or bottom margin set in a column, as close to its other lines as they are to each other, carry
+    // on the running text: a running head or footer is set apart from it. Each one found can bring in the next. How
+    // close they usually are is the gap between a column's lines and the next below, most often, which can be less
+    // than nothing, since lines' boxes often overlap.
+    const auto columnLine = [&](qsizetype i) {
+        return !aside.at(i) && lines.at(i).text.trimmed().size() >= kLongLine && inColumn(lines.at(i).rect);
+    };
+    QList<double> gaps;
+    for (qsizetype i = 0; i < count; ++i) {
+        if (!columnLine(i))
+            continue;
+        const QRectF rect = lines.at(i).rect;
+        std::optional<QRectF> below;
+        for (qsizetype j = 0; j < count; ++j) {
+            const QRectF other = lines.at(j).rect;
+            if (j == i || !columnLine(j) || other.center().y() <= rect.center().y() || other.right() < rect.left()
+                || other.left() > rect.right())
+                continue;
+            if (!below || other.center().y() < below->center().y())
+                below = other;
+        }
+        if (below)
+            gaps << below->top() - rect.bottom();
+    }
+    std::sort(gaps.begin(), gaps.end());
+    const double usualGap = gaps.isEmpty() ? 0 : gaps.at(gaps.size() / 2);
+    for (bool found = !gaps.isEmpty(); found;) {
+        found = false;
+        for (qsizetype i = 0; i < count; ++i) {
+            if (!aside.at(i) || !topOrFoot.at(i) || !inColumn(lines.at(i).rect))
+                continue;
+            const QRectF rect = lines.at(i).rect;
+            for (qsizetype j = 0; j < count; ++j) {
+                if (!columnLine(j))
+                    continue;
+                const QRectF other = lines.at(j).rect;
+                if (other.right() < rect.left() || other.left() > rect.right())
+                    continue; // Another column.
+                const double gap = other.center().y() < rect.center().y() ? rect.top() - other.bottom() : other.top() - rect.bottom();
+                if (gap <= usualGap + 0.6 * qMin(rect.height(), other.height())) {
+                    aside[i] = false;
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    QList<bool> text(count, false);
+    for (qsizetype i = 0; i < count; ++i) {
+        if (aside.at(i))
+            continue;
+        text[i] = inColumn(lines.at(i).rect);
+        fullLine[i] = text.at(i) && isFull(i);
+    }
+    // A shorter line in a column is running text only near a full one: the end of a paragraph just below one, or a
+    // heading just above one. On its own, it's a figure's label, a footer, or the like.
+    for (qsizetype i = 0; i < count; ++i) {
+        if (!text.at(i) || fullLine.at(i))
+            continue;
+        const QRectF rect = lines.at(i).rect;
+        const double height = qMax(1.0, rect.height());
+        bool near = false;
+        for (qsizetype j = 0; j < count && !near; ++j) {
+            if (!fullLine.at(j))
+                continue;
+            const QRectF other = lines.at(j).rect;
+            if (other.right() < rect.left() || other.left() > rect.right())
+                continue; // Another column.
+            // Above or below by their middles, since lines' boxes often overlap a little.
+            if (other.center().y() > rect.center().y())
+                near = other.top() - rect.bottom() <= 3 * height;  // Text below it, as below a heading.
+            else if (other.center().y() < rect.center().y())
+                near = rect.top() - other.bottom() <= 1.5 * height; // Text just above it, as a paragraph's last line has.
+        }
+        text[i] = near;
+    }
+    // The other pieces of a row of running text, such as a heading's words after its number, are part of it.
+    for (qsizetype i = 1; i < count; ++i) {
+        if (text.at(i) || aside.at(i) || !text.at(i - 1))
+            continue;
+        const QRectF before = lines.at(i - 1).rect;
+        const QRectF rect = lines.at(i).rect;
+        const double height = qMin(before.height(), rect.height());
+        const double overlap = qMin(before.bottom(), rect.bottom()) - qMax(before.top(), rect.top());
+        const double gap = rect.left() - before.right();
+        text[i] = height > 0 && overlap > height * 0.5 && gap > -height && gap < height * 2.5;
+    }
+    for (qsizetype i = 0; i < count; ++i)
+        aside[i] = aside.at(i) || !text.at(i);
+    return withTables(aside);
 }
 
 class Host {
@@ -508,13 +1078,80 @@ private:
         const bool withChars = request.value(QStringLiteral("chars")).toBool();
         const QList<engine::TextLine> &lines = linesOn(number);
         const double body = bodySize(lines);
-        double pageHeight = 0;
+        QSizeF pageSize;
         try {
-            pageHeight = m_document->pageSize(number).height();
+            pageSize = m_document->pageSize(number);
         } catch (const engine::EngineError &) {
         }
+        QList<engine::Drawing> drawings;
+        try {
+            drawings = m_document->drawings(number);
+        } catch (const engine::EngineError &) {
+        }
+        QList<TableRows> tables;
+        QList<QRectF> figures;
+        const QList<bool> aside = besideTheText(lines, drawings, pageSize, body, &tables, &figures);
+        // Each figure is given whole, as a line with no text, among the running text where it's read: after the last
+        // line above it that it's under, or else before the first below it.
+        QMultiHash<int, qsizetype> figuresBefore;
+        QList<qsizetype> figuresAtEnd;
+        for (qsizetype f = 0; f < figures.size(); ++f) {
+            const QRectF figure = figures.at(f);
+            const auto across = [&](const QRectF &rect) { return rect.right() > figure.left() && rect.left() < figure.right(); };
+            int after = -1;
+            int below = -1;
+            for (int i = 0; i < lines.size(); ++i) {
+                const QRectF rect = lines.at(i).rect;
+                if (aside.at(i) || !across(rect))
+                    continue;
+                if (rect.center().y() < figure.top())
+                    after = i;
+                else if (below < 0 && rect.center().y() > figure.top())
+                    below = i;
+            }
+            if (after >= 0 && after + 1 < lines.size())
+                figuresBefore.insert(after + 1, f);
+            else if (after < 0 && below >= 0)
+                figuresBefore.insert(below, f);
+            else
+                figuresAtEnd << f;
+        }
+        const auto figureItem = [&](qsizetype f) {
+            return QJsonObject{{QStringLiteral("text"), QString()}, {QStringLiteral("rect"), rectToJson(figures.at(f))},
+                               {QStringLiteral("figure"), true}, {QStringLiteral("margin"), true}, {QStringLiteral("paragraph"), true}};
+        };
+        // A table's rows are given a row at a time, each as one line, top to bottom, where its first line was: a file
+        // can keep a table a column at a time, or its cells in any order.
+        QHash<int, qsizetype> tableAt;
+        QSet<int> inTable;
+        for (qsizetype t = 0; t < tables.size(); ++t) {
+            int firstLine = int(lines.size());
+            for (const QList<int> &row : tables.at(t)) {
+                for (int i : row) {
+                    inTable.insert(i);
+                    firstLine = qMin(firstLine, i);
+                }
+            }
+            tableAt.insert(firstLine, t);
+        }
         QJsonArray items;
+        bool afterTable = false;
         for (int i = 0; i < lines.size(); ++i) {
+            QList<qsizetype> here = figuresBefore.values(i);
+            std::sort(here.begin(), here.end());
+            for (qsizetype f : std::as_const(here))
+                items.append(figureItem(f));
+            if (inTable.contains(i)) {
+                if (const auto found = tableAt.constFind(i); found != tableAt.cend()) {
+                    for (const QList<int> &row : tables.at(*found)) {
+                        QJsonObject item = tableRow(lines, row, withChars);
+                        item.insert(QStringLiteral("table"), int(*found));
+                        items.append(item);
+                    }
+                    afterTable = true;
+                }
+                continue;
+            }
             const engine::TextLine &line = lines.at(i);
             QJsonObject item{{QStringLiteral("text"), line.text}, {QStringLiteral("rect"), rectToJson(line.rect)},
                              {QStringLiteral("size"), line.size}};
@@ -522,11 +1159,14 @@ private:
                 item.insert(QStringLiteral("chars"), rectsToJson(line.chars));
             if (line.bold)
                 item.insert(QStringLiteral("bold"), true);
-            // A running head or a page number, which reading along passes over.
-            if (inMargin(line, pageHeight, body))
+            // A running head, footer or page number, or text beside the page's running text, such as a figure's label,
+            // which reading along passes over.
+            if (aside.at(i))
                 item.insert(QStringLiteral("margin"), true);
             // A paragraph starts after a gap, or with its first line set in from the one above.
-            bool starts = standsApart(lines, i);
+            // What comes after a table, such as its notes, isn't part of its last row.
+            const bool firstAfterTable = std::exchange(afterTable, false);
+            bool starts = firstAfterTable || standsApart(lines, i);
             if (!starts && i > 0) {
                 const QRectF above = lines.at(i - 1).rect;
                 const bool sameColumn = above.right() > line.rect.left() && above.left() < line.rect.right();
@@ -536,8 +1176,43 @@ private:
                 item.insert(QStringLiteral("paragraph"), true);
             items.append(item);
         }
+        for (qsizetype f : std::as_const(figuresAtEnd))
+            items.append(figureItem(f));
         reply.insert(QStringLiteral("page"), number);
         reply.insert(QStringLiteral("lines"), items);
+    }
+
+    // A table's row as one line, its cells' words a space apart, starting a paragraph of its own.
+    static QJsonObject tableRow(const QList<engine::TextLine> &lines, const QList<int> &row, bool withChars)
+    {
+        QString text;
+        QList<QRectF> chars;
+        QRectF rect;
+        double size = 0;
+        bool bold = true;
+        for (int i : row) {
+            const engine::TextLine &piece = lines.at(i);
+            if (!text.isEmpty()) {
+                text += u' ';
+                chars << QRectF();
+            }
+            QString words = piece.text;
+            while (!words.isEmpty() && words.back().isSpace())
+                words.chop(1);
+            text += words;
+            for (qsizetype c = 0; c < words.size(); ++c)
+                chars << (c < piece.chars.size() ? piece.chars.at(c) : QRectF());
+            rect = rect.united(piece.rect);
+            size = qMax(size, piece.size);
+            bold = bold && piece.bold;
+        }
+        QJsonObject item{{QStringLiteral("text"), text}, {QStringLiteral("rect"), rectToJson(rect)},
+                         {QStringLiteral("size"), size}, {QStringLiteral("paragraph"), true}};
+        if (withChars)
+            item.insert(QStringLiteral("chars"), rectsToJson(chars));
+        if (bold)
+            item.insert(QStringLiteral("bold"), true);
+        return item;
     }
 
     // The words inside an area marked on a page, so that searching finds it.

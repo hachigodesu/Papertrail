@@ -38,6 +38,7 @@ public:
     // A key of the user's own for an online source, such as metadata::kOpenAlex, held only in memory and used from the
     // next request on. Empty for none. Safe to call from any thread.
     void setKey(const QString &provider, const QString &key);
+    bool hasKey(const QString &provider) const { return !keyFor(provider).isEmpty(); }
 
 signals:
     void progress(qint64 done, qint64 remaining, const QString &source);

@@ -245,6 +245,16 @@ public:
     RelatedPapersDialog *showRelatedPapers(qint64 publicationId);
     // Fetches a language's model for recognising text, after asking, if lookups are online.
     void getOcrLanguage(const QString &code, std::function<void(bool ready)> done);
+    // Fetches the natural voices for reading aloud, after asking, if lookups are online. `done` is told whether they're
+    // here, and isn't called at all if a fetch is already going.
+    void getNaturalVoices(std::function<void(bool ready)> done);
+    bool isFetchingNaturalVoices() const { return m_voicesFetch != nullptr; }
+    // Offers them once on this computer, the first time something's read aloud, only while lookups are online.
+    void offerNaturalVoices();
+    // Deletes them from this computer, after asking. Says whether they've gone.
+    bool removeNaturalVoices();
+    // Whether lookups, and so anything else going online, are allowed.
+    bool lookupsAreOnline();
     bool isFullScreenReading() const { return m_fullScreenTab != nullptr; }
     ReferenceImportActions *referenceImports() const { return m_references; }
     // What an empty library says, for tests.
@@ -363,6 +373,7 @@ private:
     void askToSaveSearch();
     void askAndLookUpLibrary();
     void askAndLookUpSelected();
+    bool keysForCasesOrAsk(const QList<qint64> &ids);
     bool makeSureLookupModeIsChosen();
     void updateReviewButton();
     void onLookupProgress(qint64 done, qint64 remaining, const QString &source);
@@ -394,7 +405,10 @@ private:
     QAction *m_stopReading = nullptr;
     void updateRulerAction();
     QToolBar *m_libraryBar = nullptr;
-    std::unique_ptr<metadata::Transport> m_downloads; // For language models, made when first needed.
+    std::unique_ptr<metadata::Transport> m_downloads; // For language models and voices, made when first needed.
+    std::shared_ptr<bool> m_voicesFetch; // Set to stop fetching the natural voices.
+    QLabel *m_voicesLabel = nullptr;
+    QPushButton *m_voicesStop = nullptr;
     QPointer<QWidget> m_fullScreenTab; // The document tab shown over the whole screen.
     bool m_maximizedBeforeFullScreen = false;
     QPointer<QWidget> m_lastDocument; // The document tab last shown.

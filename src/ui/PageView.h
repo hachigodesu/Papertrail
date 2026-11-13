@@ -129,12 +129,16 @@ public:
     // Whether this part of a page is in view now.
     bool isShowing(int page, const QRectF &rect) const;
 
-    // The sentence being read aloud, marked on its page.
-    void setSpoken(int page, const QList<QRectF> &rects);
+    // The sentence being read aloud, marked on its page, and on the next where it carries on over it.
+    void setSpoken(int page, const QList<QRectF> &rects, const QList<QRectF> &onNextPage = {});
     void clearSpoken();
     int spokenPage() const { return m_spokenPage; }
     // Where the selection starts: its first page and the first of its boxes there.
     std::optional<std::pair<int, QRectF>> selectionStart() const;
+    // A plain click says where with pageClicked, as it does with a ruler shown, such as while reading aloud.
+    void setClicksWanted(bool wanted) { m_clicksWanted = wanted; }
+    // The page and the point on it at a place in the viewport.
+    std::optional<std::pair<int, QPointF>> pagePointAt(const QPoint &viewportPoint) const { return pageAt(viewportPoint, false); }
 
     void setSelection(int page, const QList<QRectF> &rects, const QString &text);
     void clearSelection();
@@ -194,7 +198,7 @@ signals:
     void escapeUnused();
     // Up or Down with a ruler shown: -1 or 1.
     void rulerStepRequested(int step);
-    // A plain click on a page, not on a link, with a ruler shown.
+    // A plain click on a page, not on a link, with a ruler shown or clicks wanted.
     void pageClicked(int page, const QPointF &point);
 
 protected:
@@ -294,7 +298,9 @@ private:
     int m_rulerPage = -1;
     QRectF m_rulerRect;
     int m_spokenPage = -1;
+    bool m_clicksWanted = false;
     QList<QRectF> m_spokenRects;
+    QList<QRectF> m_spokenNextRects;
     QRectF m_currentHitRect;
 
     QHash<int, Selected> m_selected;

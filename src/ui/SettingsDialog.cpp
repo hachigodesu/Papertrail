@@ -5,6 +5,7 @@
 #include <QSlider>
 
 #include "core/settings/SettingsStore.h"
+#include "metadata/NaturalVoices.h"
 #include "metadata/OcrLanguages.h"
 #include "ui/LibrarySession.h"
 #include "ui/Theme.h"
@@ -137,19 +138,47 @@ SettingsDialog::SettingsDialog(LibrarySession &session, const SettingsActions &a
         auto *aloudForm = new QFormLayout(aloud);
         m_voice = new QComboBox(aloud);
         m_voice->setAccessibleName(tr("Voice"));
-        m_voice->addItem(tr("The usual voice"), QString());
-        QString chosen;
         double rate = 0;
         try {
-            chosen = m_session.settings().value(QStringLiteral("reader.voice")).toString();
             rate = m_session.settings().value(QStringLiteral("reader.speech_rate")).toDouble();
         } catch (const std::exception &) {
         }
-        for (const QString &voice : availableVoices())
-            m_voice->addItem(voice, voice);
-        m_voice->setCurrentIndex(qMax(0, m_voice->findData(chosen)));
+        fillVoices();
         connect(m_voice, &QComboBox::activated, this, [this] { save(QStringLiteral("reader.voice"), m_voice->currentData().toString()); });
         aloudForm->addRow(tr("Voice:"), m_voice);
+        if (canSpeakNaturally() && actions.getNaturalVoices && actions.removeNaturalVoices
+            && !m_session.paths().voicesDirectory.isEmpty()) {
+            m_naturalVoices = new QPushButton(aloud);
+            const auto label = [this] {
+                const bool here = metadata::naturalVoicesPresent(m_session.paths().voicesDirectory);
+                m_naturalVoices->setText(here ? tr("Remove natural voices")
+                                              : tr("Fetch natural voices (%1 MB)...")
+                                                    .arg(QLocale().toString(double(metadata::naturalVoicesBytes()) / 1e6, 'f', 0)));
+                m_naturalVoices->setToolTip(here ? tr("Deletes Kokoro's voices from this computer. They can be fetched again.")
+                                                 : tr("Kokoro's voices, which read far more naturally, fetched from Hugging Face "
+                                                      "and kept on this computer. Nothing you read is sent anywhere."));
+            };
+            label();
+            connect(m_naturalVoices, &QPushButton::clicked, this, [this, actions, label] {
+                if (metadata::naturalVoicesPresent(m_session.paths().voicesDirectory)) {
+                    if (actions.removeNaturalVoices()) {
+                        fillVoices();
+                        label();
+                    }
+                    return;
+                }
+                m_naturalVoices->setEnabled(false);
+                QPointer<SettingsDialog> self(this);
+                actions.getNaturalVoices([self, label](bool) {
+                    if (!self)
+                        return;
+                    self->m_naturalVoices->setEnabled(true);
+                    self->fillVoices();
+                    label();
+                });
+            });
+            aloudForm->addRow(QString(), m_naturalVoices);
+        }
         m_speechRate = new QSlider(Qt::Horizontal, aloud);
         m_speechRate->setRange(-10, 10);
         m_speechRate->setValue(int(qRound(rate * 10)));
@@ -278,6 +307,27 @@ void SettingsDialog::onLanguageChanged(QListWidgetItem *item, const SettingsActi
         }
         choose();
     });
+}
+
+void SettingsDialog::fillVoices()
+{
+    QString chosen;
+    try {
+        chosen = m_session.settings().value(QStringLiteral("reader.voice")).toString();
+    } catch (const std::exception &) {
+    }
+    m_voice->clear();
+    m_voice->addItem(tr("The usual voice"), QString());
+    // Natural voices first, once they're here, since they read best.
+    if (canSpeakNaturally() && metadata::naturalVoicesPresent(m_session.paths().voicesDirectory)) {
+        for (const metadata::NaturalVoice &voice : metadata::naturalVoices()) {
+            const QString id = QLatin1StringView(voice.id);
+            m_voice->addItem(naturalVoiceLabel(id), kNaturalVoicePrefix + id);
+        }
+    }
+    for (const QString &voice : availableVoices())
+        m_voice->addItem(voice, voice);
+    m_voice->setCurrentIndex(qMax(0, m_voice->findData(chosen)));
 }
 
 QComboBox *SettingsDialog::choiceFor(const QString &key, const QList<QPair<QString, QString>> &labelsAndValues)

@@ -5,6 +5,8 @@ add_library(papertrail_metadata STATIC
     LookupEngine.h
     Matching.cpp
     Matching.h
+    NaturalVoices.cpp
+    NaturalVoices.h
     NoticeChecker.cpp
     NoticeChecker.h
     OcrLanguages.cpp

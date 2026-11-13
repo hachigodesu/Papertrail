@@ -19,21 +19,25 @@ makedepends=('cmake' 'ninja' 'pkgconf')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         "sqlite-amalgamation-3540100.zip::https://sqlite.org/2026/sqlite-amalgamation-3540100.zip"
         "libmobi-0.12.tar.gz::https://github.com/bfabiszewski/libmobi/archive/refs/tags/v0.12.tar.gz"
-        "qtkeychain-0.15.0.tar.gz::https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz")
+        "qtkeychain-0.15.0.tar.gz::https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz"
+        "sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2::https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2")
 noextract=("sqlite-amalgamation-3540100.zip")
 sha256sums=('72047833eecf989e58c2014172d6dd871456165e706d931413987d1a3beb9c9f'
             '0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9'
             '78826d161c02ce93ff1cd62838b4d749df754f52185474b82e4093badf4689c1'
-            'f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22')
+            'f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22'
+            'c0bdb7907d3a74bba1d55d22bf4d9fa75586cf1530614ebe88a27b9118e015c4')
 
 prepare() {
     # Where CMake expects each, as if it had fetched them.
     mkdir -p deps
     bsdtar -xf sqlite-amalgamation-3540100.zip -C deps
-    rm -rf deps/sqlite deps/libmobi deps/qtkeychain
+    rm -rf deps/sqlite deps/libmobi deps/qtkeychain deps/sherpaonnx
     mv deps/sqlite-amalgamation-3540100 deps/sqlite
     mv libmobi-0.12 deps/libmobi
     mv qtkeychain-0.15.0 deps/qtkeychain
+    # sherpa-onnx's own build of its C library, for the natural voices, as every package uses.
+    mv sherpa-onnx-v1.13.8-linux-x64-shared deps/sherpaonnx
     # What cmake/KeychainPatch.cmake does when CMake fetches it: QtKeychain's own tests aren't ours to run.
     sed -i 's/add_subdirectory(autotest)//' deps/qtkeychain/CMakeLists.txt
 }
@@ -48,6 +52,7 @@ build() {
         -DFETCHCONTENT_SOURCE_DIR_SQLITE="$srcdir/deps/sqlite" \
         -DFETCHCONTENT_SOURCE_DIR_LIBMOBI="$srcdir/deps/libmobi" \
         -DFETCHCONTENT_SOURCE_DIR_QTKEYCHAIN="$srcdir/deps/qtkeychain" \
+        -DFETCHCONTENT_SOURCE_DIR_SHERPAONNX="$srcdir/deps/sherpaonnx" \
         -Wno-dev
     cmake --build build
 }

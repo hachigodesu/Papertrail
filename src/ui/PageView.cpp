@@ -705,10 +705,11 @@ bool PageView::isShowing(int page, const QRectF &rect) const
     return visible.intersects(pageToContent(page).mapRect(rect));
 }
 
-void PageView::setSpoken(int page, const QList<QRectF> &rects)
+void PageView::setSpoken(int page, const QList<QRectF> &rects, const QList<QRectF> &onNextPage)
 {
     m_spokenPage = page;
     m_spokenRects = rects;
+    m_spokenNextRects = onNextPage;
     viewport()->update();
 }
 
@@ -716,6 +717,7 @@ void PageView::clearSpoken()
 {
     m_spokenPage = -1;
     m_spokenRects.clear();
+    m_spokenNextRects.clear();
     viewport()->update();
 }
 
@@ -1039,8 +1041,8 @@ void PageView::drawUnturnedPage(QPainter &painter, int page, const QRectF &targe
     }
 
     // The sentence being read aloud, in a colour of its own.
-    if (page == m_spokenPage) {
-        for (const QRectF &rect : std::as_const(m_spokenRects))
+    if (m_spokenPage >= 0 && (page == m_spokenPage || page == m_spokenPage + 1)) {
+        for (const QRectF &rect : std::as_const(page == m_spokenPage ? m_spokenRects : m_spokenNextRects))
             painter.fillRect(toTarget(rect.adjusted(-1, -1, 1, 1)), QColor(90, 170, 255, 85));
     }
 
@@ -1370,7 +1372,7 @@ void PageView::mouseReleaseEvent(QMouseEvent *event)
     }
     const bool wasClick = (position - m_pressPosition).manhattanLength() < QApplication::startDragDistance();
     m_dragging = false;
-    if (wasClick && !m_pressedOnLink && m_rulerPage >= 0 && event->modifiers() == Qt::NoModifier) {
+    if (wasClick && !m_pressedOnLink && (m_rulerPage >= 0 || m_clicksWanted) && event->modifiers() == Qt::NoModifier) {
         if (const auto found = pageAt(position, false))
             emit pageClicked(found->first, found->second);
         return;

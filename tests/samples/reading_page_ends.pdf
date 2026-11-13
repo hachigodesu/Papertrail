@@ -1,0 +1,57 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+5 0 obj
+<< /Length 664 >>
+stream
+BT /F1 11 Tf 50 110 Td (A made-up page whose text runs on almost to the foot) Tj ET
+BT /F1 11 Tf 50 98 Td (of the page, as some papers set it, with no more than) Tj ET
+BT /F1 11 Tf 50 86 Td (a narrow margin below its last line. Its last lines) Tj ET
+BT /F1 11 Tf 50 74 Td (are still read with the rest, and a footer set apart) Tj ET
+BT /F1 11 Tf 50 62 Td (below them is not. This sentence, though, does not) Tj ET
+BT /F1 11 Tf 50 50 Td (end on this page, but carries on over it, broken in) Tj ET
+BT /F1 11 Tf 50 38 Td (the middle of a word as it goes onto the next, exam-) Tj ET
+BT /F1 9 Tf 50 14 Td (Made-up footer, not read) Tj ET
+BT /F1 9 Tf 290 14 Td (1) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+7 0 obj
+<< /Length 524 >>
+stream
+BT /F1 9 Tf 50 826 Td (A Made-Up Journal of Reading, Volume 1) Tj ET
+BT /F1 11 Tf 50 794 Td (ple of one, and ends here on the second page. Then the) Tj ET
+BT /F1 11 Tf 50 782 Td (second page carries on with a sentence of its own, over) Tj ET
+BT /F1 11 Tf 50 770 Td (two lines, and that is all it has to say about it.) Tj ET
+BT /F1 11 Tf 50 758 Td (Nothing here means anything at all, and the words were) Tj ET
+BT /F1 11 Tf 50 746 Td (made up for testing, as were the pages they are on.) Tj ET
+BT /F1 9 Tf 290 14 Td (2) Tj ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000191 00000 n 
+0000000317 00000 n 
+0000001032 00000 n 
+0000001158 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+1733
+%%EOF

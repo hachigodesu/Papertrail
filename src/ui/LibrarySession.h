@@ -28,6 +28,8 @@ struct LibraryPaths {
     QString workerPath;
     // The models for recognising text, one file a language. English comes with Papertrail, and is copied here.
     QString tessdataDirectory;
+    // Natural voices for reading aloud, once fetched. Each computer's, and never in an export or backup.
+    QString voicesDirectory;
 
     // Files changed more recently than this are left for a later scan. See ImportOptions.
     qint64 settleMs = 5000;

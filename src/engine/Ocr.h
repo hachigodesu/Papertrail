@@ -74,6 +74,7 @@ public:
     QList<OutlineItem> outline() override { return m_inner->outline(); }
     QList<PageLink> links(int page) override { return m_inner->links(page); }
     QList<QRectF> imageAreas(int page) override { return m_inner->imageAreas(page); }
+    QList<Drawing> drawings(int page) override { return m_inner->drawings(page); }
     QList<QRectF> search(int page, const QString &text) override;
     TextSelection selectText(int page, const QPointF &a, const QPointF &b) override;
     QList<TextLine> textLines(int page) override;

@@ -47,6 +47,7 @@
 #include "ui/ReaderPair.h"
 #include "ui/ReferenceImportDialog.h"
 #include "ui/RelatedPapersDialog.h"
+#include "metadata/NaturalVoices.h"
 #include "metadata/OcrLanguages.h"
 #include "ui/ReaderTab.h"
 #include "core/repo/SavedSearchRepository.h"
@@ -958,6 +959,19 @@ void MainWindow::buildStatusBar()
     statusBar()->addPermanentWidget(m_indexLabel);
     statusBar()->addPermanentWidget(m_indexStop);
 
+    m_voicesLabel = new QLabel(this);
+    m_voicesLabel->setTextFormat(Qt::PlainText);
+    m_voicesLabel->hide();
+    m_voicesStop = new QPushButton(tr("Stop fetching"), this);
+    m_voicesStop->setToolTip(tr("Stops fetching the natural voices, keeping nothing."));
+    m_voicesStop->hide();
+    connect(m_voicesStop, &QPushButton::clicked, this, [this] {
+        if (m_voicesFetch)
+            *m_voicesFetch = true;
+    });
+    statusBar()->addPermanentWidget(m_voicesLabel);
+    statusBar()->addPermanentWidget(m_voicesStop);
+
     m_lookupLabel = new QLabel(this);
     m_lookupLabel->setTextFormat(Qt::PlainText);
     m_lookupStop = new QPushButton(tr("Stop lookups"), this);
@@ -1164,6 +1178,8 @@ void MainWindow::showSettings()
     };
     actions.showBackups = [this] { showBackupsDialog(); };
     actions.getLanguage = [this](const QString &code, std::function<void(bool)> done) { getOcrLanguage(code, std::move(done)); };
+    actions.getNaturalVoices = [this](std::function<void(bool)> done) { getNaturalVoices(std::move(done)); };
+    actions.removeNaturalVoices = [this] { return removeNaturalVoices(); };
     actions.recognitionChanged = [this] {
         m_index->stopIndexing();
         kickIndexing();
@@ -2061,6 +2077,10 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
         });
         connect(reader, &ReaderTab::rulerShownChanged, this, &MainWindow::updateRulerAction);
         connect(reader, &ReaderTab::readingAloudChanged, this, &MainWindow::updateRulerAction);
+        connect(reader, &ReaderTab::readingAloudChanged, this, [this](bool reading) {
+            if (reading)
+                offerNaturalVoices();
+        });
         connect(reader, &ReaderTab::escapeUnused, this, [this] {
             if (isFullScreenReading())
                 m_fullScreen->setChecked(false);
@@ -3207,8 +3227,61 @@ void MainWindow::askAndLookUpLibrary()
 
 void MainWindow::askAndLookUpSelected()
 {
-    if (makeSureLookupModeIsChosen())
-        lookUp(selectedIds(), true);
+    if (!makeSureLookupModeIsChosen())
+        return;
+    const QList<qint64> ids = selectedIds();
+    if (keysForCasesOrAsk(ids))
+        lookUp(ids, true);
+}
+
+// US and Canadian cases are only looked up with a key of the user's own, since their sources refuse anyone without
+// one, so say so rather than finding nothing.
+bool MainWindow::keysForCasesOrAsk(const QList<qint64> &ids)
+{
+    constexpr qsizetype kMostLookedAt = 1000;
+    int american = 0;
+    int canadian = 0;
+    int others = 0;
+    guarded(tr("Reading the library"), [&] {
+        for (qsizetype i = 0; i < ids.size() && i < kMostLookedAt; ++i) {
+            const std::optional<Publication> p = m_session.publications().get(ids.at(i));
+            if (!p)
+                continue;
+            const metadata::CaseJurisdiction where =
+                p->type == PublicationType::CaseLaw ? metadata::caseJurisdictionOf(*p) : metadata::CaseJurisdiction::Unknown;
+            if (where == metadata::CaseJurisdiction::UnitedStates && !m_lookup->hasKey(metadata::kCourtListener))
+                ++american;
+            else if (where == metadata::CaseJurisdiction::Canada && !m_lookup->hasKey(metadata::kCanLii))
+                ++canadian;
+            else
+                ++others;
+        }
+    });
+    if (american == 0 && canadian == 0)
+        return true;
+
+    QStringList why;
+    if (american > 0) {
+        why << tr("%n of these is a US case, which is looked up in the Free Law Project's CourtListener. It needs a free "
+                  "token of your own, from an account at courtlistener.com.", nullptr, american);
+    }
+    if (canadian > 0) {
+        why << tr("%n of these is a Canadian case, which is looked up in CanLII. It needs a key of your own, which CanLII "
+                  "gives on request at canlii.org.", nullptr, canadian);
+    }
+    why << tr("Without one, they aren't looked up.");
+    QMessageBox box(QMessageBox::Information, tr("Look up details"), why.join(QStringLiteral("\n\n")), QMessageBox::Cancel, this);
+    box.setTextFormat(Qt::PlainText);
+    QPushButton *enter = box.addButton(tr("Enter a key..."), QMessageBox::ActionRole);
+    QPushButton *rest = others > 0 || ids.size() > kMostLookedAt ? box.addButton(tr("Look up the rest"), QMessageBox::AcceptRole)
+                                                                 : nullptr;
+    box.setDefaultButton(enter);
+    box.exec();
+    if (box.clickedButton() == enter) {
+        showLookupSettings();
+        return true;
+    }
+    return rest && box.clickedButton() == rest;
 }
 
 ReviewTab *MainWindow::reviewTab() const
@@ -3225,12 +3298,7 @@ void MainWindow::getOcrLanguage(const QString &code, std::function<void(bool)> d
     }
     const QString name = QCoreApplication::translate("Languages", language->name);
     // Fetching anything is going online, which only happens with lookups online.
-    bool online = false;
-    guarded(tr("Reading the settings"), [&] {
-        online = m_session.settings().value(QStringLiteral("metadata.mode_chosen")).toBool()
-                 && m_session.settings().value(QStringLiteral("metadata.mode")).toString() != QLatin1StringView("offline");
-    });
-    if (!online) {
+    if (!lookupsAreOnline()) {
         QMessageBox::information(this, tr("Recognising %1").arg(name),
                                  tr("Papertrail is set to stay offline, so it can't fetch the %1 model. Choose a lookup mode "
                                     "under Online lookups first.").arg(name));
@@ -3262,6 +3330,103 @@ void MainWindow::getOcrLanguage(const QString &code, std::function<void(bool)> d
             done(false);
         }
     });
+}
+
+bool MainWindow::lookupsAreOnline()
+{
+    bool online = false;
+    guarded(tr("Reading the settings"), [&] {
+        online = m_session.settings().value(QStringLiteral("metadata.mode_chosen")).toBool()
+                 && m_session.settings().value(QStringLiteral("metadata.mode")).toString() != QLatin1StringView("offline");
+    });
+    return online;
+}
+
+void MainWindow::getNaturalVoices(std::function<void(bool)> done)
+{
+    if (m_voicesFetch)
+        return;
+    const QString title = tr("Natural voices");
+    const QString folder = m_session.paths().voicesDirectory;
+    if (!canSpeakNaturally() || folder.isEmpty()) {
+        done(false);
+        return;
+    }
+    if (metadata::naturalVoicesPresent(folder)) {
+        done(true);
+        return;
+    }
+    if (!lookupsAreOnline()) {
+        QMessageBox::information(this, title,
+                                 tr("Papertrail is set to stay offline, so it can't fetch the natural voices. Choose a lookup "
+                                    "mode under Online lookups first."));
+        done(false);
+        return;
+    }
+    const QString size = QLocale().toString(double(metadata::naturalVoicesBytes()) / 1e6, 'f', 0);
+    const auto answer = QMessageBox::question(
+        this, title,
+        tr("Fetch Kokoro's natural voices for reading aloud, %1 MB, from Hugging Face? They read far more naturally than "
+           "the voices that come with this computer. Only the files are asked for, and nothing you read is sent anywhere: "
+           "the voices work on this computer.").arg(size));
+    if (answer != QMessageBox::Yes) {
+        done(false);
+        return;
+    }
+    if (!m_downloads)
+        m_downloads = m_session.paths().transportFactory ? m_session.paths().transportFactory() : std::make_unique<metadata::NetworkTransport>();
+    QPointer<MainWindow> self(this);
+    const qint64 total = metadata::naturalVoicesBytes();
+    const auto showProgress = [self, total](qint64 received) {
+        if (self)
+            self->m_voicesLabel->setText(tr("Fetching the natural voices: %1 of %2 MB")
+                                             .arg(QLocale().toString(received / 1000000), QLocale().toString(total / 1000000)));
+    };
+    showProgress(0);
+    m_voicesLabel->show();
+    m_voicesStop->show();
+    m_voicesFetch = metadata::downloadNaturalVoices(*m_downloads, folder, showProgress, [self, title, done](const QString &error) {
+        if (!self)
+            return;
+        self->m_voicesFetch.reset();
+        self->m_voicesLabel->hide();
+        self->m_voicesStop->hide();
+        if (error.isEmpty()) {
+            self->statusBar()->showMessage(tr("The natural voices are ready."), 8000);
+            done(true);
+        } else {
+            if (error != metadata::kDownloadStopped)
+                QMessageBox::warning(self, title, tr("The natural voices couldn't be fetched: %1").arg(error));
+            done(false);
+        }
+    });
+}
+
+bool MainWindow::removeNaturalVoices()
+{
+    const auto answer = QMessageBox::question(this, tr("Natural voices"),
+                                              tr("Delete the natural voices from this computer? They can be fetched again."));
+    if (answer != QMessageBox::Yes)
+        return false;
+    if (!metadata::removeNaturalVoices(m_session.paths().voicesDirectory)) {
+        QMessageBox::warning(this, tr("Natural voices"), tr("The natural voices couldn't all be deleted."));
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::offerNaturalVoices()
+{
+    const QString folder = m_session.paths().voicesDirectory;
+    if (!canSpeakNaturally() || folder.isEmpty() || m_voicesFetch || metadata::naturalVoicesPresent(folder) || !lookupsAreOnline())
+        return;
+    bool offered = true;
+    guarded(tr("Reading the settings"), [&] { offered = m_session.settings().value(QStringLiteral("speech.natural_offered")).toBool(); });
+    if (offered)
+        return;
+    guarded(tr("Saving the settings"), [&] { m_session.settings().setValue(QStringLiteral("speech.natural_offered"), true); });
+    // After what was asked for has started, so the question doesn't hold it up.
+    QTimer::singleShot(0, this, [this] { getNaturalVoices([](bool) {}); });
 }
 
 RelatedPapersDialog *MainWindow::showRelatedPapers(qint64 publicationId)

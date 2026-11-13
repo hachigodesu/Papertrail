@@ -531,6 +531,60 @@ private slots:
         QVERIFY(!caseDetailsOnFirstPage(QStringLiteral("As the court held in 2022 SCC 99, the made-up rule applies.")));
     }
 
+    void aJudgmentInTheSupremeCourtReportsIsRecognised()
+    {
+        // Its first page has the report and its page above the parties, in French on a right-hand page, and its name
+        // and neutral citation come a few pages on. A case it cites can come first.
+        const QString first = QStringLiteral(
+            "[2021] 1 R.C.S. RENVOIS : LOI SUR UN EXEMPLE 175\n"
+            "IN THE MATTER OF a Reference to the Court of Appeal for a made-up province respecting the made-up Sample Act, "
+            "as in 2019 SCC 5\n"
+            "Attorney General of a Made-Up Province   Appellant\n"
+            "v.\n"
+            "Attorney General of Example   Respondent\n");
+        const QString later = QStringLiteral(
+            "176 RE: MADE-UP SAMPLE ACT [2021] 1 S.C.R.\n"
+            "Made-Up Society and Example Association   Interveners\n"
+            "Indexed as: References re MADE-UP SAMPLE ACT\n"
+            "2021 SCC 99\n"
+            "File Nos.: 10001, 10002.\n"
+            "2020: September 22, 23; 2021: March 25.\n"
+            "Present: Made-Up C.J. and Example J.\n"
+            "\f"
+            "The court's earlier decision in 2021 SCC 98 is cited here.\n");
+        std::optional<CaseDetails> found = caseDetailsOnFirstPage(first, QStringLiteral("[2021] 1 R.C.S."), later);
+        QVERIFY(found);
+        QCOMPARE(found->name, QStringLiteral("References re Made-up Sample Act"));
+        QCOMPARE(found->neutralCitation, QStringLiteral("2021 SCC 99"));
+        QCOMPARE(found->court, QStringLiteral("Supreme Court of Canada"));
+        QCOMPARE(found->jurisdiction, QStringLiteral("Canada"));
+        QCOMPARE(found->report, QStringLiteral("S.C.R."));
+        QCOMPARE(found->reportVolume, QStringLiteral("1"));
+        QCOMPARE(found->reportPage, QStringLiteral("175"));
+        QCOMPARE(found->year.value_or(0), 2021);
+        QCOMPARE(found->month.value_or(0), 3);
+        QCOMPARE(found->day.value_or(0), 25);
+
+        ClassificationInput input;
+        input.format = QStringLiteral("pdf");
+        input.pageCount = 60;
+        input.firstPage = first;
+        input.laterPages = later;
+        QCOMPARE(classify(input).type, PublicationType::CaseLaw);
+
+        // On a left-hand page, the page comes first. Without its index, a case it cites isn't taken for its own.
+        found = caseDetailsOnFirstPage(QStringLiteral("176 SAMPLE v. EXAMPLE [2021] 1 S.C.R.\n"
+                                                      "Sample Ltd.   Appellant\nv.\nExample Inc.   Respondent\n"
+                                                      "following 2015 SCC 7\n"));
+        QVERIFY(found);
+        QCOMPARE(found->reportPage, QStringLiteral("176"));
+        QVERIFY(found->neutralCitation.isEmpty());
+        QCOMPARE(found->jurisdiction, QStringLiteral("Canada"));
+
+        // A paper that cites the report isn't one.
+        QVERIFY(!caseDetailsOnFirstPage(QStringLiteral("[2021] 1 S.C.R. 175 changed the made-up rule, as this paper shows.\n")));
+    }
+
     void writingAboutACaseIsntOne()
     {
         // An article about a case cites it, and a court, on its first page, but has an abstract.

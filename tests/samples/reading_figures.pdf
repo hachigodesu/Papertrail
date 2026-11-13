@@ -1,0 +1,288 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+5 0 obj
+<< /Length 7481 >>
+stream
+BT /F1 11 Tf 50 790 Td (A made-up page with a figure drawn as many small boxes,) Tj ET
+BT /F1 11 Tf 50 776 Td (with labels around and inside it, which the ruler takes) Tj ET
+BT /F1 11 Tf 50 762 Td (whole, and which are not read along with the text.) Tj ET
+BT /F1 9 Tf 115 710 Td (max delay: 0.0%) Tj ET
+BT /F1 9 Tf 152 680 Td (min:0.0) Tj ET
+BT /F1 9 Tf 152 668 Td (max:0.6) Tj ET
+BT /F1 9 Tf 152 656 Td (mean:0.2) Tj ET
+BT /F1 9 Tf 115 543 Td (Frequency \(/year\)) Tj ET
+BT /F1 9 Tf 249 710 Td (max delay: 10.0%) Tj ET
+BT /F1 9 Tf 286 680 Td (min:0.0) Tj ET
+BT /F1 9 Tf 286 668 Td (max:0.7) Tj ET
+BT /F1 9 Tf 286 656 Td (mean:0.3) Tj ET
+BT /F1 9 Tf 249 543 Td (Frequency \(/year\)) Tj ET
+BT /F1 9 Tf 383 710 Td (max delay: 20.0%) Tj ET
+BT /F1 9 Tf 420 680 Td (min:0.0) Tj ET
+BT /F1 9 Tf 420 668 Td (max:0.8) Tj ET
+BT /F1 9 Tf 420 656 Td (mean:0.4) Tj ET
+BT /F1 9 Tf 383 543 Td (Frequency \(/year\)) Tj ET
+BT /F1 8 Tf 70 694 Td (24.0) Tj ET
+BT /F1 8 Tf 70 679 Td (12.0) Tj ET
+BT /F1 8 Tf 70 664 Td (6.0) Tj ET
+BT /F1 8 Tf 70 649 Td (3.0) Tj ET
+BT /F1 8 Tf 70 634 Td (2.0) Tj ET
+BT /F1 8 Tf 70 619 Td (1.0) Tj ET
+BT /F1 8 Tf 70 604 Td (0.5) Tj ET
+BT /F1 8 Tf 70 589 Td (0.25) Tj ET
+BT /F1 8 Tf 509 585 Td (0.0) Tj ET
+BT /F1 8 Tf 509 640 Td (0.4) Tj ET
+BT /F1 8 Tf 509 695 Td (0.8) Tj ET
+BT /F1 10 Tf 50 518 Td (Figure 1: A made-up figure of boxes, for testing the ruler.) Tj ET
+BT /F1 11 Tf 50 490 Td (After the figure the text carries on, and then comes a) Tj ET
+BT /F1 11 Tf 50 476 Td (table drawn with its cells' lines, which is one stop too,) Tj ET
+BT /F1 11 Tf 50 462 Td (while each of its rows is still read a row at a time.) Tj ET
+BT /F1 10 Tf 60 418 Td (Made-up) Tj ET
+BT /F1 10 Tf 200 418 Td (First) Tj ET
+BT /F1 10 Tf 340 418 Td (Second) Tj ET
+BT /F1 10 Tf 60 398 Td (Alpha) Tj ET
+BT /F1 10 Tf 200 398 Td (12) Tj ET
+BT /F1 10 Tf 340 398 Td (30) Tj ET
+BT /F1 10 Tf 60 378 Td (Beta) Tj ET
+BT /F1 10 Tf 200 378 Td (8) Tj ET
+BT /F1 10 Tf 340 378 Td (20) Tj ET
+BT /F1 10 Tf 60 358 Td (Gamma) Tj ET
+BT /F1 10 Tf 200 358 Td (5) Tj ET
+BT /F1 10 Tf 340 358 Td (11) Tj ET
+BT /F1 9 Tf 290 30 Td (1) Tj ET
+0.20 0.1 0.3 rg 90 690 15 15 re f
+0.28 0.1 0.3 rg 90 675 15 15 re f
+0.36 0.1 0.3 rg 105 675 15 15 re f
+0.36 0.1 0.3 rg 90 660 15 15 re f
+0.44 0.1 0.3 rg 105 660 15 15 re f
+0.52 0.1 0.3 rg 120 660 15 15 re f
+0.44 0.1 0.3 rg 90 645 15 15 re f
+0.52 0.1 0.3 rg 105 645 15 15 re f
+0.60 0.1 0.3 rg 120 645 15 15 re f
+0.68 0.1 0.3 rg 135 645 15 15 re f
+0.52 0.1 0.3 rg 90 630 15 15 re f
+0.60 0.1 0.3 rg 105 630 15 15 re f
+0.68 0.1 0.3 rg 120 630 15 15 re f
+0.76 0.1 0.3 rg 135 630 15 15 re f
+0.20 0.1 0.3 rg 150 630 15 15 re f
+0.60 0.1 0.3 rg 90 615 15 15 re f
+0.68 0.1 0.3 rg 105 615 15 15 re f
+0.76 0.1 0.3 rg 120 615 15 15 re f
+0.20 0.1 0.3 rg 135 615 15 15 re f
+0.28 0.1 0.3 rg 150 615 15 15 re f
+0.36 0.1 0.3 rg 165 615 15 15 re f
+0.68 0.1 0.3 rg 90 600 15 15 re f
+0.76 0.1 0.3 rg 105 600 15 15 re f
+0.20 0.1 0.3 rg 120 600 15 15 re f
+0.28 0.1 0.3 rg 135 600 15 15 re f
+0.36 0.1 0.3 rg 150 600 15 15 re f
+0.44 0.1 0.3 rg 165 600 15 15 re f
+0.52 0.1 0.3 rg 180 600 15 15 re f
+0.76 0.1 0.3 rg 90 585 15 15 re f
+0.20 0.1 0.3 rg 105 585 15 15 re f
+0.28 0.1 0.3 rg 120 585 15 15 re f
+0.36 0.1 0.3 rg 135 585 15 15 re f
+0.44 0.1 0.3 rg 150 585 15 15 re f
+0.52 0.1 0.3 rg 165 585 15 15 re f
+0.60 0.1 0.3 rg 180 585 15 15 re f
+0.68 0.1 0.3 rg 195 585 15 15 re f
+BT /F1 7 Tf 0 1 -1 0 101 556 Tm (365) Tj ET
+BT /F1 7 Tf 0 1 -1 0 116 556 Tm (730) Tj ET
+BT /F1 7 Tf 0 1 -1 0 131 556 Tm (1460) Tj ET
+BT /F1 7 Tf 0 1 -1 0 146 556 Tm (2920) Tj ET
+BT /F1 7 Tf 0 1 -1 0 161 556 Tm (4380) Tj ET
+BT /F1 7 Tf 0 1 -1 0 176 556 Tm (8760) Tj ET
+BT /F1 7 Tf 0 1 -1 0 191 556 Tm (17520) Tj ET
+BT /F1 7 Tf 0 1 -1 0 206 556 Tm (35040) Tj ET
+0.28 0.1 0.3 rg 224 690 15 15 re f
+0.36 0.1 0.3 rg 224 675 15 15 re f
+0.44 0.1 0.3 rg 239 675 15 15 re f
+0.44 0.1 0.3 rg 224 660 15 15 re f
+0.52 0.1 0.3 rg 239 660 15 15 re f
+0.60 0.1 0.3 rg 254 660 15 15 re f
+0.52 0.1 0.3 rg 224 645 15 15 re f
+0.60 0.1 0.3 rg 239 645 15 15 re f
+0.68 0.1 0.3 rg 254 645 15 15 re f
+0.76 0.1 0.3 rg 269 645 15 15 re f
+0.60 0.1 0.3 rg 224 630 15 15 re f
+0.68 0.1 0.3 rg 239 630 15 15 re f
+0.76 0.1 0.3 rg 254 630 15 15 re f
+0.20 0.1 0.3 rg 269 630 15 15 re f
+0.28 0.1 0.3 rg 284 630 15 15 re f
+0.68 0.1 0.3 rg 224 615 15 15 re f
+0.76 0.1 0.3 rg 239 615 15 15 re f
+0.20 0.1 0.3 rg 254 615 15 15 re f
+0.28 0.1 0.3 rg 269 615 15 15 re f
+0.36 0.1 0.3 rg 284 615 15 15 re f
+0.44 0.1 0.3 rg 299 615 15 15 re f
+0.76 0.1 0.3 rg 224 600 15 15 re f
+0.20 0.1 0.3 rg 239 600 15 15 re f
+0.28 0.1 0.3 rg 254 600 15 15 re f
+0.36 0.1 0.3 rg 269 600 15 15 re f
+0.44 0.1 0.3 rg 284 600 15 15 re f
+0.52 0.1 0.3 rg 299 600 15 15 re f
+0.60 0.1 0.3 rg 314 600 15 15 re f
+0.20 0.1 0.3 rg 224 585 15 15 re f
+0.28 0.1 0.3 rg 239 585 15 15 re f
+0.36 0.1 0.3 rg 254 585 15 15 re f
+0.44 0.1 0.3 rg 269 585 15 15 re f
+0.52 0.1 0.3 rg 284 585 15 15 re f
+0.60 0.1 0.3 rg 299 585 15 15 re f
+0.68 0.1 0.3 rg 314 585 15 15 re f
+0.76 0.1 0.3 rg 329 585 15 15 re f
+BT /F1 7 Tf 0 1 -1 0 235 556 Tm (365) Tj ET
+BT /F1 7 Tf 0 1 -1 0 250 556 Tm (730) Tj ET
+BT /F1 7 Tf 0 1 -1 0 265 556 Tm (1460) Tj ET
+BT /F1 7 Tf 0 1 -1 0 280 556 Tm (2920) Tj ET
+BT /F1 7 Tf 0 1 -1 0 295 556 Tm (4380) Tj ET
+BT /F1 7 Tf 0 1 -1 0 310 556 Tm (8760) Tj ET
+BT /F1 7 Tf 0 1 -1 0 325 556 Tm (17520) Tj ET
+BT /F1 7 Tf 0 1 -1 0 340 556 Tm (35040) Tj ET
+0.36 0.1 0.3 rg 358 690 15 15 re f
+0.44 0.1 0.3 rg 358 675 15 15 re f
+0.52 0.1 0.3 rg 373 675 15 15 re f
+0.52 0.1 0.3 rg 358 660 15 15 re f
+0.60 0.1 0.3 rg 373 660 15 15 re f
+0.68 0.1 0.3 rg 388 660 15 15 re f
+0.60 0.1 0.3 rg 358 645 15 15 re f
+0.68 0.1 0.3 rg 373 645 15 15 re f
+0.76 0.1 0.3 rg 388 645 15 15 re f
+0.20 0.1 0.3 rg 403 645 15 15 re f
+0.68 0.1 0.3 rg 358 630 15 15 re f
+0.76 0.1 0.3 rg 373 630 15 15 re f
+0.20 0.1 0.3 rg 388 630 15 15 re f
+0.28 0.1 0.3 rg 403 630 15 15 re f
+0.36 0.1 0.3 rg 418 630 15 15 re f
+0.76 0.1 0.3 rg 358 615 15 15 re f
+0.20 0.1 0.3 rg 373 615 15 15 re f
+0.28 0.1 0.3 rg 388 615 15 15 re f
+0.36 0.1 0.3 rg 403 615 15 15 re f
+0.44 0.1 0.3 rg 418 615 15 15 re f
+0.52 0.1 0.3 rg 433 615 15 15 re f
+0.20 0.1 0.3 rg 358 600 15 15 re f
+0.28 0.1 0.3 rg 373 600 15 15 re f
+0.36 0.1 0.3 rg 388 600 15 15 re f
+0.44 0.1 0.3 rg 403 600 15 15 re f
+0.52 0.1 0.3 rg 418 600 15 15 re f
+0.60 0.1 0.3 rg 433 600 15 15 re f
+0.68 0.1 0.3 rg 448 600 15 15 re f
+0.28 0.1 0.3 rg 358 585 15 15 re f
+0.36 0.1 0.3 rg 373 585 15 15 re f
+0.44 0.1 0.3 rg 388 585 15 15 re f
+0.52 0.1 0.3 rg 403 585 15 15 re f
+0.60 0.1 0.3 rg 418 585 15 15 re f
+0.68 0.1 0.3 rg 433 585 15 15 re f
+0.76 0.1 0.3 rg 448 585 15 15 re f
+0.20 0.1 0.3 rg 463 585 15 15 re f
+BT /F1 7 Tf 0 1 -1 0 369 556 Tm (365) Tj ET
+BT /F1 7 Tf 0 1 -1 0 384 556 Tm (730) Tj ET
+BT /F1 7 Tf 0 1 -1 0 399 556 Tm (1460) Tj ET
+BT /F1 7 Tf 0 1 -1 0 414 556 Tm (2920) Tj ET
+BT /F1 7 Tf 0 1 -1 0 429 556 Tm (4380) Tj ET
+BT /F1 7 Tf 0 1 -1 0 444 556 Tm (8760) Tj ET
+BT /F1 7 Tf 0 1 -1 0 459 556 Tm (17520) Tj ET
+BT /F1 7 Tf 0 1 -1 0 474 556 Tm (35040) Tj ET
+BT /F1 9 Tf 0 1 -1 0 62 600 Tm (Duration \(hour\)) Tj ET
+0.10 0.2 0.3 rg 495 585 10 15 re f
+0.20 0.2 0.3 rg 495 600 10 15 re f
+0.30 0.2 0.3 rg 495 615 10 15 re f
+0.40 0.2 0.3 rg 495 630 10 15 re f
+0.50 0.2 0.3 rg 495 645 10 15 re f
+0.60 0.2 0.3 rg 495 660 10 15 re f
+0.70 0.2 0.3 rg 495 675 10 15 re f
+0.80 0.2 0.3 rg 495 690 10 15 re f
+0 0 0 RG 0.6 w
+55 432 m 420 432 l
+55 412 m 420 412 l
+55 392 m 420 392 l
+55 372 m 420 372 l
+55 352 m 420 352 l
+55 352 m 55 432 l
+190 352 m 190 432 l
+330 352 m 330 432 l
+420 352 m 420 432 l
+S
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+7 0 obj
+<< /Length 1222 >>
+stream
+BT /F1 11 Tf 50 790 Td (The second made-up page has a plot drawn with a line, its) Tj ET
+BT /F1 11 Tf 50 776 Td (numbers set around it, and nothing else in it at all, so) Tj ET
+BT /F1 11 Tf 50 762 Td (that it is one stop for the ruler, and none of it is read.) Tj ET
+BT /F1 11 Tf 200 738 Td (Made-up utilisation) Tj ET
+BT /F1 8 Tf 80 548 Td (0.0) Tj ET
+BT /F1 8 Tf 80 638 Td (0.5) Tj ET
+BT /F1 8 Tf 80 726 Td (1.0) Tj ET
+BT /F1 8 Tf 98 538 Td (0) Tj ET
+BT /F1 8 Tf 196 538 Td (10) Tj ET
+BT /F1 8 Tf 296 538 Td (20) Tj ET
+BT /F1 8 Tf 394 538 Td (30) Tj ET
+BT /F1 9 Tf 240 524 Td (Day) Tj ET
+BT /F1 10 Tf 50 496 Td (Figure 2: A made-up plot.) Tj ET
+BT /F1 11 Tf 50 466 Td (After it, the text ends with one more line to read here,) Tj ET
+BT /F1 11 Tf 50 452 Td (and then the page ends with its number at the foot of it.) Tj ET
+BT /F1 9 Tf 290 30 Td (2) Tj ET
+0 0 0 RG 0.8 w 100 550 300 180 re S
+0.2 0.4 0.2 RG 1 w 100 600 m
+110 637 l
+120 674 l
+130 711 l
+140 628 l
+150 665 l
+160 702 l
+170 619 l
+180 656 l
+190 693 l
+200 610 l
+210 647 l
+220 684 l
+230 601 l
+240 638 l
+250 675 l
+260 712 l
+270 629 l
+280 666 l
+290 703 l
+300 620 l
+310 657 l
+320 694 l
+330 611 l
+340 648 l
+350 685 l
+360 602 l
+370 639 l
+380 676 l
+390 713 l
+400 630 l
+S
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000191 00000 n 
+0000000317 00000 n 
+0000007850 00000 n 
+0000007976 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+9250
+%%EOF

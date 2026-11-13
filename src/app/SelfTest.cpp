@@ -5,6 +5,7 @@
 #include "core/repo/PublicationRepository.h"
 #include "import/WorkerClient.h"
 #include "ui/LibrarySession.h"
+#include "ui/NaturalSpeaker.h"
 #include "ui/Speaker.h"
 
 #include <QCoreApplication>
@@ -106,6 +107,19 @@ bool runSelfTest(const QString &reportPath)
                 QString detail;
                 const QString problem = ui::checkSpeech(&detail);
                 report.check(problem.isEmpty(), QStringLiteral("a sentence can be read aloud"), problem.isEmpty() ? detail : problem);
+            }
+
+            // Natural voices: their program must start from inside the package. They're fetched when wanted, so a
+            // sentence is only said with them where this computer has them.
+#ifdef PAPERTRAIL_PACKAGE
+            report.check(ui::canSpeakNaturally(), QStringLiteral("this package can use natural voices"),
+                         ui::canSpeakNaturally() ? QString() : QStringLiteral("it was built without sherpa-onnx"));
+#endif
+            if (ui::canSpeakNaturally()) {
+                QString detail;
+                const QString problem =
+                    ui::checkNaturalVoice(paths.workerPath, ui::LibraryPaths::forThisCopy().voicesDirectory, &detail);
+                report.check(problem.isEmpty(), QStringLiteral("the natural voices' program runs"), problem.isEmpty() ? detail : problem);
             }
 
             ui::LibrarySession session(paths);
