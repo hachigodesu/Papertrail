@@ -16,6 +16,10 @@
 #include "core/repo/CollectionRepository.h"
 #include "core/repo/TagRepository.h"
 #include "ui/HighlightsWindow.h"
+#include "ui/CitationActions.h"
+#include "ui/FilterSidebar.h"
+#include <QComboBox>
+#include <QFileDialog>
 #include "ui/PageView.h"
 #include "ui/ReaderTab.h"
 
@@ -321,6 +325,102 @@ private slots:
         QCOMPARE(view->marksOn(0).size(), 1);
         QCOMPARE(view->marksOn(1).size(), 1);
         QVERIFY(view->marksOn(0).first().underline);
+    }
+
+    void aCollectionsMenuShowsItsHighlightsAndExportsItsCitations()
+    {
+        Database &db = m_session->database();
+        PublicationRepository publications(db);
+        const auto publication = [&](const QString &title) {
+            Publication p;
+            p.title = title;
+            p.year = 2020;
+            return publications.create(p);
+        };
+        const qint64 inside = publication(QStringLiteral("A Made-Up Book In The Project"));
+        const qint64 deeper = publication(QStringLiteral("A Made-Up Paper In Part One"));
+        const qint64 outside = publication(QStringLiteral("A Made-Up Book Elsewhere"));
+        const auto make = [&](qint64 id) {
+            Annotation annotation;
+            annotation.publicationId = id;
+            annotation.contentHash = QStringLiteral("hash%1").arg(id);
+            annotation.type = AnnotationType::Highlight;
+            annotation.colour = QStringLiteral("#ffe45c");
+            AnnotationPart part;
+            part.text = QStringLiteral("made-up words");
+            part.rects = {QRectF(1, 1, 10, 10)};
+            annotation.parts = {part};
+            return AnnotationRepository(db).create(annotation);
+        };
+        const qint64 first = make(inside);
+        const qint64 second = make(deeper);
+        make(outside);
+        CollectionRepository collections(db);
+        const qint64 project = collections.create(QStringLiteral("A Made-Up Project: Draft/2"));
+        const qint64 part = collections.create(QStringLiteral("Part One"), project);
+        collections.add(project, {inside});
+        collections.add(part, {deeper});
+
+        m_window = std::make_unique<MainWindow>(*m_session);
+        m_window->show();
+
+        // Both items are in the collection's menu in the sidebar.
+        FilterSidebar *sidebar = m_window->sidebar();
+        QTRY_VERIFY_WITH_TIMEOUT(sidebar->findValue(FilterSidebar::Collections, QString::number(project)) != nullptr, kLongWaitMs);
+        QTreeWidgetItem *item = sidebar->findValue(FilterSidebar::Collections, QString::number(project));
+        sidebar->tree()->scrollToItem(item);
+        QStringList names;
+        QTimer::singleShot(200, this, [&names] {
+            if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+                for (QAction *action : menu->actions())
+                    names << action->objectName();
+                menu->close();
+            }
+        });
+        emit sidebar->tree()->customContextMenuRequested(sidebar->tree()->visualItemRect(item).center());
+        QVERIFY2(names.contains(QStringLiteral("exportCollectionCitations")), qPrintable(names.join(u',')));
+        QVERIFY(names.contains(QStringLiteral("showCollectionHighlights")));
+
+        // Exporting asks where, named after the collection, and writes both of its publications.
+        m_boxWatcher->stop();
+        QString suggested;
+        const QString out = m_dir->filePath(QStringLiteral("A Made-Up Project Draft2.bib"));
+        QTimer::singleShot(300, this, [&suggested, out] {
+            if (auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget())) {
+                suggested = QFileInfo(dialog->selectedFiles().value(0)).fileName();
+                dialog->selectFile(out);
+                QMetaObject::invokeMethod(dialog, "accept");
+            }
+        });
+        QSignalSpy finished(m_window->citations(), &CitationActions::exportFinished);
+        m_window->exportCollectionCitations(project);
+        m_boxWatcher->start(100);
+        QTRY_VERIFY_WITH_TIMEOUT(!finished.isEmpty(), kLongWaitMs);
+        QVERIFY2(finished.first().at(0).toBool(), qPrintable(finished.first().at(1).toString()));
+        QCOMPARE(suggested, QStringLiteral("A Made-Up Project Draft2.bib"));
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(out) && !m_window->citations()->isExporting(), kLongWaitMs);
+        QFile written(out);
+        QVERIFY(written.open(QIODevice::ReadOnly));
+        const QString bib = QString::fromUtf8(written.readAll());
+        QVERIFY(bib.contains(QStringLiteral("A Made-Up Book In The Project")));
+        QVERIFY(bib.contains(QStringLiteral("A Made-Up Paper In Part One")));
+        QVERIFY(!bib.contains(QStringLiteral("Elsewhere")));
+        // Its highlights, with those of the collection inside it, and none from elsewhere.
+        m_window->showCollectionHighlights(project);
+        HighlightsWindow *window = m_window->highlightsWindow();
+        QVERIFY(window && window->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(!window->isLoading(), kLongWaitMs);
+        QList<qint64> shown = window->shownIds();
+        std::sort(shown.begin(), shown.end());
+        QCOMPARE(shown, (QList<qint64>{first, second}));
+        QCOMPARE(window->collectionChoice()->currentData().toLongLong(), project);
+
+        // One publication's, from its own menu, isn't kept to the collection.
+        m_window->showHighlights(outside);
+        QTRY_VERIFY_WITH_TIMEOUT(!window->isLoading(), kLongWaitMs);
+        QCOMPARE(window->shownIds().size(), qsizetype(1));
+        QCOMPARE(window->collectionChoice()->currentData().toLongLong(), qint64(0));
+
     }
 
     void everyHighlightIsListedAndOpensAtItsPlace()

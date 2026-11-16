@@ -96,6 +96,9 @@ signals:
     void filterChanged();
     void tagsChanged();
     void collectionsChanged();
+    // From a collection's menu: everything in it, and in the collections inside it.
+    void collectionCitationsRequested(qint64 collectionId);
+    void collectionHighlightsRequested(qint64 collectionId);
     // The publications chosen in the library were dragged onto a collection or tag.
     void publicationsDropped(Section section, qint64 id);
     void savedSearchChosen(qint64 id);

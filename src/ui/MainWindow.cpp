@@ -660,6 +660,8 @@ void MainWindow::buildCentre()
         applyFilters();
     });
     connect(m_sidebar, &FilterSidebar::tagsChanged, this, &MainWindow::refreshNow);
+    connect(m_sidebar, &FilterSidebar::collectionCitationsRequested, this, &MainWindow::exportCollectionCitations);
+    connect(m_sidebar, &FilterSidebar::collectionHighlightsRequested, this, &MainWindow::showCollectionHighlights);
     connect(m_sidebar, &FilterSidebar::collectionsChanged, this, [this] {
         refreshNow();
         m_details->reload();
@@ -2350,7 +2352,7 @@ HighlightsWindow *MainWindow::highlightsWindow() const
     return qobject_cast<HighlightsWindow *>(m_highlights.data());
 }
 
-void MainWindow::showHighlights(qint64 publicationId)
+HighlightsWindow *MainWindow::openHighlightsWindow()
 {
     HighlightsWindow *window = highlightsWindow();
     if (!window) {
@@ -2373,6 +2375,38 @@ void MainWindow::showHighlights(qint64 publicationId)
             }
         });
     }
+    window->show();
+    window->raise();
+    window->activateWindow();
+    return window;
+}
+
+void MainWindow::exportCollectionCitations(qint64 collectionId)
+{
+    QList<qint64> ids;
+    QString name;
+    guarded(tr("Reading the collection"), [&] {
+        if (const std::optional<Collection> collection = CollectionRepository(m_session.database()).get(collectionId))
+            name = collection->name;
+        PublicationFilter filter;
+        filter.collectionIds = {collectionId};
+        ids = m_session.query().ids(filter, {});
+    });
+    if (ids.isEmpty()) {
+        statusBar()->showMessage(tr("There's nothing in this collection to cite."), 8000);
+        return;
+    }
+    m_citations->askAndExport(ids, name);
+}
+
+void MainWindow::showCollectionHighlights(qint64 collectionId)
+{
+    openHighlightsWindow()->showOnlyCollection(collectionId);
+}
+
+void MainWindow::showHighlights(qint64 publicationId)
+{
+    HighlightsWindow *window = openHighlightsWindow();
     if (publicationId != 0) {
         QString title;
         guarded(tr("Reading the publication"), [&] {

@@ -189,7 +189,23 @@ bool CitationActions::copyInTextCitation(const QList<qint64> &ids)
     return true;
 }
 
-void CitationActions::askAndExport(const QList<qint64> &ids)
+namespace {
+
+// A name for a file from a collection's name, which can hold anything, or "citations" if it's left with nothing.
+QString fileNameFrom(const QString &name)
+{
+    QString cleaned;
+    for (const QChar c : name.simplified()) {
+        if (c.isLetterOrNumber() || c == u' ' || c == u'-' || c == u'_' || c == u'(' || c == u')')
+            cleaned += c;
+    }
+    cleaned = cleaned.trimmed().left(80).trimmed();
+    return cleaned.isEmpty() ? QStringLiteral("citations") : cleaned;
+}
+
+} // namespace
+
+void CitationActions::askAndExport(const QList<qint64> &ids, const QString &suggestedName)
 {
     if (ids.isEmpty() || isExporting())
         return;
@@ -198,7 +214,7 @@ void CitationActions::askAndExport(const QList<qint64> &ids)
         filters << exportFileFilter(format);
     QString chosenFilter = filters.first();
     const QString folder = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    QString path = QFileDialog::getSaveFileName(m_window, tr("Export citations"), QDir(folder).filePath(QStringLiteral("citations.bib")),
+    QString path = QFileDialog::getSaveFileName(m_window, tr("Export citations"), QDir(folder).filePath(fileNameFrom(suggestedName) + QStringLiteral(".bib")),
                                                 filters.join(QStringLiteral(";;")), &chosenFilter);
     if (path.isEmpty())
         return;

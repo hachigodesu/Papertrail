@@ -773,6 +773,11 @@ void FilterSidebar::showContextMenu(const QPoint &position)
             const qint64 id = item->data(0, kKeyRole).toLongLong();
             menu.addAction(tr("New collection inside this one..."), this, [this, id] { newCollection(id); });
             menu.addSeparator();
+            menu.addAction(tr("Export citations..."), this, [this, id] { emit collectionCitationsRequested(id); })
+                ->setObjectName(QStringLiteral("exportCollectionCitations"));
+            menu.addAction(tr("Show its highlights and notes"), this, [this, id] { emit collectionHighlightsRequested(id); })
+                ->setObjectName(QStringLiteral("showCollectionHighlights"));
+            menu.addSeparator();
             menu.addAction(tr("Rename..."), this, [this, id] { renameCollection(id); });
             menu.addAction(tr("Move..."), this, [this, id] { moveCollection(id); });
             menu.addSeparator();

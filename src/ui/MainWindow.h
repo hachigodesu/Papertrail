@@ -269,6 +269,8 @@ public:
     // View > Highlights and notes, kept open beside the library. With a publication, only those made in it.
     void showHighlights(qint64 publicationId = 0);
     class HighlightsWindow *highlightsWindow() const;
+    // The one open, or a new one, shown and in front.
+    class HighlightsWindow *openHighlightsWindow();
     // Opens the document a highlight or note is in, at its place. Returns whether it could.
     bool openAnnotation(qint64 annotationId);
 
@@ -383,6 +385,9 @@ public:
     // Recognises every page of these files' text in the background, and in any reader showing them, in place of
     // their own text.
     void recogniseDocuments(const QList<core::FileRecord> &files);
+    // From a collection's menu in the sidebar.
+    void exportCollectionCitations(qint64 collectionId);
+    void showCollectionHighlights(qint64 collectionId);
     // The order of a book's parts, for a book downloaded as a zip of PDFs, to check it or stitch it again.
     void showStitchDialog(const QString &zipSha256);
     // For tests: the one open, if any.

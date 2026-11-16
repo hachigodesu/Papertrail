@@ -264,8 +264,23 @@ void HighlightsWindow::showOnlyPublication(qint64 publicationId, const QString &
     m_only->setText(tr("Only in %1").arg(oneLine(title, 120)));
     m_only->setVisible(publicationId != 0);
     m_showAll->setVisible(publicationId != 0);
-    if (publicationId != 0)
+    if (publicationId != 0) {
         m_sort->setCurrentIndex(1); // In the order they come in it.
+        m_collection->setCurrentIndex(0); // A collection chosen from its menu needn't hold it.
+    }
+    reload();
+}
+
+void HighlightsWindow::showOnlyCollection(qint64 collectionId)
+{
+    fillChoices(); // It may be new since the window opened.
+    const int index = m_collection->findData(collectionId);
+    m_collection->setCurrentIndex(index >= 0 ? index : 0);
+    // Every publication in it, in the order its highlights come in each.
+    m_onlyPublication = 0;
+    m_only->hide();
+    m_showAll->hide();
+    m_sort->setCurrentIndex(1);
     reload();
 }
 

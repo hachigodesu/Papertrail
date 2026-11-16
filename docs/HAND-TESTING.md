@@ -164,3 +164,4 @@ What its tests can't vouch for. The packages are on the release's page.
 - **Saving the stitched PDF:** **Save the stitched PDF as...** saves one that opens in another app, with its outline.
 - **Other zips** in a folder, such as one with data files or one PDF only, are left alone, aren't listed anywhere, and aren't read again on the next scan.
 - **On another computer:** a library exported with a book in a zip, imported where the zip is too, has the book in the same order, with its highlights on the same words.
+- **A collection's menu:** right-clicking a collection in the sidebar offers **Export citations...**, which suggests a file named after it and writes everything in it and in the collections inside it, and **Show its highlights and notes**, which opens the highlights window with that collection chosen. **Show its highlights** on one publication afterwards shows all of that one's, whatever collection was chosen.

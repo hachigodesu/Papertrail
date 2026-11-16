@@ -52,7 +52,7 @@ public:
     bool copyCaseCitations(const QList<qint64> &ids, bool oscola);
 
     // Asks for a file, then exports in the background.
-    void askAndExport(const QList<qint64> &ids);
+    void askAndExport(const QList<qint64> &ids, const QString &suggestedName = QString());
     // Exports to this file in the background. `exportFinished` follows.
     void startExport(const QList<qint64> &ids, const QString &path, citation::ExportFormat format);
     bool isExporting() const { return m_thread != nullptr; }

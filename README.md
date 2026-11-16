@@ -229,7 +229,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **The Notes panel** lists a document's highlights and notes, and goes to each. Choose several at once to change their colour, copy, export or delete them together.
 - **Reading aloud** (**View > Read aloud**, Ctrl+Shift+Space) from the selection, the ruler, the top of the page, or wherever you click, marking each sentence as it's read and going on through the pages, with a player along the bottom to go back or on a sentence, pause, and change the speed and volume as it reads. It can read with natural voices, Kokoro's, which sound far more like a person: they're 367 MB, so Papertrail offers to fetch them the first time you read aloud, or in **File > Settings...**, and then reads with them on your computer, with nothing you read sent anywhere. Otherwise it uses your computer's voices, or on Linux a voice that comes with Papertrail. Scanned pages are read once their text is recognised.
 - **A reading ruler** (**View > Reading ruler**, Ctrl+L) dims everything but the line or paragraph you're reading, moved with Up and Down or a click, on to the next page, and passing over running heads, page numbers and notices down the side of the page.
-- **Every highlight and note in your library** in a window of its own, under **View > Highlights and notes...**, that stays open while you read: searched, or chosen by colour, kind, collection, tag or publication, edited there, and exported as Markdown. **Show its highlights** in the library's right-click menu shows one publication's.
+- **Every highlight and note in your library** in a window of its own, under **View > Highlights and notes...**, that stays open while you read: searched, or chosen by colour, kind, collection, tag or publication, edited there, and exported as Markdown. **Show its highlights** in the library's right-click menu shows one publication's, and **Show its highlights and notes** on a collection in the sidebar shows those of everything in it.
 - **Export to Markdown,** with each quote and note under its page.
 - **Save a copy of a PDF with its highlights and notes** as ordinary PDF annotations, for any other PDF reader. The original is left untouched.
 
@@ -245,7 +245,7 @@ Moving from another computer? Choose **Import a library from another computer...
 
 - **Copy references and in-text citations** in Harvard, APA (7th edition), IEEE or Chicago (author-date, 18th edition), with italics that paste into a word processor.
 - **Reference lists** for any selection, in the style's order, with 2020a and 2020b where needed.
-- **Export** BibTeX, RIS (for Zotero, Mendeley and EndNote) or CSL-JSON.
+- **Export** BibTeX, RIS (for Zotero, Mendeley and EndNote) or CSL-JSON, for what you've chosen or, from its menu in the sidebar, for a whole collection.
 - **Case law** is cited in the Bluebook's form, or OSCOLA's if you choose it for a case, in every style. With lookups online, a case's details come from a source of judgments for its jurisdiction: Find Case Law for the UK, for cases you choose to look up, EUR-Lex for the EU's courts, and CourtListener for the US or CanLII for Canada with a free key of your own.
 
 ### Summaries from Claude

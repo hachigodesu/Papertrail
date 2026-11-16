@@ -32,6 +32,8 @@ public:
 
     // Only those made in this publication, or all again with 0.
     void showOnlyPublication(qint64 publicationId, const QString &title);
+    // Only those in this collection's publications, and in those of the collections inside it.
+    void showOnlyCollection(qint64 collectionId);
     // Reads the list again with the choices as they are now, as after a change elsewhere.
     void reload();
     bool isLoading() const { return m_thread != nullptr; }
