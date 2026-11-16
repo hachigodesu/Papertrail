@@ -10,6 +10,8 @@ add_library(papertrail_engine STATIC
     MuPdfDocument.cpp
     Ocr.cpp
     Ocr.h
+    TurnedText.cpp
+    TurnedText.h
     WordLayer.cpp
     WordLayer.h)
 

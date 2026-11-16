@@ -3,6 +3,7 @@
 // Results stay in plain pointers until the block has finished.
 
 #include "engine/Backends.h"
+#include "engine/TurnedText.h"
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
@@ -148,15 +149,27 @@ public:
         layoutIfNeeded();
         fz_page *loaded = nullptr;
         fz_pixmap *pixmap = nullptr;
+        fz_device *device = nullptr;
         bool failed = false;
         fz_var(loaded);
         fz_var(pixmap);
+        fz_var(device);
         fz_try(m_ctx) {
             loaded = fz_load_page(m_ctx, m_doc, page);
             const fz_rect bounds = fz_bound_page(m_ctx, loaded);
             const float largest = std::max(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
             const float scale = largest > 0 ? float(maxDimension) / largest : 1.0f;
-            pixmap = fz_new_pixmap_from_page(m_ctx, loaded, fz_scale(scale, scale), fz_device_rgb(m_ctx), 0);
+            const fz_matrix matrix = fz_scale(scale, scale);
+            const fz_irect box = fz_round_rect(fz_transform_rect(bounds, matrix));
+            pixmap = fz_new_pixmap_with_bbox(m_ctx, fz_device_rgb(m_ctx), box, nullptr, 0);
+            fz_clear_pixmap_with_value(m_ctx, pixmap, 0xFF);
+            device = fz_new_draw_device(m_ctx, matrix, pixmap);
+            drawTurnedTextFromOutlines(device);
+            fz_run_page(m_ctx, loaded, device, fz_identity, nullptr);
+            fz_close_device(m_ctx, device);
+        }
+        fz_always(m_ctx) {
+            fz_drop_device(m_ctx, device);
         }
         fz_catch(m_ctx) {
             failed = true;
@@ -221,6 +234,7 @@ public:
             pixmap = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), box, nullptr, 1);
             fz_clear_pixmap_with_value(m_ctx, pixmap, 0xFF);
             device = fz_new_draw_device(m_ctx, matrix, pixmap);
+            drawTurnedTextFromOutlines(device);
             fz_run_page(m_ctx, loaded, device, fz_identity, nullptr);
             fz_close_device(m_ctx, device);
         }

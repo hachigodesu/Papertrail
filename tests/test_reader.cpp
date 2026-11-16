@@ -3,6 +3,7 @@
 #include "KindleSamples.h"
 
 #include "core/repo/PublicationMerge.h"
+#include "import/WorkerClient.h"
 #include "core/repo/BookmarkRepository.h"
 #include "core/repo/ReadingStateRepository.h"
 #include "ui/DetailsPanel.h"
@@ -302,6 +303,76 @@ private slots:
         const QImage image = rendered.first().at(2).value<QImage>();
         QVERIFY(image.width() <= 16000);
         QVERIFY(qint64(image.width()) * image.height() <= qint64(101e6));
+    }
+
+    void textSetAtAnAngleIsDrawnAtItsSize()
+    {
+        // FreeType 2.15.0 dropped the turn MuPDF gave a glyph set at about 45 degrees, so each of these letters was
+        // drawn upright and 1024 points tall, over most of the page. Made-up labels, as a figure's axis might have.
+        const QString path = m_dir->filePath(QStringLiteral("turned.pdf"));
+        const QByteArray content = "BT /F1 10 Tf 0.7071 0.7071 -0.7071 0.7071 40 40 Tm (Made-up label) Tj ET\n"
+                                   "BT /F1 10 Tf 0.7071 -0.7071 0.7071 0.7071 40 260 Tm (Another label) Tj ET\n"
+                                   "BT /F1 10 Tf 0.7193 0.6947 -0.6947 0.7193 180 40 Tm (At 44 degrees) Tj ET\n"
+                                   "BT /F1 10 Tf 40 140 Td (Upright words) Tj ET";
+        QByteArray pdf = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+                         "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+                         "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R "
+                         "/Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n";
+        pdf += "4 0 obj\n<< /Length " + QByteArray::number(content.size()) + " >>\nstream\n" + content
+               + "\nendstream\nendobj\n";
+        pdf += "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
+        pdf += "trailer\n<< /Root 1 0 R >>\n";
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(pdf);
+        file.close();
+
+        const auto inkIn = [](const QImage &image, const QRect &area) {
+            int dark = 0;
+            for (int y = area.top(); y <= area.bottom(); ++y) {
+                for (int x = area.left(); x <= area.right(); ++x)
+                    dark += qGray(image.pixel(x, y)) < 128 ? 1 : 0;
+            }
+            return double(dark) / double(area.width() * area.height());
+        };
+
+        DocumentClient client(worker());
+        QSignalSpy opened(&client, &DocumentClient::opened);
+        QSignalSpy rendered(&client, &DocumentClient::pageRendered);
+        QSignalSpy thumbnails(&client, &DocumentClient::thumbnailReady);
+        client.open(path, {});
+        QVERIFY(opened.wait(kWaitMs));
+        for (const double scale : {1.0, 3.0}) {
+            rendered.clear();
+            client.setWantedPages({{0, scale}});
+            QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), kWaitMs);
+            const QImage image = rendered.first().at(2).value<QImage>();
+            QCOMPARE(image.width(), qRound(300 * scale));
+            // Letters cover a little of the page, and the labels are there along their diagonals.
+            QVERIFY2(inkIn(image, image.rect()) < 0.05, qPrintable(QString::number(inkIn(image, image.rect()))));
+            const auto at = [scale](int x, int y, int size) {
+                return QRect(qRound(x * scale), qRound((300 - y) * scale), qRound(size * scale), qRound(size * scale));
+            };
+            QVERIFY(inkIn(image, at(45, 95, 50)) > 0.01);  // "Made-up label", rising from (40, 40).
+            QVERIFY(inkIn(image, at(45, 255, 50)) > 0.01); // "Another label", falling from (40, 260).
+            QVERIFY(inkIn(image, at(40, 150, 60)) > 0.01); // The upright words still draw.
+        }
+
+        // Thumbnails are drawn the same way.
+        client.requestThumbnail(0, 0.5);
+        QTRY_VERIFY_WITH_TIMEOUT(!thumbnails.isEmpty(), kWaitMs);
+        const QImage thumbnail = thumbnails.first().at(1).value<QImage>();
+        QVERIFY(!thumbnail.isNull());
+        QVERIFY2(inkIn(thumbnail, thumbnail.rect()) < 0.05, qPrintable(QString::number(inkIn(thumbnail, thumbnail.rect()))));
+
+        // So are covers, by the library's worker, whose picture of a page also tells whether it's a scan.
+        import::WorkerClient library(worker());
+        const QString coverPath = m_dir->filePath(QStringLiteral("turned.jpg"));
+        const import::WorkerClient::Cover cover = library.pageCover(path, QString(), 0, coverPath, kWaitMs);
+        QCOMPARE(cover.failure, import::WorkerFailure::None);
+        const QImage coverImage(coverPath);
+        QVERIFY(!coverImage.isNull());
+        QVERIFY2(inkIn(coverImage, coverImage.rect()) < 0.05, qPrintable(QString::number(inkIn(coverImage, coverImage.rect()))));
     }
 
     void readsTheContentsAndLinksOfAPdf()
