@@ -59,6 +59,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.5.0" date="2026-11-17">
+      <description>
+        <p>A book downloaded as a zip of PDFs, one for each chapter, as ScienceDirect gives them, is read as one book, in an order worked out from the parts' page numbers and names and checked by the user, without changing the zip. A collection's menu exports citations for everything in it and shows its highlights and notes, and text set at an angle is drawn properly.</p>
+      </description>
+    </release>
     <release version="1.4.0" date="2026-11-14">
       <description>
         <p>Documents read aloud, sentence by sentence, with the computer's own voices or natural voices fetched when chosen, a reading ruler, every highlight in a window of its own, a check of the library for what needs attention, court cases looked up in sources of judgments for the UK, the EU, the US and Canada, the scanned pages of partly scanned documents recognised, and an OpenAlex key of the user's own.</p>
