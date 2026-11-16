@@ -7,6 +7,8 @@
 #include "core/model/Identifiers.h"
 #include "core/repo/LookupRepository.h"
 #include "core/repo/PublicationMerge.h"
+#include "core/repo/StitchRepository.h"
+#include "import/Stitching.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -83,6 +85,8 @@ const QStringList &supportedExtensions()
         QStringLiteral("pdf"), QStringLiteral("epub"), QStringLiteral("djvu"), QStringLiteral("djv"),
         QStringLiteral("mobi"), QStringLiteral("azw"), QStringLiteral("azw3"), QStringLiteral("xps"),
         QStringLiteral("oxps"), QStringLiteral("cbz"), QStringLiteral("fb2"),
+        // A book downloaded as a zip of PDFs, one per part. Other zips are looked at once and left alone.
+        QStringLiteral("zip"),
     };
     return extensions;
 }
@@ -114,9 +118,12 @@ QString coverPathFor(const QString &cacheDirectory, const QString &sha256)
     return QDir(cacheDirectory).filePath(QStringLiteral("covers/%1/%2.jpg").arg(sha256.left(2), sha256));
 }
 
-QString convertedPathFor(const QString &cacheDirectory, const QString &sha256)
+QString convertedPathFor(const QString &cacheDirectory, const QString &sha256, const QString &path)
 {
-    return QDir(cacheDirectory).filePath(QStringLiteral("converted/%1/%2.epub").arg(sha256.left(2), sha256));
+    // A Kindle book's converted copy is an EPUB, and a zip of a book's parts is stitched into a PDF.
+    const bool zip = QFileInfo(path).suffix().compare(QStringLiteral("zip"), Qt::CaseInsensitive) == 0;
+    return QDir(cacheDirectory)
+        .filePath(QStringLiteral("converted/%1/%2.%3").arg(sha256.left(2), sha256, zip ? QStringLiteral("pdf") : QStringLiteral("epub")));
 }
 
 QString recognisedFolderFor(const QString &cacheDirectory, const QString &sha256)
@@ -142,6 +149,19 @@ ImportService::ImportService(Database &db, const ImportOptions &options)
 }
 
 ImportService::~ImportService() = default;
+
+void ImportService::keepOrderFile(const FileRecord &file, const QString &path)
+{
+    // A book in a zip already has an order here, as one from another computer's library does, so the worker stitches
+    // it by that rather than working out its own.
+    if (file.format != QLatin1StringView("zip") || file.sha256.isEmpty())
+        return;
+    if (const std::optional<StitchOrder> kept = StitchRepository(m_db).get(file.sha256)) {
+        const QList<OrderedPart> order = orderFromJson(kept->partsJson);
+        if (!order.isEmpty())
+            writeOrderFile(convertedPathFor(m_options.cacheDirectory, file.sha256, path), order);
+    }
+}
 
 QString ImportService::coverPath(const QString &sha256) const
 {
@@ -223,6 +243,12 @@ ScanReport ImportService::scan(qint64 rootId)
         const QFileInfo info = it.fileInfo();
         const QString relative = QDir::fromNativeSeparators(base.relativeFilePath(path));
         const qint64 modified = info.lastModified().toMSecsSinceEpoch();
+        // A zip already found not to be a book is left alone until it changes.
+        if (info.suffix().compare(QStringLiteral("zip"), Qt::CaseInsensitive) == 0
+            && StitchRepository(m_db).isSkippedZip(rootId, relative, info.size(), modified)) {
+            ++report.unsupportedSkipped;
+            continue;
+        }
         seen.insert(relative);
 
         const auto existing = known.constFind(relative);
@@ -396,6 +422,27 @@ void ImportService::processFingerprint(const Job &job, ImportReport &report)
         return;
     }
 
+    // Only a zip of a book's parts is a document. Any other is forgotten, and noted so it isn't read again until it
+    // changes, which costs one read of its list of entries.
+    if (file->format == QLatin1StringView("zip")) {
+        const WorkerClient::ZipCheck check = m_worker.zipCheck(path, m_options.inspectTimeoutMs);
+        if (check.failure == WorkerFailure::Cancelled) {
+            requeueJob(job);
+            return;
+        }
+        if (!check.book) {
+            Transaction transaction(m_db);
+            if (m_files.publicationsFor(file->id).isEmpty()) {
+                StitchRepository(m_db).skipZip(file->rootId, file->relativePath, file->size, file->modifiedAt);
+                m_files.forgetFile(file->id);
+                ++report.notBooks;
+            }
+            finishJob(job);
+            transaction.commit();
+            return;
+        }
+    }
+
     const qint64 hashSeconds = file->size / qMax<qint64>(1, m_options.hashBytesPerSecond);
     const int timeout = int(qMin<qint64>(qMax<qint64>(m_options.minHashTimeoutMs, hashSeconds * 1000), 3600000));
     const WorkerClient::HashResult hash = m_worker.hash(path, timeout);
@@ -498,8 +545,9 @@ void ImportService::processInspect(const Job &job, ImportReport &report)
     }
 
     const QString path = m_files.absolutePath(file->id);
+    keepOrderFile(*file, path);
     const WorkerClient::Inspection inspection = m_worker.inspect(
-        path, coverPath(file->sha256), convertedPathFor(m_options.cacheDirectory, file->sha256), m_options.inspectTimeoutMs);
+        path, coverPath(file->sha256), convertedPathFor(m_options.cacheDirectory, file->sha256, path), m_options.inspectTimeoutMs);
 
     if (inspection.failure == WorkerFailure::Cancelled) {
         requeueJob(job);
@@ -556,8 +604,9 @@ void ImportService::processReclassify(const Job &job, ImportReport &report)
     bool gaveUp = false;
     const QString path = m_files.absolutePath(file->id);
     if (QFile::exists(path)) {
+        keepOrderFile(*file, path);
         const WorkerClient::Inspection inspection = m_worker.inspect(
-            path, QString(), convertedPathFor(m_options.cacheDirectory, file->sha256), m_options.inspectTimeoutMs);
+            path, QString(), convertedPathFor(m_options.cacheDirectory, file->sha256, path), m_options.inspectTimeoutMs);
         if (inspection.failure == WorkerFailure::Cancelled) {
             requeueJob(job);
             return;
@@ -750,7 +799,10 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
     Publication p;
     bool titleIsReliable = true;
     QString titleSource;
-    const QString fileTitle = titleFromFileName(QFileInfo(file.relativePath).fileName());
+    // A book's zip is named for when it was downloaded, so the title its parts' names share is better.
+    const bool stitched = file.format == QLatin1StringView("zip");
+    const QString fileTitle = stitched && !found.bookTitle.isEmpty() ? found.bookTitle
+                                                                     : titleFromFileName(QFileInfo(file.relativePath).fileName());
     if (!meta.title.isEmpty() && !isJunkTitle(meta.title)) {
         p.title = meta.title;
         titleSource = QStringLiteral("embedded");
@@ -778,8 +830,9 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
 
     p.doi = meta.doi.isEmpty() ? findDoi(firstTwoPages) : meta.doi;
 
-    // An ISBN found inside a short document belongs to the proceedings or book it's part of.
-    const bool longEnoughForIsbn = !found.pageCount || *found.pageCount >= 50;
+    // An ISBN found inside a short document belongs to the proceedings or book it's part of. A book stitched from its
+    // parts is the whole book, however short.
+    const bool longEnoughForIsbn = stitched || !found.pageCount || *found.pageCount >= 50;
     const QString isbn = !meta.isbn.isEmpty() ? meta.isbn : (longEnoughForIsbn ? findIsbn(found.text) : QString());
     if (isbn.size() == 13)
         p.isbn13 = isbn;
@@ -793,6 +846,8 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
     p.year = yearFromDate(meta.date);
     if (!p.year)
         p.year = findCopyrightYear(firstTwoPages);
+    if (!p.year && stitched && found.bookYear > 0)
+        p.year = found.bookYear;
     if (!meta.keywords.isEmpty()) {
         p.extraJson = QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("keywords"), meta.keywords}})
                                             .toJson(QJsonDocument::Compact));
@@ -802,6 +857,15 @@ void ImportService::createPublication(const FileRecord &file, const InspectResul
                                                     p.doi, isbn, p.issn, p.arxivId});
     p.type = classification.type;
     p.needsReview = !titleIsReliable || !classification.confident;
+    if (stitched) {
+        // A zip of parts is a book, or a textbook or proceedings if its pages say so. The order its parts were stitched
+        // in is only a best guess until the user confirms it.
+        if (p.type != PublicationType::Textbook && p.type != PublicationType::ConferenceProceedings)
+            p.type = PublicationType::Book;
+        p.needsReview = true;
+        if (!found.stitchOrder.isEmpty() && !file.sha256.isEmpty() && !StitchRepository(m_db).get(file.sha256))
+            StitchRepository(m_db).set(file.sha256, found.stitchOrder, false);
+    }
     if (p.type == PublicationType::CaseLaw) {
         if (const std::optional<CaseDetails> details = caseDetailsOnFirstPage(firstPage, p.title, laterPages)) {
             // A judgment's largest text is usually its court or "JUDGMENT", so the parties make a better title.

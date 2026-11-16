@@ -404,13 +404,11 @@ private slots:
     void bookmarksRelatedPapersAndRatingSortsAreAddedAndCanBeAddedAgain()
     {
         Database db(path());
-        const std::vector<Migration> &all = libraryMigrations();
-        QCOMPARE(all.back().version, 22);
-        migrate(db, std::vector<Migration>(all.begin(), all.end() - 2));
+        migrate(db, migrationsBefore(21));
         db.exec("INSERT INTO publication (id, uuid, type, title, rating, title_sort, created_at, updated_at) VALUES "
                 "(1, 'u1', 'book', 'A Made-Up Book', 4, 'a made-up book', 1, 1)");
         migrateLibrary(db);
-        QCOMPARE(db.userVersion(), 22);
+        QCOMPARE(db.userVersion(), libraryMigrations().back().version);
         const auto count = [&](const char *sql) {
             auto select = db.prepare(sql);
             select->step();
@@ -445,14 +443,13 @@ private slots:
     void publicationsSaidToDifferAreKeptAndCanBeAddedAgain()
     {
         Database db(path());
-        const std::vector<Migration> &all = libraryMigrations();
-        migrate(db, std::vector<Migration>(all.begin(), all.end() - 1));
+        migrate(db, migrationsBefore(22));
         for (int id = 1; id <= 3; ++id) {
             db.exec(QStringLiteral("INSERT INTO publication (id, uuid, type, title, title_sort, created_at, updated_at) VALUES "
                                    "(%1, 'u%1', 'book', 'A Made-Up Book', 'a made-up book', 1, 1)").arg(id).toUtf8().constData());
         }
         migrateLibrary(db);
-        QCOMPARE(db.userVersion(), 22);
+        QCOMPARE(db.userVersion(), libraryMigrations().back().version);
         const auto count = [&](const char *sql) {
             auto select = db.prepare(sql);
             select->step();
@@ -491,6 +488,17 @@ private slots:
 
 private:
     QString path() const { return m_dir->filePath(QStringLiteral("test.db")); }
+
+    // The library's migrations up to, but not including, this one.
+    static std::vector<Migration> migrationsBefore(int version)
+    {
+        std::vector<Migration> before;
+        for (const Migration &migration : libraryMigrations()) {
+            if (migration.version < version)
+                before.push_back(migration);
+        }
+        return before;
+    }
 
     static void addPublication(Database &db, const QString &title)
     {

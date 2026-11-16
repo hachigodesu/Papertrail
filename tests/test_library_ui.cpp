@@ -24,6 +24,9 @@
 #include "ui/ReferenceImportDialog.h"
 #include "core/repo/SavedSearchRepository.h"
 #include "ui/SettingsDialog.h"
+#include "ui/StitchDialog.h"
+#include "core/repo/StitchRepository.h"
+#include "import/Stitching.h"
 #include "ui/Theme.h"
 #include "import/ImportService.h"
 #include "import/TextRecognition.h"
@@ -786,6 +789,145 @@ private slots:
     }
 
     // ---- Importing ----
+
+    // ---- Books downloaded as a zip of PDFs ----
+
+    void aBookInAZipIsOfferedForCheckingAfterImport()
+    {
+        const QString folder = copySamples({QStringLiteral("sciencedirect_book.zip"), QStringLiteral("not_a_book.zip")});
+        const auto before = hashTree(folder);
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->importThread()->isBusy(), kLongWaitMs);
+
+        // Offered once the import's done, in the order worked out.
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->stitchDialog() != nullptr, kLongWaitMs);
+        StitchDialog *dialog = m_window->stitchDialog();
+        QTRY_VERIFY_WITH_TIMEOUT(!dialog->isReading(), kLongWaitMs);
+        QListWidget *parts = dialog->list();
+        QCOMPARE(parts->count(), 10);
+        QVERIFY(parts->item(0)->data(Qt::UserRole).toString().startsWith(QStringLiteral("Front-matter")));
+        QVERIFY(parts->item(9)->data(Qt::UserRole).toString().startsWith(QStringLiteral("No-title-available")));
+        QVERIFY(parts->item(9)->text().contains(QStringLiteral("Couldn't tell where this goes")));
+        QVERIFY(!dialog->changed());
+
+        // The part that couldn't be placed moved to the front, and stitched.
+        parts->setCurrentRow(9);
+        for (int i = 0; i < 9; ++i)
+            dialog->button(QStringLiteral("moveUp"))->click();
+        QVERIFY(!dialog->button(QStringLiteral("moveUp"))->isEnabled());
+        QVERIFY(dialog->changed());
+        const QString sha = dialog->zipSha256();
+        const QString moved = parts->item(0)->data(Qt::UserRole).toString();
+        dialog->button(QStringLiteral("stitch"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->stitchDialog() == nullptr, kLongWaitMs);
+
+        const std::optional<StitchOrder> kept = StitchRepository(m_session->database()).get(sha);
+        QVERIFY(kept && kept->confirmed);
+        const QList<import::OrderedPart> order = import::orderFromJson(kept->partsJson);
+        QCOMPARE(order.first().name, moved);
+        QVERIFY(!m_session->publications().get(allIds().first())->needsReview);
+        // Stitched again in the background, as its cover's made.
+        const QString converted = import::convertedPathFor(m_session->paths().cacheDirectory, sha, QStringLiteral("book.zip"));
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(import::stitchedPathFor(converted, order)), kLongWaitMs);
+        QFile orderFile(import::orderPathFor(converted));
+        QVERIFY(orderFile.open(QIODevice::ReadOnly));
+        QCOMPARE(import::orderKey(import::orderFromJson(orderFile.readAll())), import::orderKey(order));
+
+        // Not offered again.
+        QTest::qWait(300);
+        QVERIFY(m_window->stitchDialog() == nullptr);
+        QCOMPARE(hashTree(folder), before);
+    }
+
+    void laterPutsTheOfferOffAndTheMenusBringItBack()
+    {
+        const QString folder = copySamples({QStringLiteral("sciencedirect_book.zip")});
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->stitchDialog() != nullptr, kLongWaitMs);
+        const QString sha = m_window->stitchDialog()->zipSha256();
+        m_window->stitchDialog()->button(QStringLiteral("later"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->stitchDialog() == nullptr, kLongWaitMs);
+        QTest::qWait(300);
+        QVERIFY(m_window->stitchDialog() == nullptr);
+        // Still to check, and saying why.
+        QVERIFY(m_session->publications().get(allIds().first())->needsReview);
+        QVERIFY(!StitchRepository(m_session->database()).get(sha)->confirmed);
+
+        // The library's menu has it, and Save the stitched PDF.
+        selectRows(0, 0);
+        QStringList names;
+        QTimer::singleShot(200, this, [&names] {
+            if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+                for (QAction *item : menu->actions())
+                    names << item->objectName();
+                menu->close();
+            }
+        });
+        QAbstractItemView *view = m_window->gridView()->isVisible() ? static_cast<QAbstractItemView *>(m_window->gridView())
+                                                                    : static_cast<QAbstractItemView *>(m_window->listView());
+        const QRect first = view->visualRect(m_window->model()->index(0, 0));
+        emit view->customContextMenuRequested(first.center());
+        QVERIFY2(names.contains(QStringLiteral("stitchOrder")), qPrintable(names.join(u',')));
+        QVERIFY(names.contains(QStringLiteral("saveStitched")));
+
+        // And opens it with the order kept.
+        m_window->showStitchDialog(sha);
+        QVERIFY(m_window->stitchDialog() != nullptr);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->stitchDialog()->isReading(), kLongWaitMs);
+        QCOMPARE(m_window->stitchDialog()->list()->count(), 10);
+        m_window->stitchDialog()->button(QStringLiteral("later"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->stitchDialog() == nullptr, kLongWaitMs);
+    }
+
+    void aPartLeftOutWarnsOfItsHighlights()
+    {
+        const QString folder = copySamples({QStringLiteral("sciencedirect_book.zip")});
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 1, kLongWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->stitchDialog() != nullptr, kLongWaitMs);
+        StitchDialog *dialog = m_window->stitchDialog();
+        QTRY_VERIFY_WITH_TIMEOUT(!dialog->isReading(), kLongWaitMs);
+        const QString sha = dialog->zipSha256();
+        const qint64 book = allIds().first();
+        // A highlight on the first page, the front matter's.
+        auto insert = m_session->database().prepare(
+            "INSERT INTO annotation (uuid, publication_id, content_hash, location_json, type, colour, selected_text, created_at, "
+            "updated_at) VALUES ('88888888-0000-0000-0000-000000000001', ?, ?, "
+            "'{\"parts\":[{\"text\":\"made-up\",\"page\":0,\"rects\":[[70,90,80,30]]}]}', 'highlight', '#ffff00', 'made-up', 1, 1)");
+        insert->bind(1, book);
+        insert->bind(2, sha);
+        insert->step();
+
+        dialog->list()->item(0)->setCheckState(Qt::Unchecked);
+        // The warning's answered with Cancel first, which leaves the dialog open, then with OK. It's expected here.
+        m_boxWatcher->stop();
+        bool warned = false;
+        QTimer::singleShot(300, this, [&warned] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                warned = box->text().contains(QStringLiteral("leaving out"));
+                box->button(QMessageBox::Cancel)->click();
+            }
+        });
+        dialog->button(QStringLiteral("stitch"))->click();
+        QVERIFY(warned);
+        QVERIFY(m_window->stitchDialog() != nullptr);
+        QTimer::singleShot(300, this, [] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                box->button(QMessageBox::Ok)->click();
+        });
+        dialog->button(QStringLiteral("stitch"))->click();
+        m_boxWatcher->start(100);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->stitchDialog() == nullptr, kLongWaitMs);
+        auto count = m_session->database().prepare("SELECT count(*) FROM annotation");
+        count->step();
+        QCOMPARE(count->int64At(0), qint64(0)); // Set aside, to come back with its part.
+        QCOMPARE(m_session->files().filesFor(book).first().pageCount, std::optional<int>(16));
+    }
 
     void importingFromTheWindowLeavesFilesAlone()
     {

@@ -1,5 +1,6 @@
 #include "ReaderHost.h"
 #include "RecognisedText.h"
+#include "ZipBook.h"
 
 #include "core/text/References.h"
 #include "engine/Document.h"
@@ -116,6 +117,8 @@ void applyPageFaults(const QString &path, int page)
 QString readablePath(engine::Engine &engine, const QString &path, const QString &convertedPath)
 {
     const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == QLatin1StringView("zip"))
+        return stitchedZip(engine, path, convertedPath);
     if (suffix != QLatin1StringView("mobi") && suffix != QLatin1StringView("azw") && suffix != QLatin1StringView("azw3"))
         return path;
 

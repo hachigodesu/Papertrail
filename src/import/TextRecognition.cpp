@@ -98,6 +98,17 @@ void TextRecognition::want(Database &db, const QString &sha256)
     transaction.commit();
 }
 
+void TextRecognition::forget(Database &db, const QString &sha256)
+{
+    Transaction transaction(db);
+    for (const char *sql : {"DELETE FROM fulltext.recognition WHERE sha256 = ?", "DELETE FROM fulltext.mixed_pages WHERE sha256 = ?"}) {
+        auto remove = db.prepare(sql);
+        remove->bind(1, sha256);
+        remove->step();
+    }
+    transaction.commit();
+}
+
 bool TextRecognition::isWanted(Database &db, const QString &sha256)
 {
     auto select = db.prepare("SELECT 1 FROM fulltext.recognition_wanted WHERE sha256 = ?");
@@ -204,7 +215,7 @@ RecognitionReport TextRecognition::run(const Progress &progress)
         };
 
         const QString folder = recognisedFolderFor(m_options.cacheDirectory, sha256);
-        const QString converted = convertedPathFor(m_options.cacheDirectory, sha256);
+        const QString converted = convertedPathFor(m_options.cacheDirectory, sha256, path);
         const QString name = QFileInfo(path).fileName();
         int pageCount = 0;
         int recognisedHere = 0;

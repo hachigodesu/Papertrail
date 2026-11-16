@@ -3,6 +3,7 @@
 #include "core/repo/AnnotationRepository.h"
 #include "core/repo/FullTextIndex.h"
 #include "core/repo/NoticeRepository.h"
+#include "core/repo/StitchRepository.h"
 #include "core/repo/SummaryRepository.h"
 #include "core/repo/VolumeArticles.h"
 #include "summary/SummaryBatches.h"
@@ -568,8 +569,13 @@ void DetailsPanel::reload()
     m_authors->setVisible(!authors.isEmpty());
 
     m_review->setVisible(p.needsReview);
-    if (p.needsReview)
-        m_reviewReason->setText(reviewReason(m_session.publications(), p.id));
+    if (p.needsReview) {
+        if (StitchRepository(m_session.database()).unconfirmedFor(p.id))
+            m_reviewReason->setText(tr("It's a book downloaded as a zip of its parts, and the order they're stitched in "
+                                       "hasn't been checked. Right-click it and choose Order of its parts."));
+        else
+            m_reviewReason->setText(reviewReason(m_session.publications(), p.id));
+    }
 
     m_preprint->setChecked(p.type == PublicationType::Preprint);
 

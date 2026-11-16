@@ -1122,7 +1122,7 @@ void ReaderTab::restorePlace()
 
 void ReaderTab::saveState()
 {
-    if (!m_ready || m_failedToOpen || !m_savesPlace)
+    if (!m_ready || m_failedToOpen || !m_savesPlace || m_placeOutOfDate)
         return;
     m_saveTimer->stop();
     QJsonObject place;
@@ -2139,6 +2139,11 @@ void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
             QAction *recognise = menu->addAction(tr("Recognise this document's text"), this, &ReaderTab::recogniseDocumentWanted);
             recognise->setObjectName(QStringLiteral("recogniseDocument"));
             recognise->setToolTip(tr("Reads the words on every page from the pictures of them, in place of the file's own text."));
+        }
+        if (m_format == QLatin1StringView("zip") && !m_contentHash.isEmpty()) {
+            QAction *order = menu->addAction(tr("Order of its parts..."), this,
+                                             [this] { emit stitchOrderWanted(m_contentHash); });
+            order->setObjectName(QStringLiteral("stitchOrder"));
         }
     }
 }

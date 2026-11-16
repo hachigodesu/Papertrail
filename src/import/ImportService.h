@@ -69,6 +69,7 @@ struct ImportReport {
     int formatsJoined = 0;      // Files recognised as another format of an existing publication.
     int relinked = 0;           // Files of publications imported from another computer, found here.
     int keptOut = 0;            // Files of publications the user removed, found again and left out.
+    int notBooks = 0;           // Zips found not to hold a book's parts, and left alone.
     int unreadable = 0;         // Couldn't be read, or need a password.
     int workerRestarts = 0;     // Crashes or hangs recovered from.
     int needsReview = 0;
@@ -82,7 +83,7 @@ bool isPathInside(const QString &path, const QString &folder);
 QString coverPathFor(const QString &cacheDirectory, const QString &sha256);
 
 // Where a Kindle book that had to be converted keeps its readable copy.
-QString convertedPathFor(const QString &cacheDirectory, const QString &sha256);
+QString convertedPathFor(const QString &cacheDirectory, const QString &sha256, const QString &path);
 // Where the words recognised on a file's scanned pages are kept, by its contents.
 QString recognisedFolderFor(const QString &cacheDirectory, const QString &sha256);
 
@@ -108,6 +109,8 @@ public:
     QString coverPath(const QString &sha256) const;
 
 private:
+    // Writes the order kept for a book in a zip into the cache, for the worker.
+    void keepOrderFile(const core::FileRecord &file, const QString &path);
     struct Job;
     bool nextJob(Job &job);
     void finishJob(const Job &job);

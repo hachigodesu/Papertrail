@@ -176,15 +176,49 @@ WorkerClient::Cover WorkerClient::pageCover(const QString &path, const QString &
     return Cover{reply.failure, reply.error};
 }
 
-WorkerClient::MarkedCopy WorkerClient::markedCopy(const QString &path, const QString &out, const QJsonArray &marks, int timeoutMs)
+WorkerClient::MarkedCopy WorkerClient::markedCopy(const QString &path, const QString &out, const QJsonArray &marks, int timeoutMs,
+                                                   const QString &convertedPath)
 {
     QJsonObject request;
     request.insert(QStringLiteral("op"), QStringLiteral("markedcopy"));
     request.insert(QStringLiteral("path"), path);
+    request.insert(QStringLiteral("convertedPath"), convertedPath);
     request.insert(QStringLiteral("out"), out);
     request.insert(QStringLiteral("marks"), marks);
     const Reply reply = call(request, timeoutMs);
     return MarkedCopy{reply.failure, reply.error};
+}
+
+WorkerClient::ZipCheck WorkerClient::zipCheck(const QString &path, int timeoutMs)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("op"), QStringLiteral("zipcheck"));
+    request.insert(QStringLiteral("path"), path);
+    const Reply reply = call(request, timeoutMs);
+    ZipCheck check;
+    check.failure = reply.failure;
+    check.error = reply.error;
+    check.book = reply.failure == WorkerFailure::None && reply.body.value(QStringLiteral("book")).toBool();
+    return check;
+}
+
+WorkerClient::ZipParts WorkerClient::zipParts(const QString &path, const QString &coverFolder, int timeoutMs)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("op"), QStringLiteral("zipparts"));
+    request.insert(QStringLiteral("path"), path);
+    request.insert(QStringLiteral("coverFolder"), coverFolder);
+    const Reply reply = call(request, timeoutMs);
+    ZipParts parts;
+    parts.failure = reply.failure;
+    parts.error = reply.error;
+    if (reply.failure != WorkerFailure::None)
+        return parts;
+    parts.plan = planFromJson(reply.body.value(QStringLiteral("plan")).toArray());
+    parts.plan.certain = reply.body.value(QStringLiteral("certain")).toBool();
+    parts.book.title = reply.body.value(QStringLiteral("bookTitle")).toString();
+    parts.book.year = reply.body.value(QStringLiteral("bookYear")).toInt();
+    return parts;
 }
 
 WorkerClient::Inspection WorkerClient::inspect(const QString &path, const QString &coverPath, const QString &convertedPath,
@@ -230,6 +264,10 @@ WorkerClient::Inspection WorkerClient::inspect(const QString &path, const QStrin
     r.metadata.issn = m.value(QStringLiteral("issn")).toString();
     r.metadata.description = m.value(QStringLiteral("description")).toString();
     r.metadata.keywords = m.value(QStringLiteral("keywords")).toString();
+
+    r.stitchOrder = b.value(QStringLiteral("stitchOrder")).toString().toUtf8();
+    r.bookTitle = b.value(QStringLiteral("bookTitle")).toString();
+    r.bookYear = b.value(QStringLiteral("bookYear")).toInt();
     return inspection;
 }
 

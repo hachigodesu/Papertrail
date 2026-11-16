@@ -13,7 +13,8 @@ add_library(papertrail_engine STATIC
     TurnedText.cpp
     TurnedText.h
     WordLayer.cpp
-    WordLayer.h)
+    WordLayer.h
+    ZipBook.cpp)
 
 target_include_directories(papertrail_engine PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(papertrail_engine PUBLIC Qt6::Core PRIVATE MuPDF::MuPDF DjVuLibre::DjVuLibre Mobi::Mobi)

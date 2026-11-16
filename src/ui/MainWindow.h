@@ -4,15 +4,18 @@
 #include "core/query/PublicationFilter.h"
 #include "core/repo/FileRepository.h"
 #include "import/ImportService.h"
+#include "import/Stitching.h"
 #include "metadata/LookupEngine.h"
 #include "ui/QueryThreads.h"
 
 #include <QHash>
+#include <QSet>
 #include <QJsonObject>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPointer>
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -33,6 +36,7 @@ class QStackedWidget;
 class QTabBar;
 class QTabWidget;
 class QTableView;
+class QThread;
 class QTimer;
 class QToolBar;
 class QToolButton;
@@ -346,7 +350,23 @@ private:
     void letGoOfHidden();
     void offerReviewIfDue();
     void offerRetractionsIfDue();
-    void offerWhatsDue(); // Retractions first, then details to review.
+    void offerWhatsDue(); // Retractions first, then details to review, then books in zips to check.
+    // Offers the order of a book in a zip whose order hasn't been checked yet, one at a time, each once a session.
+    void offerStitchingIfDue();
+    // Keeps the order chosen in the dialog, moves what's kept by page with its part, and has everything read from
+    // the old stitched PDF made again.
+    void applyStitchOrder(const QString &zipSha256, const QList<import::OrderedPart> &order);
+    // Readers showing these contents are opened again, from their places as they're kept now.
+    void reopenReadersOf(const QString &contentHash);
+    // What was read from a book in a zip's pages, its text and recognised words, is out of date once it's stitched in
+    // another order.
+    void forgetStitchedPages(const QString &zipSha256);
+    // The cache's copy of each order, for the worker, written again if it's been cleared, and stitched copies made
+    // by an order no longer kept removed.
+    void writeStitchOrders();
+    void saveStitchedCopy(qint64 publicationId);
+    // The zip's path, if a copy of it can be found.
+    std::optional<QString> zipPathFor(const QString &zipSha256);
     void deletePublications(const QList<qint64> &ids);
     void askForBulkTag();
     void askToAddSelectedToNewCollection();
@@ -363,6 +383,10 @@ public:
     // Recognises every page of these files' text in the background, and in any reader showing them, in place of
     // their own text.
     void recogniseDocuments(const QList<core::FileRecord> &files);
+    // The order of a book's parts, for a book downloaded as a zip of PDFs, to check it or stitch it again.
+    void showStitchDialog(const QString &zipSha256);
+    // For tests: the one open, if any.
+    class StitchDialog *stitchDialog() const;
 
 private:
     void showAbout();
@@ -431,6 +455,10 @@ private:
     ArticleCoverThread *m_articleCovers = nullptr;
     QPointer<QDialog> m_libraryCheck; // A LibraryCheckDialog.
     QPointer<QWidget> m_highlights;    // A HighlightsWindow.
+    QPointer<QDialog> m_stitch;        // A StitchDialog.
+    QSet<QString> m_stitchOffered;     // Books in zips offered this session, so Later puts them off till the next.
+    QList<QThread *> m_stitchWork;     // Stitching again, and the cover made from it, waited for as the window goes.
+    std::atomic<bool> m_closing{false};
     std::unique_ptr<ApiKeyStore> m_keys;
     std::unique_ptr<ApiKeyStore> m_openAlexKeys;
     std::unique_ptr<ApiKeyStore> m_courtListenerKeys;

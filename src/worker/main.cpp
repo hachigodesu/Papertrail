@@ -8,6 +8,7 @@
 #include "ReaderHost.h"
 #include "RecognisedText.h"
 #include "VoiceHost.h"
+#include "ZipBook.h"
 
 #include "engine/Document.h"
 #include "engine/Ocr.h"
@@ -107,6 +108,26 @@ QJsonObject inspectFile(engine::Engine &engine, const QString &originalPath, con
     reply.insert(QStringLiteral("format"), formatFromSuffix(path));
 
     import::EmbeddedMetadata metadata;
+
+    // A book downloaded as a zip of PDFs is read as its stitched PDF, with the order its parts were stitched in.
+    if (QFileInfo(path).suffix().toLower() == QLatin1StringView("zip")) {
+        try {
+            path = worker::readablePath(engine, path, convertedPath);
+        } catch (const engine::EngineError &error) {
+            return failure(QString::fromUtf8(error.what()));
+        }
+        QFile kept(import::orderPathFor(convertedPath));
+        if (kept.open(QIODevice::ReadOnly)) {
+            const QByteArray order = kept.read(1 << 20);
+            reply.insert(QStringLiteral("stitchOrder"), QString::fromUtf8(order));
+            QStringList names;
+            for (const import::OrderedPart &part : import::orderFromJson(order))
+                names << part.name;
+            const import::BookFromNames book = import::bookFromNames(names);
+            reply.insert(QStringLiteral("bookTitle"), book.title);
+            reply.insert(QStringLiteral("bookYear"), book.year);
+        }
+    }
 
     // KF8 has to be caught here. MuPDF would open it and quietly give a blank page.
     if (isKindleSuffix(QFileInfo(path).suffix().toLower())) {
@@ -226,7 +247,7 @@ QJsonObject inspectFile(engine::Engine &engine, const QString &originalPath, con
 
 // The document the last request was about, kept open since requests usually come in runs for one file. It
 // has to be closed before the engine that opened it goes, so main() closes it before returning.
-QString openPath;
+QString openReadable; // The file it was opened from, which for a stitched book changes when it's stitched again.
 QString openRecognised; // Where its recognised words are kept, if anywhere.
 std::unique_ptr<engine::Document> document;
 
@@ -236,15 +257,19 @@ engine::Document *documentFor(engine::Engine &engine, const QJsonObject &request
 
     const QString path = request.value(QStringLiteral("path")).toString();
     const QString recognised = request.value(QStringLiteral("ocrFolder")).toString();
-    if (path != openPath || recognised != openRecognised || !document) {
+    QString readable;
+    try {
+        readable = worker::readablePath(engine, path, request.value(QStringLiteral("convertedPath")).toString());
+    } catch (const engine::EngineError &caught) {
+        error = QString::fromUtf8(caught.what());
+        return nullptr;
+    }
+    if (readable != openReadable || recognised != openRecognised || !document) {
         document.reset();
-        openPath.clear();
+        openReadable.clear();
         try {
-            QString readable = path;
-            if (isKindleSuffix(QFileInfo(path).suffix().toLower()))
-                readable = worker::readablePath(engine, path, request.value(QStringLiteral("convertedPath")).toString());
             document = worker::withRecognisedText(engine.open(readable), recognised);
-            openPath = path;
+            openReadable = readable;
             openRecognised = recognised;
         } catch (const engine::EngineError &caught) {
             error = QString::fromUtf8(caught.what());
@@ -430,7 +455,9 @@ QJsonObject markedCopy(engine::Engine &engine, const QJsonObject &request)
         marks << mark;
     }
     try {
-        const std::unique_ptr<engine::Document> fresh = engine.open(path);
+        // A stitched book is copied from its stitched PDF.
+        const std::unique_ptr<engine::Document> fresh =
+            engine.open(worker::readablePath(engine, path, request.value(QStringLiteral("convertedPath")).toString()));
         if (fresh->needsPassword())
             return failure(QStringLiteral("the file needs a password"));
         if (!fresh->canSaveMarkedCopy())
@@ -503,6 +530,10 @@ int main(int argc, char *argv[])
             reply = pageCover(engine, object);
         } else if (op == QStringLiteral("markedcopy")) {
             reply = markedCopy(engine, object);
+        } else if (op == QStringLiteral("zipcheck")) {
+            reply = worker::zipCheck(engine, path);
+        } else if (op == QStringLiteral("zipparts")) {
+            reply = worker::zipParts(engine, path, object.value(QStringLiteral("coverFolder")).toString());
         } else if (op == QStringLiteral("inspect")) {
             reply = inspectFile(engine, path, object.value(QStringLiteral("coverPath")).toString(),
                                 object.value(QStringLiteral("convertedPath")).toString());

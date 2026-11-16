@@ -67,6 +67,8 @@ public:
     // Whether it keeps its place for next time, which only one of two sides showing the same document does.
     void setSavesPlace(bool saves) { m_savesPlace = saves; }
     bool savesPlace() const { return m_savesPlace; }
+    // Its place is out of date, kept since for pages that have moved, so it never keeps it again, even if asked to.
+    void stopKeepingPlace() { m_placeOutOfDate = true; }
     void setImageBudget(qint64 bytes);
 
     // Remembers the place in the document for next time.
@@ -232,6 +234,8 @@ signals:
     void textRecognised(const QString &contentHash);
     // Recognise this document's text was chosen. The window asks for the rest of it to be recognised.
     void recogniseDocumentWanted();
+    // Order of its parts was chosen, for a book downloaded as a zip of PDFs.
+    void stitchOrderWanted(const QString &contentHash);
 
 private:
     struct Hit {
@@ -322,6 +326,7 @@ private:
     QString m_fullTitle;
     bool m_inPair = false;
     bool m_savesPlace = true;
+    bool m_placeOutOfDate = false;
     QToolButton *m_closeSide = nullptr;
     QAction *m_closeSideAction = nullptr;
 

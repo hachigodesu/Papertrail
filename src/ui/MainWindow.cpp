@@ -52,6 +52,10 @@
 #include "ui/ReaderTab.h"
 #include "core/repo/SavedSearchRepository.h"
 #include "ui/SettingsDialog.h"
+#include "ui/StitchDialog.h"
+#include "core/repo/StitchRepository.h"
+#include "import/Restitch.h"
+#include "import/TextRecognition.h"
 #include "ui/Theme.h"
 
 #include <QStyleHints>
@@ -90,6 +94,10 @@
 #include <QTabWidget>
 #include <QTableView>
 #include <QTimer>
+#include <QThread>
+#include <QSaveFile>
+#include <QTemporaryDir>
+#include <QStandardPaths>
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
@@ -237,7 +245,11 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
     connect(m_transfer, &LibraryTransferActions::foldersRequested, this, &MainWindow::showFoldersDialog);
     connect(m_transfer, &LibraryTransferActions::importFinished, this,
             [this](bool ok, const transfer::ImportReport &report, const QString &text) {
-                // Whatever happened, the library is looked at afresh, and anything paused carries on.
+                // Whatever happened, the library is looked at afresh, and anything paused carries on. Books in zips
+                // are stitched by the orders kept now, before the scan reads any.
+                writeStitchOrders();
+                for (const QString &hash : report.restitched)
+                    forgetStitchedPages(hash);
                 m_covers->forgetMissing();
                 refreshNow();
                 refreshSavedSearches();
@@ -414,6 +426,7 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
             if (LookupRepository(m_session.database()).pendingCount() > 0)
                 m_lookup->kick();
         });
+        writeStitchOrders();
         updateRetractionWarning();
         const QList<LibraryRoot> roots = m_session.files().roots();
         if (m_session.settings().value(QStringLiteral("library.rescan_on_startup")).toBool() && !roots.isEmpty())
@@ -427,6 +440,9 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
 MainWindow::~MainWindow()
 {
     m_details->saveNotes();
+    m_closing = true;
+    for (QThread *thread : std::as_const(m_stitchWork))
+        thread->wait();
     if (m_dailyBackup)
         m_dailyBackup->wait();
 }
@@ -2052,7 +2068,7 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
         }
         const QString converted = file->sha256.isEmpty()
             ? QString()
-            : import::convertedPathFor(m_session.paths().cacheDirectory, file->sha256);
+            : import::convertedPathFor(m_session.paths().cacheDirectory, file->sha256, path);
         reader = new ReaderTab(m_session, id, fileId, file->format, path, converted, m_documentTabs);
         reader->setArticleOnly(articleOnly);
         connect(reader, &ReaderTab::openElsewhereRequested, this,
@@ -2070,6 +2086,7 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
                     recogniseDocuments({*file});
             });
         });
+        connect(reader, &ReaderTab::stitchOrderWanted, this, &MainWindow::showStitchDialog);
         connect(reader, &ReaderTab::textRecognised, this, [this](const QString &contentHash) {
             // Read into the index again, with its recognised words, once the reader's done with them.
             guarded(tr("Updating the index"), [&] { FullTextIndex(m_session.database()).forget(contentHash); });
@@ -2417,10 +2434,26 @@ bool MainWindow::restoreBackup(const QString &backupPath)
         m_dailyBackup->wait();
     m_details->saveNotes();
     const QString made = QFileInfo(backupPath).fileName();
+    // Books in zips the backup has in another order have other pages.
+    const auto stitchKeys = [this] {
+        QHash<QString, QString> keys;
+        guarded(tr("Reading the books in zips"), [&] {
+            for (const StitchOrder &order : StitchRepository(m_session.database()).all())
+                keys.insert(order.sha256, import::orderKey(import::orderFromJson(order.partsJson)));
+        });
+        return keys;
+    };
+    const QHash<QString, QString> keysBefore = stitchKeys();
     const bool done = guarded(tr("Restoring the backup"), [&] {
         core::restoreBackup(m_session.database(), m_session.paths().database, backupPath);
     });
     // Whatever happened, the library is looked at afresh.
+    const QHash<QString, QString> keysAfter = stitchKeys();
+    for (auto it = keysAfter.cbegin(); it != keysAfter.cend(); ++it) {
+        if (keysBefore.value(it.key()) != it.value())
+            forgetStitchedPages(it.key());
+    }
+    writeStitchOrders();
     m_covers->forgetMissing();
     afterFoldersChanged();
     refreshSavedSearches();
@@ -2611,13 +2644,24 @@ void MainWindow::showContextMenu(const QPoint &position)
             if (canRecogniseText()) {
                 QList<FileRecord> fixed;
                 for (const FileRecord &file : choices) {
-                    if (file.format == QStringLiteral("pdf") || file.format == QStringLiteral("djvu"))
+                    if (file.format == QStringLiteral("pdf") || file.format == QStringLiteral("djvu")
+                        || file.format == QStringLiteral("zip"))
                         fixed << file;
                 }
                 if (!fixed.isEmpty()) {
                     menu.addAction(tr("Recognise its text"), this, [this, fixed] { recogniseDocuments(fixed); })
                         ->setObjectName(QStringLiteral("recogniseText"));
                 }
+            }
+            for (const FileRecord &file : choices) {
+                if (file.format != QLatin1StringView("zip") || file.sha256.isEmpty())
+                    continue;
+                const QString hash = file.sha256;
+                menu.addAction(tr("Order of its parts..."), this, [this, hash] { showStitchDialog(hash); })
+                    ->setObjectName(QStringLiteral("stitchOrder"));
+                menu.addAction(tr("Save the stitched PDF as..."), this, [this, publication] { saveStitchedCopy(publication); })
+                    ->setObjectName(QStringLiteral("saveStitched"));
+                break;
             }
             menu.addAction(tr("Summarize later at half price..."), this, &MainWindow::showBatchSummaryDialog);
             bool marked = false;
@@ -2917,7 +2961,8 @@ void MainWindow::recogniseDocuments(const QList<FileRecord> &files)
     }
     QSet<QString> hashes;
     for (const FileRecord &file : files) {
-        if (!file.sha256.isEmpty() && (file.format == QStringLiteral("pdf") || file.format == QStringLiteral("djvu")))
+        if (!file.sha256.isEmpty()
+            && (file.format == QStringLiteral("pdf") || file.format == QStringLiteral("djvu") || file.format == QStringLiteral("zip")))
             hashes.insert(file.sha256);
     }
     if (hashes.isEmpty())
@@ -2944,6 +2989,300 @@ void MainWindow::recogniseDocuments(const QList<FileRecord> &files)
                                  : tr("Recognising the text on each page as you read it. Turn on Index document text to "
                                       "have the rest done in the background."),
                              15000);
+}
+
+namespace {
+
+// Stitched copies made by any order but this one, which nothing should be reading now. One still open elsewhere, as
+// Windows won't let go of, is removed next time.
+void removeOtherStitchedCopies(const QString &convertedPath, const QList<import::OrderedPart> &order)
+{
+    const QFileInfo converted(convertedPath);
+    const QString kept = QFileInfo(import::stitchedPathFor(convertedPath, order)).fileName();
+    const QDir folder = converted.dir();
+    for (const QString &name : folder.entryList({converted.completeBaseName() + QStringLiteral("-*.pdf")}, QDir::Files)) {
+        if (name != kept)
+            QFile::remove(folder.filePath(name));
+    }
+}
+
+} // namespace
+
+void MainWindow::forgetStitchedPages(const QString &zipSha256)
+{
+    // Everything read from the old pages is read again from the new.
+    guarded(tr("Updating the index"), [&] {
+        FullTextIndex(m_session.database()).forget(zipSha256);
+        import::TextRecognition::forget(m_session.database(), zipSha256);
+    });
+    const QString cache = m_session.paths().cacheDirectory;
+    QDir(import::recognisedFolderFor(cache, zipSha256)).removeRecursively();
+    // Articles' covers are made from their first pages.
+    const QFileInfo cover(import::coverPathFor(cache, zipSha256));
+    for (const QString &name : cover.dir().entryList({zipSha256 + QStringLiteral("-p*.jpg")}, QDir::Files))
+        QFile::remove(cover.dir().filePath(name));
+}
+
+std::optional<QString> MainWindow::zipPathFor(const QString &zipSha256)
+{
+    for (const FileRecord &file : m_session.files().withHash(zipSha256)) {
+        const QString path = m_session.files().absolutePath(file.id);
+        if (file.status == FileStatus::Ok && QFileInfo::exists(path))
+            return path;
+    }
+    return std::nullopt;
+}
+
+StitchDialog *MainWindow::stitchDialog() const
+{
+    return qobject_cast<StitchDialog *>(m_stitch.data());
+}
+
+void MainWindow::showStitchDialog(const QString &zipSha256)
+{
+    if (StitchDialog *open = stitchDialog()) {
+        if (open->zipSha256() == zipSha256) {
+            open->raise();
+            open->activateWindow();
+            return;
+        }
+        open->reject();
+    }
+    std::optional<QString> path;
+    QString title;
+    guarded(tr("Reading the book"), [&] {
+        path = zipPathFor(zipSha256);
+        if (const std::optional<qint64> id = StitchRepository(m_session.database()).publicationFor(zipSha256)) {
+            if (const std::optional<Publication> publication = m_session.publications().get(*id))
+                title = publication->title;
+        }
+    });
+    if (!path) {
+        statusBar()->showMessage(tr("This book's zip can't be found right now."), 8000);
+        return;
+    }
+    m_stitchOffered.insert(zipSha256);
+    auto *dialog = new StitchDialog(m_session, zipSha256, *path, title, this);
+    dialog->setObjectName(QStringLiteral("stitchDialog"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_stitch = dialog;
+    connect(dialog, &QDialog::accepted, this, [this, dialog] { applyStitchOrder(dialog->zipSha256(), dialog->chosenOrder()); });
+    // The next waiting, if there is one.
+    connect(dialog, &QObject::destroyed, this, [this] { QTimer::singleShot(0, this, &MainWindow::offerStitchingIfDue); });
+    dialog->open();
+}
+
+// Like the other offers, it waits rather than interrupt someone reading, and comes after them.
+void MainWindow::offerStitchingIfDue()
+{
+    if (m_stitch || m_retractionOffer || m_reviewOffer)
+        return;
+    if (m_documentTabs->currentIndex() != 0 || QApplication::activeModalWidget() || isMinimized() || !isVisible())
+        return;
+    QString due;
+    guarded(tr("Reading the books in zips"), [&] {
+        for (const QString &hash : StitchRepository(m_session.database()).unconfirmed()) {
+            if (!m_stitchOffered.contains(hash)) {
+                due = hash;
+                break;
+            }
+        }
+    });
+    if (!due.isEmpty())
+        showStitchDialog(due);
+}
+
+void MainWindow::applyStitchOrder(const QString &zipSha256, const QList<import::OrderedPart> &order)
+{
+    // Where each reader of it is, kept first, so that moves with its part too.
+    for (int i = 1; i < m_documentTabs->count(); ++i) {
+        for (ReaderTab *reader : readersIn(m_documentTabs->widget(i))) {
+            if (reader->contentHash() == zipSha256)
+                reader->saveState();
+        }
+    }
+    QList<import::OrderedPart> before;
+    import::RestitchCounts counts;
+    bool applied = false;
+    guarded(tr("Keeping the order of its parts"), [&] {
+        if (const std::optional<StitchOrder> kept = StitchRepository(m_session.database()).get(zipSha256))
+            before = import::orderFromJson(kept->partsJson);
+        counts = import::applyStitchOrder(m_session.database(), zipSha256, order, true);
+        // Checking the order was what it was marked for review for.
+        m_session.publications().setNeedsReview(import::publicationsWithContents(m_session.database(), zipSha256), false);
+        applied = true;
+    });
+    if (!applied)
+        return;
+
+    const QString cache = m_session.paths().cacheDirectory;
+    const QString converted = import::convertedPathFor(cache, zipSha256, QStringLiteral("book.zip"));
+    if (!import::writeOrderFile(converted, order))
+        statusBar()->showMessage(tr("The order was kept, but couldn't be written to Papertrail's cache folder."), 15000);
+    const bool pagesChanged = import::orderKey(before) != import::orderKey(order);
+    if (pagesChanged) {
+        forgetStitchedPages(zipSha256);
+        reopenReadersOf(zipSha256);
+        const QFileInfo cover(import::coverPathFor(cache, zipSha256));
+
+        // The stitching itself happens as the cover's made, so readers find it done.
+        const std::optional<QString> zip = zipPathFor(zipSha256);
+        if (zip) {
+            const QString worker = m_session.paths().workerPath;
+            const QString coverPath = cover.filePath();
+            const QString zipPath = *zip;
+            QThread *thread = QThread::create([this, worker, zipPath, converted, coverPath, order] {
+                import::WorkerClient client(worker, [this] { return m_closing.load(); });
+                const QString made = coverPath + QStringLiteral(".new.jpg");
+                QDir().mkpath(QFileInfo(coverPath).absolutePath());
+                const import::WorkerClient::Cover result = client.pageCover(zipPath, converted, 0, made, 10 * 60 * 1000);
+                if (result.failure == import::WorkerFailure::None && QFileInfo::exists(made)) {
+                    QFile::remove(coverPath);
+                    QFile::rename(made, coverPath);
+                } else {
+                    QFile::remove(made);
+                }
+                removeOtherStitchedCopies(converted, order);
+            });
+            m_stitchWork << thread;
+            connect(thread, &QThread::finished, this, [this, thread, zipSha256] {
+                m_stitchWork.removeOne(thread);
+                thread->deleteLater();
+                m_covers->coverMade(zipSha256);
+                m_details->reload();
+            });
+            thread->start(QThread::LowPriority);
+        }
+        kickIndexing();
+    }
+    refreshNow();
+    m_details->reload();
+
+    QStringList said;
+    if (counts.moved > 0)
+        said << tr("%n highlight(s), note(s) or bookmark(s) moved with their parts", "", counts.moved);
+    if (counts.setAside > 0)
+        said << tr("%n set aside with the parts left out", "", counts.setAside);
+    if (counts.broughtBack > 0)
+        said << tr("%n brought back with their parts", "", counts.broughtBack);
+    statusBar()->showMessage(said.isEmpty() ? tr("The order of its parts is kept.")
+                                            : tr("The order of its parts is kept: %1.").arg(said.join(QStringLiteral(", "))),
+                             10000);
+}
+
+void MainWindow::reopenReadersOf(const QString &contentHash)
+{
+    for (int i = 1; i < m_documentTabs->count(); ++i) {
+        QWidget *tab = m_documentTabs->widget(i);
+        for (ReaderTab *reader : readersIn(tab)) {
+            if (reader->contentHash() != contentHash)
+                continue;
+            // Its place was kept before the order changed, and moved with it, so it mustn't keep the old one as it goes.
+            reader->stopKeepingPlace();
+            ReaderTab *fresh = createReader(reader->publicationId(), reader->fileId(), reader->isArticleOnly());
+            if (!fresh) {
+                closeSide(reader);
+                continue;
+            }
+            if (auto *pair = qobject_cast<ReaderPair *>(tab)) {
+                ReaderTab *old = pair->replace(reader, fresh);
+                if (old) {
+                    old->hide();
+                    old->setParent(this);
+                    old->deleteLater();
+                }
+                updatePairTitle(pair);
+            } else {
+                const bool current = m_documentTabs->currentIndex() == i;
+                m_documentTabs->removeTab(i);
+                insertReaderTab(fresh, i);
+                if (current)
+                    m_documentTabs->setCurrentIndex(i);
+                reader->hide();
+                reader->setParent(this);
+                reader->deleteLater();
+            }
+        }
+    }
+}
+
+void MainWindow::writeStitchOrders()
+{
+    guarded(tr("Reading the books in zips"), [&] {
+        const QString cache = m_session.paths().cacheDirectory;
+        for (const StitchOrder &kept : StitchRepository(m_session.database()).all()) {
+            const QString converted = import::convertedPathFor(cache, kept.sha256, QStringLiteral("book.zip"));
+            const QList<import::OrderedPart> order = import::orderFromJson(kept.partsJson);
+            if (order.isEmpty())
+                continue;
+            import::writeOrderFile(converted, order);
+            removeOtherStitchedCopies(converted, order);
+        }
+    });
+}
+
+void MainWindow::saveStitchedCopy(qint64 publicationId)
+{
+    QString hash;
+    std::optional<QString> zip;
+    QList<import::OrderedPart> order;
+    guarded(tr("Reading the book"), [&] {
+        for (const FileRecord &file : m_session.files().filesFor(publicationId)) {
+            if (file.format == QLatin1StringView("zip") && !file.sha256.isEmpty()) {
+                hash = file.sha256;
+                break;
+            }
+        }
+        if (hash.isEmpty())
+            return;
+        zip = zipPathFor(hash);
+        if (const std::optional<StitchOrder> kept = StitchRepository(m_session.database()).get(hash))
+            order = import::orderFromJson(kept->partsJson);
+    });
+    if (!zip) {
+        statusBar()->showMessage(tr("This book's zip can't be found right now."), 8000);
+        return;
+    }
+    // Somewhere outside the library by default: a copy in one of its folders would be added as a publication of its own.
+    const QString suggested = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+                                  .filePath(QFileInfo(*zip).completeBaseName() + QStringLiteral(".pdf"));
+    const QString out = QFileDialog::getSaveFileName(this, tr("Save the stitched PDF"), suggested, tr("PDF (*.pdf)"));
+    if (out.isEmpty())
+        return;
+    const QString converted = import::convertedPathFor(m_session.paths().cacheDirectory, hash, *zip);
+    const QString worker = m_session.paths().workerPath;
+    const QString zipPath = *zip;
+    auto saved = std::make_shared<bool>(false);
+    statusBar()->showMessage(tr("Saving the stitched PDF..."));
+    QThread *thread = QThread::create([this, worker, zipPath, converted, order, out, saved] {
+        QString stitched = import::stitchedPathFor(converted, order);
+        if (order.isEmpty() || !QFileInfo::exists(stitched)) {
+            // The worker stitches it as it reads it, here for a cover no one keeps.
+            QTemporaryDir scratch;
+            import::WorkerClient client(worker, [this] { return m_closing.load(); });
+            client.pageCover(zipPath, converted, 0, scratch.filePath(QStringLiteral("cover.jpg")), 10 * 60 * 1000);
+            QFile orderFile(import::orderPathFor(converted));
+            if (orderFile.open(QIODevice::ReadOnly))
+                stitched = import::stitchedPathFor(converted, import::orderFromJson(orderFile.readAll()));
+        }
+        if (!QFileInfo::exists(stitched))
+            return;
+        const QString part = out + QStringLiteral(".part");
+        QFile::remove(part);
+        if (QFile::copy(stitched, part)) {
+            QFile::remove(out);
+            *saved = QFile::rename(part, out);
+        }
+        if (!*saved)
+            QFile::remove(part);
+    });
+    m_stitchWork << thread;
+    connect(thread, &QThread::finished, this, [this, thread, saved] {
+        m_stitchWork.removeOne(thread);
+        thread->deleteLater();
+        statusBar()->showMessage(*saved ? tr("Saved the stitched PDF.") : tr("The stitched PDF couldn't be saved there."), 10000);
+    });
+    thread->start();
 }
 
 void MainWindow::openAtMatch(qint64 publicationId, qint64 fileId, int page, const QString &text)
@@ -3541,6 +3880,7 @@ void MainWindow::offerWhatsDue()
 {
     offerRetractionsIfDue();
     offerReviewIfDue();
+    offerStitchingIfDue();
 }
 
 // What's new since the user last looked is counted in the status bar. The first time a library's opened by a version
@@ -4039,6 +4379,7 @@ void MainWindow::onRootScanned(qint64 rootId, const import::ScanReport &report, 
 void MainWindow::onImportFinished(const import::ImportReport &report)
 {
     refreshNow();
+    QTimer::singleShot(0, this, &MainWindow::offerStitchingIfDue);
     // A choice made for one folder only lasts as long as that folder's import, which may not be this one.
     if (m_lookupOverride && m_lookupOverrideScanned) {
         m_lookupOverride.reset();
@@ -4056,7 +4397,8 @@ void MainWindow::onImportFinished(const import::ImportReport &report)
         return;
     }
     if (report.publicationsCreated == 0 && report.duplicates == 0 && report.moved == 0 && report.updated == 0
-        && report.unreadable == 0 && report.reclassified == 0 && report.formatsJoined == 0 && report.keptOut == 0) {
+        && report.unreadable == 0 && report.reclassified == 0 && report.formatsJoined == 0 && report.keptOut == 0
+        && report.notBooks == 0) {
         return;
     }
     QStringList parts;
@@ -4077,6 +4419,8 @@ void MainWindow::onImportFinished(const import::ImportReport &report)
         parts << tr("%1 to check").arg(report.needsReview);
     if (report.keptOut > 0)
         parts << tr("%1 left out, as you removed them earlier").arg(report.keptOut);
+    if (report.notBooks > 0)
+        parts << tr("%n zip(s) left alone, as they don't hold a book's parts", "", report.notBooks);
     statusBar()->showMessage(tr("Import finished: %1.").arg(parts.join(QStringLiteral(", "))), 15000);
 }
 

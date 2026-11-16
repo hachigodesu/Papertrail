@@ -2,6 +2,7 @@
 
 #include "core/repo/AnnotationRepository.h"
 #include "core/repo/FileRepository.h"
+#include "import/ImportService.h"
 #include "import/WorkerClient.h"
 #include "ui/LibrarySession.h"
 
@@ -56,7 +57,9 @@ std::optional<qint64> markedPdfFor(LibrarySession &session, qint64 publicationId
     std::optional<qint64> best;
     int most = 0;
     for (const FileRecord &file : session.files().filesFor(publication->parentId.value_or(publicationId))) {
-        if (file.format != QLatin1StringView("pdf") || file.sha256.isEmpty() || file.status != FileStatus::Ok)
+        // A book downloaded as a zip of PDFs is copied from its stitched PDF.
+        const bool fixedPdf = file.format == QLatin1StringView("pdf") || file.format == QLatin1StringView("zip");
+        if (!fixedPdf || file.sha256.isEmpty() || file.status != FileStatus::Ok)
             continue;
         int count = 0;
         marksForContents(session.database(), file.sha256, &count);
@@ -119,6 +122,7 @@ bool MarkedCopyActions::save(qint64 fileId, const QString &out)
     if (m_thread)
         return false;
     QString path;
+    QString converted;
     QJsonArray marks;
     int count = 0;
     try {
@@ -126,6 +130,7 @@ bool MarkedCopyActions::save(qint64 fileId, const QString &out)
         if (!file)
             return false;
         path = m_session.files().absolutePath(fileId);
+        converted = import::convertedPathFor(m_session.paths().cacheDirectory, file->sha256, path);
         marks = marksForContents(m_session.database(), file->sha256, &count);
     } catch (const std::exception &) {
         return false;
@@ -135,9 +140,9 @@ bool MarkedCopyActions::save(qint64 fileId, const QString &out)
 
     const QString workerPath = m_session.paths().workerPath;
     auto result = std::make_shared<import::WorkerClient::MarkedCopy>();
-    m_thread = QThread::create([workerPath, path, out, marks, result] {
+    m_thread = QThread::create([workerPath, path, converted, out, marks, result] {
         import::WorkerClient worker(workerPath);
-        *result = worker.markedCopy(path, out, marks, 5 * 60 * 1000);
+        *result = worker.markedCopy(path, out, marks, 5 * 60 * 1000, converted);
     });
     connect(m_thread, &QThread::finished, this, [this, result, out, count] {
         m_thread->deleteLater();

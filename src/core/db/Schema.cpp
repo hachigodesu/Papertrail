@@ -814,6 +814,26 @@ END;
 //
 // Related papers are only a copy of what OpenAlex said, kept so the list opens again without asking. `record` is the
 // paper's details as JSON.
+// Books downloaded as a zip of PDFs. The order each zip's parts are stitched in, by the zip's contents as annotations
+// are, whether the user has confirmed it, and the highlights and bookmarks set aside on parts left out. Zips found
+// not to be books are noted by place, size and date, so a scan doesn't read them again until they change.
+const char *const kMigration23 = R"sql(
+CREATE TABLE IF NOT EXISTS stitch_order (
+    sha256          TEXT PRIMARY KEY,
+    parts_json      TEXT NOT NULL,
+    confirmed       INTEGER NOT NULL DEFAULT 0 CHECK (confirmed IN (0, 1)),
+    set_aside_json  TEXT NOT NULL DEFAULT '{}',
+    updated_at      INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS skipped_zip (
+    root_id         INTEGER NOT NULL REFERENCES library_root(id) ON DELETE CASCADE,
+    relative_path   TEXT NOT NULL,
+    size            INTEGER NOT NULL,
+    modified_at     INTEGER NOT NULL,
+    PRIMARY KEY (root_id, relative_path)
+) STRICT;
+)sql";
+
 // Publications the user has said aren't the same work, though they share an identifier, so checking the library
 // doesn't offer to combine them again. Pairs by id, smaller first, gone with either.
 const char *const kMigration22 = R"sql(
@@ -934,6 +954,7 @@ const std::vector<Migration> &libraryMigrations()
         {20, nullptr, addCaseLaw, true},
         {21, kMigration21},
         {22, kMigration22},
+        {23, kMigration23},
     };
     return migrations;
 }

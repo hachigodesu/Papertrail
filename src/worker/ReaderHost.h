@@ -10,8 +10,9 @@ class Engine;
 
 namespace papertrail::worker {
 
-// The file to open for this path: a Kindle book in KF8 format goes through its converted copy, which
-// is made now if it doesn't exist yet. Throws EngineError if that can't be done.
+// The file to open for this path: a Kindle book in KF8 format goes through its converted copy, and a book downloaded as
+// a zip of PDFs through its stitched PDF, either made now if it doesn't exist yet. Throws EngineError if that can't be
+// done.
 QString readablePath(engine::Engine &engine, const QString &path, const QString &convertedPath);
 
 // Serves one open document to the reader, so that a page which crashes a parser only costs that

@@ -81,6 +81,8 @@ add_library(papertrail_ui STATIC
     ReviewTab.h
     SettingsDialog.cpp
     SettingsDialog.h
+    StitchDialog.cpp
+    StitchDialog.h
     NaturalSpeaker.cpp
     NaturalSpeaker.h
     ReadAloudBar.cpp

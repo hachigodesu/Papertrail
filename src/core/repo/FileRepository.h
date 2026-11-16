@@ -86,6 +86,9 @@ public:
     QList<FileRecord> filesInRoot(qint64 rootId);
     std::optional<LibraryRoot> root(qint64 rootId);
 
+    // Forgets a file found not to be a document at all, such as a zip that isn't a book. It mustn't be linked to anything.
+    void forgetFile(qint64 fileId);
+
     // Gives another file this one's publication links, then removes this one's record. For a file
     // that's been moved or renamed.
     void replaceFile(qint64 oldFileId, qint64 newFileId);

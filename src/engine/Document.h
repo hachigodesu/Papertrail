@@ -6,6 +6,7 @@
 #include <QRectF>
 #include <QSizeF>
 #include <QString>
+#include <QStringList>
 
 #include <memory>
 #include <stdexcept>
@@ -89,6 +90,12 @@ struct MarkToWrite {
     QString note;
 };
 
+// One PDF to stitch into a book, and the title its item in the book's outline gets.
+struct StitchSource {
+    QString path;
+    QString title;
+};
+
 // One open document. Nothing here ever writes to the document's file.
 class Document {
 public:
@@ -138,6 +145,9 @@ public:
     // The text whose characters' middles are inside `area`, line by line.
     QString textInRect(int page, const QRectF &area);
 
+    // The page's label, as a PDF can give its pages ("iv", "57"). Empty where it has none.
+    virtual QString pageLabel(int) { return {}; }
+
     // The text on a page set in the largest type. On a first page, or the page an article starts on,
     // that's often the title.
     virtual QString largestTextOnPage(int page) = 0;
@@ -171,6 +181,15 @@ public:
     // Writes an EPUB made from a KF8 Kindle file, which MuPDF can't read itself. Throws
     // KindleProtected if it's locked with DRM, or EngineError if it can't be converted.
     void convertKf8ToEpub(const QString &path, const QString &epubPath);
+
+    // The names of a zip's entries, folders ending in a slash. Throws EngineError if it isn't a zip that can be
+    // read, or has more than `most` entries.
+    QStringList zipEntries(const QString &zipPath, int most);
+    // Copies one entry of a zip to `outPath`, refusing one that unpacks to more than `maxBytes`. Throws EngineError.
+    void extractZipEntry(const QString &zipPath, const QString &name, const QString &outPath, qint64 maxBytes);
+    // Writes one PDF of these PDFs' pages in order, with an outline item for each, holding its own outline. The
+    // file appears only once it's complete. Throws EngineError.
+    void stitchPdfs(const QList<StitchSource> &parts, const QString &outPath);
 
     // Writes the file only if encoding succeeds, replacing any earlier version.
     void saveJpeg(const RenderedPage &page, const QString &path, int quality = 80);

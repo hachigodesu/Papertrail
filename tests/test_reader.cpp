@@ -17,6 +17,10 @@
 #include "ui/NaturalSpeaker.h"
 #include "ui/ReadAloudBar.h"
 #include "ui/ReaderTab.h"
+#include "ui/StitchDialog.h"
+#include "core/repo/StitchRepository.h"
+#include "import/Stitching.h"
+#include "import/ImportService.h"
 #include "ui/Speaker.h"
 #include "ui/VoiceClient.h"
 #include "metadata/NaturalVoices.h"
@@ -45,6 +49,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QPointer>
 #include <QtTest>
 
 using namespace papertrail;
@@ -303,6 +308,52 @@ private slots:
         const QImage image = rendered.first().at(2).value<QImage>();
         QVERIFY(image.width() <= 16000);
         QVERIFY(qint64(image.width()) * image.height() <= qint64(101e6));
+    }
+
+    void aBookInAZipIsReadStitchedAndMovesWithItsParts()
+    {
+        openLibraryWindow();
+        const qint64 id = addLinkedPublication(QStringLiteral("sciencedirect_book.zip"));
+        const FileRecord file = m_session->files().filesFor(id).first();
+        QFile zip(m_session->files().absolutePath(file.id));
+        QVERIFY(zip.open(QIODevice::ReadOnly));
+        const QString sha = QString::fromLatin1(QCryptographicHash::hash(zip.readAll(), QCryptographicHash::Sha256).toHex());
+        zip.close();
+        m_session->files().setHash(file.id, sha);
+
+        ReaderTab *first = waitForReader(id);
+        QVERIFY(first && first->isReady());
+        QCOMPARE(first->pageView()->pageCount(), 18);
+        // The order the worker worked out as it stitched, kept as the import keeps it.
+        const QString converted = import::convertedPathFor(m_session->paths().cacheDirectory, sha, QStringLiteral("book.zip"));
+        QFile orderFile(import::orderPathFor(converted));
+        QVERIFY(orderFile.open(QIODevice::ReadOnly));
+        StitchRepository(m_session->database()).set(sha, orderFile.readAll(), false);
+        orderFile.close();
+
+        // At the start of chapter 1, after six pages of front matter.
+        first->pageView()->goToPage(6);
+        QTRY_COMPARE_WITH_TIMEOUT(first->pageView()->topPage(), 6, kWaitMs);
+        QPointer<ReaderTab> old = first;
+
+        // The part that couldn't be placed, a page long, moved to the front.
+        m_window->showStitchDialog(sha);
+        StitchDialog *dialog = m_window->stitchDialog();
+        QVERIFY(dialog);
+        QTRY_VERIFY_WITH_TIMEOUT(!dialog->isReading(), kWaitMs);
+        dialog->list()->setCurrentRow(dialog->list()->count() - 1);
+        for (int i = 0; i < 9; ++i)
+            dialog->button(QStringLiteral("moveUp"))->click();
+        dialog->button(QStringLiteral("stitch"))->click();
+
+        // Opened again, a page further on, where chapter 1 now starts.
+        QTRY_VERIFY_WITH_TIMEOUT(old.isNull(), kWaitMs);
+        ReaderTab *again = m_window->activeReader();
+        QVERIFY(again);
+        QTRY_VERIFY_WITH_TIMEOUT(again->isReady(), kWaitMs);
+        QCOMPARE(again->pageView()->pageCount(), 18);
+        QTRY_COMPARE_WITH_TIMEOUT(again->pageView()->topPage(), 7, kWaitMs);
+        QCOMPARE(ReadingStateRepository(m_session->database()).placeFor(id, QStringLiteral("zip")).value(QStringLiteral("page")).toInt(), 7);
     }
 
     void textSetAtAnAngleIsDrawnAtItsSize()

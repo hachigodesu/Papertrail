@@ -4,6 +4,7 @@
 
 #include <QByteArray>
 #include <QJsonArray>
+#include <QStringList>
 #include <QJsonObject>
 #include <QString>
 
@@ -60,6 +61,7 @@ struct Bundle {
     QJsonArray summaries;
     QJsonArray removed; // Files of publications removed by hand, by contents, so they stay out here too.
     QJsonArray distinctPublications; // From 1.4.0 on: pairs said not to be the same work, by uuid.
+    QJsonArray stitchOrders; // From 1.5.0 on: the order of each book in a zip's parts, by the zip's contents.
     QJsonObject settings;
 };
 
@@ -102,6 +104,8 @@ struct ImportReport {
     qint64 bookmarksAdded = 0;
     qint64 summariesAdded = 0;
     qint64 readingPlaces = 0;
+    qint64 stitchOrders = 0; // Orders of books in zips taken from the export.
+    QStringList restitched;  // Their contents, where a book here is now stitched in another order.
     qint64 removedAdded = 0; // Files to keep out, as they were removed on the other computer.
     core::SettingsImportResult settings;
     QString backupPath;

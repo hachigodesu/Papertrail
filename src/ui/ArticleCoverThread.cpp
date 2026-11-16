@@ -99,7 +99,7 @@ void ArticleCoverThread::run()
 
         QDir().mkpath(QFileInfo(coverPath).absolutePath());
         const import::WorkerClient::Cover cover = worker.pageCover(
-            path, import::convertedPathFor(m_paths.cacheDirectory, hash), core::coverKeyPage(key) - 1, coverPath, kCoverTimeoutMs);
+            path, import::convertedPathFor(m_paths.cacheDirectory, hash, path), core::coverKeyPage(key) - 1, coverPath, kCoverTimeoutMs);
         if (cover.failure == import::WorkerFailure::None && QFileInfo::exists(coverPath))
             emit made(key);
     }

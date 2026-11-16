@@ -3,18 +3,23 @@
 #include "core/query/LibraryQuery.h"
 #include "core/repo/AnnotationRepository.h"
 #include "core/repo/FileRepository.h"
+#include "core/repo/StitchRepository.h"
 #include "core/repo/RemovedContent.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/VolumeArticles.h"
 #include "core/settings/SettingsStore.h"
 #include "import/ImportService.h"
+#include "import/Restitch.h"
+#include "import/Stitching.h"
 #include "transfer/LibraryTransfer.h"
 #include "transfer/Zip.h"
 
 #include <QCryptographicHash>
 #include <QDirIterator>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -675,6 +680,111 @@ private slots:
                            "JOIN publication b ON b.id = d.second_id WHERE a.uuid <> b.uuid"), qint64(1));
     }
 
+    void aBookInAZipGoesWithItsOrder()
+    {
+        // Chosen by hand: the part that couldn't be placed first, with a highlight on it.
+        Library from;
+        const QString sha = stitchedBook(from);
+        const qint64 book = *from.idOfFile(QStringLiteral("book.zip"));
+        const QList<import::OrderedPart> order = unplacedFirst(from, sha);
+        addZipHighlight(from, book, sha, 0, QStringLiteral("77777777-0000-0000-0000-000000000001"));
+
+        ExportReport report;
+        QString error;
+        const std::optional<Bundle> bundle = readBundle(buildBundle(*from.db, report), &error);
+        QVERIFY2(bundle, qPrintable(error));
+        QCOMPARE(bundle->stitchOrders.size(), 1);
+
+        // Imported before the zip's found: the zip's stitched by the order that came with it.
+        Library to;
+        const ImportReport imported = importBundle(*to.db, *bundle, {});
+        QCOMPARE(imported.stitchOrders, qint64(1));
+        QVERIFY(imported.restitched.isEmpty());
+        to.put(QStringLiteral("sciencedirect_book.zip"), QStringLiteral("Elsewhere/book.zip"));
+        to.scan();
+        const std::optional<StitchOrder> kept = StitchRepository(*to.db).get(sha);
+        QVERIFY(kept && kept->confirmed);
+        QCOMPARE(import::orderKey(import::orderFromJson(kept->partsJson)), import::orderKey(order));
+        QCOMPARE(highlightPage(to), 0);
+        const QString converted = import::convertedPathFor(to.dir.filePath(QStringLiteral("cache")), sha, QStringLiteral("book.zip"));
+        QVERIFY(QFile::exists(import::stitchedPathFor(converted, order)));
+    }
+
+    void aCheckedOrderFromAnExportMovesWhatsHere()
+    {
+        Library from;
+        const QString sha = stitchedBook(from);
+        unplacedFirst(from, sha);
+        ExportReport report;
+        const std::optional<Bundle> bundle = readBundle(buildBundle(*from.db, report), nullptr);
+        QVERIFY(bundle);
+
+        // Here, the same book in the order worked out, unchecked, with a highlight on its first page.
+        Library to;
+        stitchedBook(to);
+        const qint64 here = *to.idOfFile(QStringLiteral("book.zip"));
+        addZipHighlight(to, here, sha, 0, QStringLiteral("77777777-0000-0000-0000-000000000002"));
+        const ImportReport imported = importBundle(*to.db, *bundle, {});
+        QCOMPARE(imported.restitched, QStringList{sha});
+        QVERIFY(StitchRepository(*to.db).get(sha)->confirmed);
+        QCOMPARE(highlightPage(to), 1); // After the part now first, which has one page.
+    }
+
+    void anOrderCheckedHereIsKept()
+    {
+        // The export's is unchecked, and this library's checked: its highlights move to this order's pages.
+        Library from;
+        const QString sha = stitchedBook(from);
+        const qint64 book = *from.idOfFile(QStringLiteral("book.zip"));
+        addZipHighlight(from, book, sha, 0, QStringLiteral("77777777-0000-0000-0000-000000000003"));
+        ExportReport report;
+        const std::optional<Bundle> bundle = readBundle(buildBundle(*from.db, report), nullptr);
+        QVERIFY(bundle);
+
+        Library to;
+        stitchedBook(to);
+        const QList<import::OrderedPart> order = unplacedFirst(to, sha);
+        const ImportReport imported = importBundle(*to.db, *bundle, {});
+        QVERIFY(imported.restitched.isEmpty());
+        QCOMPARE(import::orderKey(import::orderFromJson(StitchRepository(*to.db).get(sha)->partsJson)), import::orderKey(order));
+        QCOMPARE(highlightPage(to), 1);
+    }
+
+    void anExportWithStitchingStillImports()
+    {
+        // Made once by 1.5.0, the first with books in zips, and kept for the same reason as the others.
+        QString error;
+        const std::optional<Bundle> bundle
+            = readBundleFile(QStringLiteral(PAPERTRAIL_TEST_FIXTURES "/transfer/library-v1-stitching.papertrail"), &error);
+        QVERIFY2(bundle, qPrintable(error));
+        QCOMPARE(bundle->stitchOrders.size(), 1);
+        Library to;
+        to.put(QStringLiteral("sciencedirect_book.zip"), QStringLiteral("Anywhere/book.zip"));
+        importBundle(*to.db, *bundle, {});
+        to.scan();
+        QCOMPARE(to.count(), qint64(1));
+        const QString sha = to.text("SELECT sha256 FROM file WHERE format = 'zip'");
+        const std::optional<StitchOrder> kept = StitchRepository(*to.db).get(sha);
+        QVERIFY(kept && kept->confirmed);
+        QVERIFY(import::orderFromJson(kept->partsJson).first().name.startsWith(QStringLiteral("No-title-available")));
+        QCOMPARE(highlightPage(to), 0);
+    }
+
+    // Writes the fixture above, when asked, as writeFixtureWhenAsked does.
+    void writeStitchingFixtureWhenAsked()
+    {
+        const QString path = qEnvironmentVariable("PAPERTRAIL_WRITE_STITCHING_FIXTURE");
+        if (path.isEmpty())
+            QSKIP("Only when PAPERTRAIL_WRITE_STITCHING_FIXTURE is set");
+        Library from;
+        const QString sha = stitchedBook(from);
+        const qint64 book = *from.idOfFile(QStringLiteral("book.zip"));
+        unplacedFirst(from, sha);
+        addZipHighlight(from, book, sha, 0, QStringLiteral("77777777-0000-0000-0000-000000000004"));
+        SettingsStore(*from.db).setValue(QStringLiteral("library.last_import_folder"), QStringLiteral("/a/made-up/folder"));
+        exportLibrary(*from.db, path);
+    }
+
     // Writes the fixture above, when asked. Only run by hand, when the format changes in a new version.
     void writeFixtureWhenAsked()
     {
@@ -687,6 +797,47 @@ private slots:
     }
 
 private:
+    // The made-up book in a zip, imported, with its contents' hash.
+    static QString stitchedBook(Library &library)
+    {
+        library.put(QStringLiteral("sciencedirect_book.zip"), QStringLiteral("book.zip"));
+        library.scan();
+        return library.text("SELECT sha256 FROM file WHERE relative_path = 'book.zip'");
+    }
+
+    // Its order changed by hand, and checked: the part that couldn't be placed, which has one page, first.
+    static QList<import::OrderedPart> unplacedFirst(Library &library, const QString &sha)
+    {
+        QList<import::OrderedPart> order = import::orderFromJson(StitchRepository(*library.db).get(sha)->partsJson);
+        order.prepend(order.takeLast());
+        import::applyStitchOrder(*library.db, sha, order, true);
+        return order;
+    }
+
+    static void addZipHighlight(Library &library, qint64 publication, const QString &sha, int page, const QString &uuid)
+    {
+        auto insert = library.db->prepare(
+            "INSERT INTO annotation (uuid, publication_id, content_hash, location_json, type, colour, selected_text, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?, 'highlight', '#ffff00', 'made-up words', 1, 1)");
+        insert->bind(1, uuid);
+        insert->bind(2, publication);
+        insert->bind(3, sha);
+        insert->bind(4, QStringLiteral("{\"parts\":[{\"text\":\"made-up words\",\"page\":%1,\"rects\":[[70,90,80,30]]}]}").arg(page));
+        insert->step();
+    }
+
+    static int highlightPage(Library &library)
+    {
+        return QJsonDocument::fromJson(library.text("SELECT location_json FROM annotation").toUtf8())
+            .object()
+            .value(QStringLiteral("parts"))
+            .toArray()
+            .first()
+            .toObject()
+            .value(QStringLiteral("page"))
+            .toInt(-1);
+    }
+
     // Things a person adds: corrections, tags, a collection, a highlight, a place, a summary, settings, an article,
     // and a folder they removed.
     void decorate(Library &library)

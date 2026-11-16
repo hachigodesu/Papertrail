@@ -954,6 +954,82 @@ def filler(pages):
     return [[(10, f"Page {i + 2} of this long document.")] for i in range(pages)]
 
 
+def zipped(path, entries):
+    """Writes a zip of (name, bytes) entries, in this order, with fixed dates so it comes out the same each time."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries:
+            info = zipfile.ZipInfo(name, date_time=(2026, 10, 12, 14, 49, 4))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, data)
+
+
+def roman(value):
+    numerals = [(10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")]
+    text = ""
+    for amount, numeral in numerals:
+        while value >= amount:
+            text += numeral
+            value -= amount
+    return text
+
+
+def sciencedirect_book_zip(path):
+    """A made-up book as ScienceDirect gives one: a zip of one PDF per part, named
+    "<Part>_<year>_<Book-title, cut short>.pdf", stored out of order. Front matter has roman page numbers and the
+    chapters arabic ones, at the foot of each page, except the dedication, which has none and is placed by its name.
+    One chapter page has a running head with its number at the start, and a "No-title-available" part is an index with
+    numbers, while another has none at all and can't be placed."""
+    book = "Made-Up-Network-Machines"
+
+    def part(title_lines, first, count, roman_numbers=False, numbered=True, head=None):
+        pages = []
+        for i in range(count):
+            items = []
+            if i == 0:
+                y = 760
+                for size, text in title_lines:
+                    items.append(f"BT /F1 {size} Tf 60 {y} Td ({escape_pdf(text)}) Tj ET")
+                    y -= size + 14
+            else:
+                items.append(f"BT /F1 11 Tf 60 700 Td (Made-up text carries on over page {i + 1} of this part.) Tj ET")
+            if head and i == 1:
+                items.append(f"BT /F1 9 Tf 60 812 Td ({escape_pdf(head)}) Tj ET")
+            elif numbered:
+                number = roman(first + i) if roman_numbers else str(first + i)
+                items.append(f"BT /F1 9 Tf 290 30 Td ({number}) Tj ET")
+            pages.append("\n".join(items).encode("latin-1"))
+        return build_pdf(pages)
+
+    parts = {
+        f"Front-matter_2011_{book}.pdf": part([(24, "Made-Up Network Machines"), (12, "A made-up book for testing")], 1, 2, True),
+        f"Copyright_2011_{book}.pdf": part([(10, "Copyright made up for testing. ISBN 978-0-306-40615-7")], 3, 1, True),
+        f"Dedication_2011_{book}.pdf": part([(12, "For the made-up readers")], 4, 1, True, numbered=False),
+        f"Preface_2011_{book}.pdf": part([(18, "Preface"), (11, "Why this made-up book was written.")], 5, 2, True),
+        f"Chapter-1---Foundations-of-made-up-machi_2011_{book}.pdf":
+            part([(18, "CHAPTER 1"), (18, "Foundations of made-up machines")], 1, 3,
+                 head="2   CHAPTER 1 Foundations of made-up machines"),
+        f"Chapter-2---Wires-and-made-up-signals_2011_{book}.pdf":
+            part([(18, "CHAPTER 2"), (18, "Wires and made-up signals")], 4, 2),
+        f"Chapter-3---Switching-made-up-frames_2011_{book}.pdf":
+            part([(18, "CHAPTER 3"), (18, "Switching made-up frames")], 6, 2),
+        f"Appendix---Made-up-tables_2011_{book}.pdf": part([(18, "Appendix"), (11, "Made-up tables.")], 8, 2),
+        f"No-title-available_2011_{book}.pdf": part([(18, "Index")], 10, 2),
+        f"No-title-available_2011_{book}1.pdf": part([(11, "A made-up page with nothing to say where it goes.")], 1, 1,
+                                                     numbered=False),
+    }
+    names = list(parts)
+    stored = [5, 0, 9, 7, 6, 3, 1, 4, 8, 2]  # Chapter 2 first, the dedication last, as a zip may hold them.
+    entries = [(names[i], parts[names[i]]) for i in stored]
+    zipped(path, entries)
+
+
+def not_a_book_zips(directory):
+    """Zips that aren't books: a PDF with a spreadsheet beside it, and only one PDF."""
+    zipped(directory / "not_a_book.zip", [("paper.pdf", build_pdf([page_stream([(12, "A made-up paper in a zip.")])])),
+                                         ("data.csv", b"made,up\n1,2\n")])
+    zipped(directory / "one_pdf.zip", [("only.pdf", build_pdf([page_stream([(12, "The only made-up PDF here.")])]))])
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
@@ -1077,6 +1153,8 @@ def main():
 
     (out / "ignored_notes.txt").write_text("Not a supported document type.\n", encoding="ascii")
     make_djvu(out)
+    sciencedirect_book_zip(out / "sciencedirect_book.zip")
+    not_a_book_zips(out)
 
 
 if __name__ == "__main__":

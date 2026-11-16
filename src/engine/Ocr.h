@@ -65,6 +65,7 @@ public:
     QString pageText(int page) override;
     RenderedPage renderPage(int page, int maxDimension) override { return m_inner->renderPage(page, maxDimension); }
     QSizeF pageSize(int page) override { return m_inner->pageSize(page); }
+    QString pageLabel(int page) override { return m_inner->pageLabel(page); }
     DisplayImage renderForDisplay(int page, double scale) override { return m_inner->renderForDisplay(page, scale); }
     void setLayout(double width, double height, double fontSize) override;
     qint64 bookmarkForPage(int page) override { return m_inner->bookmarkForPage(page); }

@@ -55,7 +55,7 @@ FullTextReport FullTextIndexer::run(const Progress &progress)
         if (progress)
             progress(done, index.pendingCount(), name);
 
-        const QString converted = convertedPathFor(m_options.cacheDirectory, pending->sha256);
+        const QString converted = convertedPathFor(m_options.cacheDirectory, pending->sha256, path);
         const QString recognised = recognisedFolderFor(m_options.cacheDirectory, pending->sha256);
         const qint64 document = index.beginDocument(pending->sha256);
         int page = 0;

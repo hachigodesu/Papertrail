@@ -366,6 +366,14 @@ std::optional<LibraryRoot> FileRepository::root(qint64 rootId)
     return LibraryRoot{select->int64At(0), select->textAt(1), select->textAt(2), select->textAt(3)};
 }
 
+void FileRepository::forgetFile(qint64 fileId)
+{
+    auto remove = m_db.prepare("DELETE FROM file WHERE id = ? AND NOT EXISTS (SELECT 1 FROM publication_file WHERE file_id = ?)");
+    remove->bind(1, fileId);
+    remove->bind(2, fileId);
+    remove->step();
+}
+
 void FileRepository::replaceFile(qint64 oldFileId, qint64 newFileId)
 {
     Transaction transaction(m_db);

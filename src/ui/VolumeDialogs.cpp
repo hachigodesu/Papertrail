@@ -99,6 +99,7 @@ ContentsDialog::ContentsDialog(LibrarySession &session, qint64 volumeId, QWidget
     const FileRecord *file = nullptr;
     for (const FileRecord &candidate : std::as_const(files)) {
         if (candidate.format == QLatin1StringView("pdf") || candidate.format == QLatin1StringView("djvu")
+            || candidate.format == QLatin1StringView("zip")
             || candidate.format == QLatin1StringView("xps")) {
             file = &candidate;
             break;
@@ -117,7 +118,7 @@ ContentsDialog::ContentsDialog(LibrarySession &session, qint64 volumeId, QWidget
     connect(m_client, &DocumentClient::headingReady, this, &ContentsDialog::onHeading);
     connect(m_client, &DocumentClient::failed, this,
             [this](DocumentClient::Failure, const QString &message) { cantOffer(tr("This file couldn't be read: %1").arg(message)); });
-    const QString converted = file->sha256.isEmpty() ? QString() : import::convertedPathFor(m_session.paths().cacheDirectory, file->sha256);
+    const QString converted = file->sha256.isEmpty() ? QString() : import::convertedPathFor(m_session.paths().cacheDirectory, file->sha256, m_session.files().absolutePath(file->id));
     m_client->open(m_session.files().absolutePath(file->id), ReaderLayout{}, converted);
 }
 

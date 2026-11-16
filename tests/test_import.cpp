@@ -4,9 +4,13 @@
 #include "core/db/Schema.h"
 #include "core/query/LibraryQuery.h"
 #include "core/repo/FileRepository.h"
+#include "core/repo/StitchRepository.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/RemovedContent.h"
 #include "import/ImportService.h"
+#include "import/Restitch.h"
+#include "import/Stitching.h"
+#include "import/WorkerClient.h"
 #include "import/JournalIssues.h"
 #include "core/repo/VolumeArticles.h"
 
@@ -420,7 +424,7 @@ private slots:
         QCOMPARE(file.hasTextLayer, true);
         const QString cache = m_dir->filePath(QStringLiteral("cache"));
         QVERIFY(QFile::exists(coverPathFor(cache, file.sha256)));
-        QVERIFY(QFile::exists(convertedPathFor(cache, file.sha256)));
+        QVERIFY(QFile::exists(convertedPathFor(cache, file.sha256, file.relativePath)));
 
         // The original isn't touched, whatever's made from it.
         QCOMPARE(hashOf(docs() + QStringLiteral("/Fr\u00E4nkenstein \u30D6\u30C3\u30AF.azw3")), before);
@@ -435,7 +439,7 @@ private slots:
         const FileRecord file = m_files->filesFor(p.id).first();
         QCOMPARE(file.status, FileStatus::Ok);
         QVERIFY2(file.pageCount.value_or(0) > 50, qPrintable(QString::number(file.pageCount.value_or(0))));
-        QVERIFY(QFile::exists(convertedPathFor(m_dir->filePath(QStringLiteral("cache")), file.sha256)));
+        QVERIFY(QFile::exists(convertedPathFor(m_dir->filePath(QStringLiteral("cache")), file.sha256, file.relativePath)));
     }
 
     void aBookLockedWithDrmSaysSo()
@@ -446,7 +450,119 @@ private slots:
         const FileRecord file = m_files->filesFor(p.id).first();
         QCOMPARE(file.status, FileStatus::Unreadable);
         QVERIFY2(file.problem.contains(QStringLiteral("DRM")), qPrintable(file.problem));
-        QVERIFY(!QFile::exists(convertedPathFor(m_dir->filePath(QStringLiteral("cache")), file.sha256)));
+        QVERIFY(!QFile::exists(convertedPathFor(m_dir->filePath(QStringLiteral("cache")), file.sha256, file.relativePath)));
+    }
+
+    void aBookInAZipIsStitchedInOrder()
+    {
+        copySample("sciencedirect_book.zip");
+        copySample("not_a_book.zip");
+        copySample("one_pdf.zip");
+        const QMap<QString, QByteArray> before = folderHashes(docs());
+        m_service->scan(m_root);
+        const ImportReport report = m_service->processQueue();
+        QCOMPARE(report.notBooks, 2);
+
+        // One book, whose file is the zip, to check.
+        const QList<qint64> ids = m_query->ids({}, {});
+        QCOMPARE(ids.size(), qsizetype(1));
+        const Publication p = *m_publications->get(ids.first());
+        QCOMPARE(p.title, QStringLiteral("Made-Up Network Machines"));
+        QCOMPARE(p.year, std::optional<int>(2011));
+        QCOMPARE(p.type, PublicationType::Book);
+        QVERIFY(p.needsReview);
+        const FileRecord file = m_files->filesFor(p.id).first();
+        QCOMPARE(file.format, QStringLiteral("zip"));
+        QCOMPARE(file.status, FileStatus::Ok);
+        QCOMPARE(file.pageCount, std::optional<int>(18));
+        QCOMPARE(p.isbn13, QStringLiteral("9780306406157")); // From the copyright page, near the front once stitched.
+
+        // The order's kept, to be checked, and the stitched copy is in the cache by it.
+        const std::optional<StitchOrder> kept = StitchRepository(*m_db).get(file.sha256);
+        QVERIFY(kept && !kept->confirmed);
+        const QList<OrderedPart> order = orderFromJson(kept->partsJson);
+        QCOMPARE(order.size(), qsizetype(10));
+        QVERIFY(order.first().name.startsWith(QStringLiteral("Front-matter")));
+        QVERIFY(order.at(4).name.startsWith(QStringLiteral("Chapter-1")));
+        QVERIFY(order.last().name.startsWith(QStringLiteral("No-title-available")));
+        const QString cache = m_dir->filePath(QStringLiteral("cache"));
+        const QString converted = convertedPathFor(cache, file.sha256, file.relativePath);
+        QVERIFY(QFile::exists(orderPathFor(converted)));
+        QVERIFY(QFile::exists(stitchedPathFor(converted, order)));
+        QVERIFY(QFile::exists(coverPathFor(cache, file.sha256)));
+
+        // Its pages run in the book's order.
+        WorkerClient worker(QStringLiteral(PAPERTRAIL_WORKER_PATH));
+        const WorkerClient::PageTexts texts = worker.pageTexts(docPath("sciencedirect_book.zip"), converted, 0, 18, 60000);
+        QCOMPARE(texts.failure, WorkerFailure::None);
+        QCOMPARE(texts.pages.size(), qsizetype(18));
+        QVERIFY(texts.pages.at(0).contains(QStringLiteral("Made-Up Network Machines")));
+        QVERIFY(texts.pages.at(2).contains(QStringLiteral("Copyright")));
+        QVERIFY(texts.pages.at(3).contains(QStringLiteral("For the made-up readers")));
+        QVERIFY(texts.pages.at(6).contains(QStringLiteral("CHAPTER 1")));
+        QVERIFY(texts.pages.at(9).contains(QStringLiteral("CHAPTER 2")));
+        QVERIFY(texts.pages.at(11).contains(QStringLiteral("CHAPTER 3")));
+        QVERIFY(texts.pages.at(15).contains(QStringLiteral("Index")));
+        QVERIFY(texts.pages.at(17).contains(QStringLiteral("nothing to say where it goes")));
+
+        // Zips that aren't books are never listed, and aren't read again until they change.
+        auto files = m_db->prepare("SELECT count(*) FROM file");
+        files->step();
+        QCOMPARE(files->int64At(0), qint64(1));
+        const ScanReport again = m_service->scan(m_root);
+        QCOMPARE(again.newFiles, 0);
+        QCOMPARE(again.unsupportedSkipped, 2);
+        QCOMPARE(m_service->pendingJobs(), qint64(0));
+
+        // Nothing in the folder is touched.
+        QCOMPARE(folderHashes(docs()), before);
+    }
+
+    void aZipThatChangesIsReadAgain()
+    {
+        copySample("one_pdf.zip", "parts.zip");
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_query->count({}), qint64(0));
+        // Now it's a book.
+        QFile::remove(docPath("parts.zip"));
+        copySample("sciencedirect_book.zip", "parts.zip");
+        QFile(docPath("parts.zip")).setFileTime(QDateTime::currentDateTime().addSecs(60), QFileDevice::FileModificationTime);
+        m_service->scan(m_root);
+        m_service->processQueue();
+        QCOMPARE(m_query->count({}), qint64(1));
+    }
+
+    void aStitchedBookKeepsItsOrderWhenReadAgain()
+    {
+        copySample("sciencedirect_book.zip");
+        const Publication p = importOne();
+        const FileRecord file = m_files->filesFor(p.id).first();
+        // Chosen by hand: the unplaced part first.
+        QList<OrderedPart> order = orderFromJson(StitchRepository(*m_db).get(file.sha256)->partsJson);
+        order.prepend(order.takeLast());
+        applyStitchOrder(*m_db, file.sha256, order, true);
+        const QString cache = m_dir->filePath(QStringLiteral("cache"));
+        const QString converted = convertedPathFor(cache, file.sha256, file.relativePath);
+        QFile orderFile(orderPathFor(converted));
+        QVERIFY(orderFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        orderFile.write(orderToJson(order));
+        orderFile.close();
+
+        WorkerClient worker(QStringLiteral(PAPERTRAIL_WORKER_PATH));
+        WorkerClient::PageTexts texts = worker.pageTexts(docPath("sciencedirect_book.zip"), converted, 0, 1, 60000);
+        QCOMPARE(texts.failure, WorkerFailure::None);
+        QVERIFY(texts.pages.first().contains(QStringLiteral("nothing to say where it goes")));
+        QVERIFY(QFile::exists(stitchedPathFor(converted, order)));
+
+        // With the cache cleared, it's stitched the same way again from the order kept beside it.
+        QDir(QFileInfo(converted).absolutePath()).removeRecursively();
+        QDir().mkpath(QFileInfo(converted).absolutePath());
+        QVERIFY(orderFile.open(QIODevice::WriteOnly));
+        orderFile.write(orderToJson(order));
+        orderFile.close();
+        texts = worker.pageTexts(docPath("sciencedirect_book.zip"), converted, 0, 1, 60000);
+        QVERIFY(texts.pages.first().contains(QStringLiteral("nothing to say where it goes")));
     }
 
     void everyFormatGetsItsFacts_data()

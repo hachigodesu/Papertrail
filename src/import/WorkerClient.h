@@ -1,6 +1,7 @@
 #pragma once
 
 #include "import/Extractors.h"
+#include "import/Stitching.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -27,6 +28,11 @@ struct InspectResult {
     QString largestText;
     QString text; // Text from the first pages, each ending in a form feed.
     EmbeddedMetadata metadata;
+    // For a book downloaded as a zip of PDFs: the order its parts were stitched in (import::orderToJson's), and the
+    // title and year its parts' names share.
+    QByteArray stitchOrder;
+    QString bookTitle;
+    int bookYear = 0;
 };
 
 enum class WorkerFailure {
@@ -92,12 +98,30 @@ public:
     // Writes a cover from one page, counting from 0, such as where an article starts.
     Cover pageCover(const QString &path, const QString &convertedPath, int page, const QString &coverPath, int timeoutMs);
 
+    struct ZipCheck {
+        WorkerFailure failure = WorkerFailure::None;
+        QString error;
+        bool book = false;
+    };
+    // Whether a zip holds a book's parts, from its list of entries alone.
+    ZipCheck zipCheck(const QString &path, int timeoutMs);
+
+    struct ZipParts {
+        WorkerFailure failure = WorkerFailure::None;
+        QString error;
+        StitchPlan plan; // The order worked out from what the parts show.
+        BookFromNames book;
+    };
+    // What each part of a book's zip shows, with pictures of their first pages in `coverFolder`.
+    ZipParts zipParts(const QString &path, const QString &coverFolder, int timeoutMs);
+
     struct MarkedCopy {
         WorkerFailure failure = WorkerFailure::None;
         QString error;
     };
     // Writes a copy of a PDF at `out` with `marks` added, each {page, kind, colour, note, rects: [[x, y, w, h]]}.
-    MarkedCopy markedCopy(const QString &path, const QString &out, const QJsonArray &marks, int timeoutMs);
+    MarkedCopy markedCopy(const QString &path, const QString &out, const QJsonArray &marks, int timeoutMs,
+                          const QString &convertedPath = QString());
 
     // Runs the worker below normal priority, for slow work in the background such as recognising text. From the next
     // time it starts.

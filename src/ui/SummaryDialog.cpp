@@ -538,7 +538,7 @@ void SummaryDialog::sendPaper()
     const QString path = m_session.files().absolutePath(m_paperPlan.file.id);
     const PaperPlan plan = m_paperPlan;
     const QString worker = m_session.paths().workerPath;
-    const QString converted = plan.file.sha256.isEmpty() ? QString() : import::convertedPathFor(m_session.paths().cacheDirectory, plan.file.sha256);
+    const QString converted = plan.file.sha256.isEmpty() ? QString() : import::convertedPathFor(m_session.paths().cacheDirectory, plan.file.sha256, path);
 
     // Reading a large file, or having the worker read its text, mustn't hold up the window.
     m_paperThread = QThread::create([this, path, plan, worker, converted] {

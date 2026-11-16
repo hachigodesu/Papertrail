@@ -133,6 +133,21 @@ void Engine::convertKf8ToEpub(const QString &path, const QString &epubPath)
     engine::convertKf8ToEpub(d->ctx, path, epubPath);
 }
 
+QStringList Engine::zipEntries(const QString &zipPath, int most)
+{
+    return listZipEntries(d->ctx, zipPath, most);
+}
+
+void Engine::extractZipEntry(const QString &zipPath, const QString &name, const QString &outPath, qint64 maxBytes)
+{
+    engine::extractZipEntry(d->ctx, zipPath, name, outPath, maxBytes);
+}
+
+void Engine::stitchPdfs(const QList<StitchSource> &parts, const QString &outPath)
+{
+    engine::stitchPdfs(d->ctx, parts, outPath);
+}
+
 void Engine::saveJpeg(const RenderedPage &page, const QString &path, int quality)
 {
     QFileInfo target(path);

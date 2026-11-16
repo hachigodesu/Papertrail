@@ -1,5 +1,5 @@
 qt_add_executable(papertrail-worker main.cpp ReaderHost.cpp ReaderHost.h RecognisedText.cpp RecognisedText.h VoiceHost.cpp
-    VoiceHost.h)
+    VoiceHost.h ZipBook.cpp ZipBook.h)
 
 target_link_libraries(papertrail-worker PRIVATE papertrail_engine papertrail_import Qt6::Core)
 target_compile_definitions(papertrail-worker PRIVATE

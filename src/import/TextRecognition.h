@@ -51,6 +51,10 @@ public:
     // Asks for every page of the file with these contents to be recognised, starting again if it's been done.
     static void want(core::Database &db, const QString &sha256);
     static bool isWanted(core::Database &db, const QString &sha256);
+    // Forgets what's been recognised of the file with these contents, and which of its pages had little text, since its
+    // pages have changed: a book in a zip stitched in another order. Asking for every page is kept. The recognised
+    // words in the cache are the caller's to remove.
+    static void forget(core::Database &db, const QString &sha256);
 
 private:
     // Notes, for each document with text of its own read into the index in full, which pages have little or none.

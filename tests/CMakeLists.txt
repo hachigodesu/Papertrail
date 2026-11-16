@@ -31,6 +31,7 @@ papertrail_core_test(test_library_check)
 papertrail_core_test(test_sentences)
 
 papertrail_core_test(test_extractors papertrail_import)
+papertrail_core_test(test_stitching papertrail_import)
 papertrail_core_test(test_import papertrail_import)
 papertrail_core_test(test_citations papertrail_citation)
 target_compile_definitions(test_citations PRIVATE PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")

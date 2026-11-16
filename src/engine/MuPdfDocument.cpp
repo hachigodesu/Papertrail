@@ -664,6 +664,28 @@ public:
         return lines;
     }
 
+    QString pageLabel(int page) override
+    {
+        layoutIfNeeded();
+        fz_page *loaded = nullptr;
+        char label[64] = {};
+        bool failed = false;
+        fz_var(loaded);
+        fz_try(m_ctx) {
+            loaded = fz_load_page(m_ctx, m_doc, page);
+            fz_page_label(m_ctx, loaded, label, int(sizeof label));
+        }
+        fz_always(m_ctx) {
+            fz_drop_page(m_ctx, loaded);
+        }
+        fz_catch(m_ctx) {
+            failed = true;
+        }
+        if (failed)
+            return {};
+        return QString::fromUtf8(label).trimmed();
+    }
+
     QString largestTextOnPage(int page) override
     {
         layoutIfNeeded();

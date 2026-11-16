@@ -48,6 +48,8 @@ add_library(papertrail_core STATIC
     repo/CollectionRepository.h
     repo/SavedSearchRepository.cpp
     repo/SavedSearchRepository.h
+    repo/StitchRepository.cpp
+    repo/StitchRepository.h
     settings/SettingsStore.cpp
     settings/SettingsStore.h
     text/References.cpp

@@ -5,13 +5,19 @@
 #include "core/repo/FileRepository.h"
 #include "core/repo/PublicationMerge.h"
 #include "core/repo/PublicationRepository.h"
+#include "core/repo/ReadingStateRepository.h"
+#include "core/repo/StitchRepository.h"
+#include "import/Restitch.h"
+#include "import/Stitching.h"
 #include "transfer/Zip.h"
 
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
 
@@ -428,6 +434,20 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
                                {QStringLiteral("createdAt"), double(s.int64At(2))}};
         });
 
+    // The order of each book in a zip's parts, so its pages are the same on the other computer as its highlights are.
+    // Those set aside on parts left out stay here: they name this library's own records.
+    const QJsonArray stitchArray = rows(
+        db,
+        "SELECT s.sha256, s.parts_json, s.confirmed, s.updated_at FROM stitch_order s WHERE s.sha256 IN ("
+        "  SELECT f.sha256 FROM file f JOIN publication_file pf ON pf.file_id = f.id JOIN publication p ON p.id = pf.publication_id "
+        "  WHERE " PAPERTRAIL_IN_LIBRARY("p") ") OR s.sha256 IN (SELECT sha256 FROM expected_file) ORDER BY s.sha256",
+        [](Statement &s) {
+            return QJsonObject{{QStringLiteral("sha256"), s.textAt(0)},
+                               {QStringLiteral("order"), QJsonDocument::fromJson(s.textAt(1).toUtf8()).object()},
+                               {QStringLiteral("confirmed"), s.intAt(2) != 0},
+                               {QStringLiteral("updatedAt"), double(s.int64At(3))}};
+        });
+
     const QJsonArray readingArray = rows(
         db,
         "SELECT p.uuid, r.location, r.zoom, r.last_opened FROM reading_state r JOIN publication p ON p.id = r.publication_id "
@@ -513,6 +533,7 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
     zip.add(QStringLiteral("annotations.json"), json(annotationArray));
     zip.add(QStringLiteral("bookmarks.json"), json(bookmarkArray));
     zip.add(QStringLiteral("distinct.json"), json(distinctArray));
+    zip.add(QStringLiteral("stitching.json"), json(stitchArray));
     zip.add(QStringLiteral("reading.json"), json(readingArray));
     zip.add(QStringLiteral("provenance.json"), json(provenanceArray));
     zip.add(QStringLiteral("summaries.json"), json(summaryArray));
@@ -588,6 +609,8 @@ std::optional<Bundle> readBundle(const QByteArray &data, QString *error)
         return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
     if (zip.contains(QStringLiteral("distinct.json")) && !array(QStringLiteral("distinct.json"), bundle.distinctPublications))
         return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
+    if (zip.contains(QStringLiteral("stitching.json")) && !array(QStringLiteral("stitching.json"), bundle.stitchOrders))
+        return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
     if (zip.contains(QStringLiteral("settings.json"))) {
         const std::optional<QByteArray> part = zip.read(QStringLiteral("settings.json"));
         if (!part)
@@ -628,6 +651,7 @@ public:
             importTags();
         if (!importPublications(total))
             return false;
+        importStitching();
         if (m_options.parts.tags) {
             importCollections();
             importSavedSearches();
@@ -1098,6 +1122,10 @@ private:
             if (uuid.isEmpty() || !publication || !types.contains(type))
                 continue;
             const qint64 updatedAt = int64Value(a.value(QStringLiteral("updatedAt")));
+            const std::optional<QString> location =
+                locationHere(a.value(QStringLiteral("contentHash")).toString(), a.value(QStringLiteral("location")).toString());
+            if (!location)
+                continue; // On a part of a book this library leaves out.
             existing->bind(1, uuid);
             if (existing->step()) {
                 const qint64 id = existing->int64At(0);
@@ -1105,7 +1133,7 @@ private:
                 existing->reset();
                 if (updatedAt > localUpdated) {
                     update->bind(1, textValue(a.value(QStringLiteral("contentHash"))));
-                    update->bind(2, a.value(QStringLiteral("location")).toString());
+                    update->bind(2, *location);
                     update->bind(3, type);
                     update->bind(4, textValue(a.value(QStringLiteral("colour"))));
                     update->bind(5, textValue(a.value(QStringLiteral("selectedText"))));
@@ -1123,7 +1151,7 @@ private:
             insert->bind(1, uuid);
             insert->bind(2, *publication);
             insert->bind(3, textValue(a.value(QStringLiteral("contentHash"))));
-            insert->bind(4, a.value(QStringLiteral("location")).toString());
+            insert->bind(4, *location);
             insert->bind(5, type);
             insert->bind(6, textValue(a.value(QStringLiteral("colour"))));
             insert->bind(7, textValue(a.value(QStringLiteral("selectedText"))));
@@ -1135,6 +1163,82 @@ private:
             insert->reset();
             ++m_report.annotationsAdded;
         }
+    }
+
+    // ---- The order of each book in a zip's parts. The export's is taken where there's none here, or where it's the
+    // later, unless only this one's been checked. Taking it moves what's here with its parts, as stitching again does.
+    // Where this one's kept instead, what comes from the export moves from its order to this one's.
+    void importStitching()
+    {
+        static const QRegularExpression hash(QStringLiteral("^[0-9a-f]{64}$"));
+        core::StitchRepository orders(m_db);
+        for (const QJsonValue &value : m_bundle.stitchOrders) {
+            const QJsonObject entry = value.toObject();
+            const QString sha = entry.value(QStringLiteral("sha256")).toString();
+            if (!hash.match(sha).hasMatch())
+                continue;
+            const QList<import::OrderedPart> theirs =
+                import::orderFromJson(QJsonDocument(entry.value(QStringLiteral("order")).toObject()).toJson(QJsonDocument::Compact));
+            if (theirs.isEmpty())
+                continue;
+            const bool theirsConfirmed = entry.value(QStringLiteral("confirmed")).toBool();
+            const qint64 theirsUpdated = int64Value(entry.value(QStringLiteral("updatedAt")));
+            const std::optional<core::StitchOrder> here = orders.get(sha);
+            if (!here) {
+                core::StitchOrder order;
+                order.sha256 = sha;
+                order.partsJson = import::orderToJson(theirs);
+                order.confirmed = theirsConfirmed;
+                order.updatedAt = theirsUpdated;
+                orders.put(order);
+                ++m_report.stitchOrders;
+                continue;
+            }
+            const QList<import::OrderedPart> ours = import::orderFromJson(here->partsJson);
+            if (import::orderKey(ours) == import::orderKey(theirs)) {
+                if (theirsConfirmed && !here->confirmed)
+                    orders.setConfirmed(sha, true);
+                continue;
+            }
+            const bool takeTheirs = theirsConfirmed != here->confirmed ? theirsConfirmed : theirsUpdated > here->updatedAt;
+            if (takeTheirs) {
+                import::applyStitchOrder(m_db, sha, theirs, theirsConfirmed);
+                ++m_report.stitchOrders;
+                m_report.restitched << sha;
+            } else {
+                m_stitchMoves.insert(sha, import::pageMapping(theirs, ours));
+            }
+        }
+    }
+
+    // A page of the export's in a book in a zip whose order here is kept instead, or -1 for one on a part left out here.
+    int pageHere(const QString &contentHash, int page) const
+    {
+        const auto moves = m_stitchMoves.constFind(contentHash);
+        if (moves == m_stitchMoves.cend())
+            return page;
+        return page >= 0 && page < moves->size() ? moves->at(page) : -1;
+    }
+
+    // An annotation's location, its parts' pages moved as above, or nothing if any is on a part left out here.
+    std::optional<QString> locationHere(const QString &contentHash, const QString &location) const
+    {
+        if (!m_stitchMoves.contains(contentHash))
+            return location;
+        QJsonObject object = QJsonDocument::fromJson(location.toUtf8()).object();
+        QJsonArray parts = object.value(QStringLiteral("parts")).toArray();
+        for (qsizetype i = 0; i < parts.size(); ++i) {
+            QJsonObject part = parts.at(i).toObject();
+            if (!part.contains(QStringLiteral("page")))
+                continue;
+            const int page = pageHere(contentHash, part.value(QStringLiteral("page")).toInt());
+            if (page < 0)
+                return std::nullopt;
+            part.insert(QStringLiteral("page"), page);
+            parts.replace(i, part);
+        }
+        object.insert(QStringLiteral("parts"), parts);
+        return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
     }
 
     // ---- Pairs said not to be the same work. Only adds, and only where both are here.
@@ -1170,7 +1274,9 @@ private:
                 continue;
             const qint64 updatedAt = int64Value(b.value(QStringLiteral("updatedAt")));
             const QString label = b.value(QStringLiteral("label")).toString().left(500);
-            const int page = qMax(0, b.value(QStringLiteral("page")).toInt());
+            const int page = pageHere(b.value(QStringLiteral("contentHash")).toString(), qMax(0, b.value(QStringLiteral("page")).toInt()));
+            if (page < 0)
+                continue; // On a part of a book this library leaves out.
             const double y = qMax(0.0, b.value(QStringLiteral("y")).toDouble());
             existing->bind(1, uuid);
             if (existing->step()) {
@@ -1239,6 +1345,32 @@ private:
             upsert->step();
             upsert->reset();
             ++m_report.readingPlaces;
+            moveZipPlace(*publication);
+        }
+    }
+
+    void moveZipPlace(qint64 publication)
+    {
+        if (m_stitchMoves.isEmpty())
+            return;
+        auto zips = m_db.prepare("SELECT f.sha256 FROM publication_file pf JOIN file f ON f.id = pf.file_id "
+                                 "WHERE pf.publication_id = ? AND f.format = 'zip' AND f.sha256 IS NOT NULL");
+        zips->bind(1, publication);
+        while (zips->step()) {
+            const QString sha = zips->textAt(0);
+            if (!m_stitchMoves.contains(sha))
+                continue;
+            core::ReadingStateRepository states(m_db);
+            QJsonObject place = states.placeFor(publication, QStringLiteral("zip"));
+            if (!place.contains(QStringLiteral("page")))
+                return;
+            const int page = pageHere(sha, place.value(QStringLiteral("page")).toInt());
+            place.insert(QStringLiteral("page"), qMax(0, page));
+            if (page < 0)
+                place.remove(QStringLiteral("offset"));
+            const std::optional<core::ReadingState> state = states.get(publication);
+            states.setPlaceFor(publication, QStringLiteral("zip"), place, state ? state->lastOpened : 0);
+            return;
         }
     }
 
@@ -1343,6 +1475,7 @@ private:
     QSet<qint64> m_removedRoots;
     QHash<QString, qint64> m_tagIds;          // By uuid.
     QHash<QString, qint64> m_publicationIds;  // By uuid.
+    QHash<QString, QList<int>> m_stitchMoves; // Books in zips whose order here is kept, from the export's pages to these.
     QSet<qint64> m_matchedLocally;            // Publications here already standing for one in the export.
     QSet<qint64> m_imported;                  // Every publication here that this export brought in or matched.
 };
@@ -1364,6 +1497,7 @@ void clearLibrary(Database &db)
     db.exec("DELETE FROM annotation");
     db.exec("DELETE FROM bookmark");
     db.exec("DELETE FROM distinct_publications");
+    db.exec("DELETE FROM stitch_order");
     db.exec("DELETE FROM reading_state");
     db.exec("DELETE FROM metadata_provenance");
     db.exec("DELETE FROM publication_tag");

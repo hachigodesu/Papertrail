@@ -9,6 +9,10 @@ add_library(papertrail_import STATIC
     ImportService.h
     JournalIssues.cpp
     JournalIssues.h
+    Restitch.cpp
+    Restitch.h
+    Stitching.cpp
+    Stitching.h
     WorkerClient.cpp
     WorkerClient.h)
 
