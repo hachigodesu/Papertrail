@@ -54,7 +54,8 @@ export OUTPUT="$LDAI_OUTPUT"
 
 # Qt Network brings in Kerberos and bundles most of it, but linuxdeploy leaves out libcom_err because it
 # assumes every system has it. A minimal openSUSE doesn't, and then the app can't start at all.
-com_err="$(ldconfig -p | awk '/libcom_err\.so\.2 / {print $NF; exit}')"
+# awk reads to the end, since stopping early would leave ldconfig writing to a closed pipe, failing it under pipefail.
+com_err="$(ldconfig -p | awk '/libcom_err\.so\.2 / && !found {print $NF; found = 1}')"
 [ -n "$com_err" ] || { echo "FAILED: libcom_err.so.2 isn't installed here" >&2; exit 1; }
 
 # The natural voices, and flite's engine, play through Qt Multimedia's own audio output, which is in the library
@@ -99,7 +100,7 @@ done
 # The natural voices run in the worker through sherpa-onnx and ONNX Runtime, which the install puts in a folder of
 # Papertrail's own. Its self-test checks they load; this checks they're there at all.
 for library in libsherpa-onnx-c-api.so libonnxruntime.so; do
-    if ! find "$work/AppDir/usr/lib" -name "$library" | grep -q .; then
+    if [ -z "$(find "$work/AppDir/usr/lib" -name "$library" -print -quit)" ]; then
         echo "FAILED: the AppImage has no $library for the natural voices" >&2
         exit 1
     fi
