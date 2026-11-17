@@ -22,7 +22,7 @@ source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         "qtkeychain-0.15.0.tar.gz::https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz"
         "sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2::https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2")
 noextract=("sqlite-amalgamation-3540100.zip")
-sha256sums=('72047833eecf989e58c2014172d6dd871456165e706d931413987d1a3beb9c9f'
+sha256sums=('ca2b9c53afabdb3c8640bde854efebbe1e7344699b41531cdb54460d1679ac5c'
             '0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9'
             '78826d161c02ce93ff1cd62838b4d749df754f52185474b82e4093badf4689c1'
             'f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22'
