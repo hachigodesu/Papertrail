@@ -41,6 +41,7 @@ class QTreeWidgetItem;
 namespace papertrail::ui {
 
 class LibrarySession;
+class LookUpPanel;
 class ThumbnailModel;
 
 // One open document: its pages, table of contents, thumbnails and search.
@@ -158,6 +159,11 @@ public:
     void addBookmark();
     void goToBookmark(qint64 id);
     QListWidget *bookmarkList() const { return m_bookmarkList; }
+    // Looks up the selection's words in the library, and online if asked, on the side panel's Look up page. With no
+    // selection, it just shows that page.
+    void lookUpSelection();
+    void lookUp(const QString &words);
+    LookUpPanel *lookUpPanel() const { return m_lookUp; }
     // The page each bookmark is on now, by id. A reflowable document's are found again after each change of layout.
     int bookmarkPage(qint64 id) const;
     void setSidePanelVisible(bool visible);
@@ -236,6 +242,11 @@ signals:
     void recogniseDocumentWanted();
     // Order of its parts was chosen, for a book downloaded as a zip of PDFs.
     void stitchOrderWanted(const QString &contentHash);
+    // Looking up a selection found these elsewhere in the library.
+    void openMatchWanted(qint64 publicationId, qint64 fileId, int page, const QString &text);
+    void openAnnotationWanted(qint64 annotationId);
+    void openPublicationWanted(qint64 publicationId);
+    void searchLibraryWanted(const QString &words);
 
 private:
     struct Hit {
@@ -365,6 +376,7 @@ private:
     QSplitter *m_splitter = nullptr;
     QTabWidget *m_side = nullptr;
     QListWidget *m_bookmarkList = nullptr;
+    LookUpPanel *m_lookUp = nullptr;
     QList<core::Bookmark> m_bookmarks;
     QHash<qint64, int> m_bookmarkPages; // Where each was found, for a reflowable document.
     qint64 m_bookmarkRound = 0;

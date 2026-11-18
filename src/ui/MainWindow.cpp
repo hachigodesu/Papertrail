@@ -1123,6 +1123,17 @@ void MainWindow::buildMenus()
             reader->setRulerShown(shown);
     });
     addAction(m_ruler); // In full screen too.
+    m_lookUpAction = view->addAction(tr("&Look up selection"));
+    m_lookUpAction->setObjectName(QStringLiteral("lookUpSelectionAction"));
+    m_lookUpAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    m_lookUpAction->setEnabled(false);
+    m_lookUpAction->setToolTip(tr("Finds the chosen words elsewhere in the library, and on Wikipedia and in Wiktionary "
+                                  "if you ask."));
+    connect(m_lookUpAction, &QAction::triggered, this, [this] {
+        if (ReaderTab *reader = activeReader())
+            reader->lookUpSelection();
+    });
+    addAction(m_lookUpAction);
     m_fullScreen = view->addAction(tr("&Full screen"));
     m_fullScreen->setShortcut(QKeySequence(Qt::Key_F11));
     m_fullScreen->setCheckable(true);
@@ -2090,6 +2101,17 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
             });
         });
         connect(reader, &ReaderTab::stitchOrderWanted, this, &MainWindow::showStitchDialog);
+        connect(reader, &ReaderTab::openMatchWanted, this, &MainWindow::openAtMatch);
+        connect(reader, &ReaderTab::openAnnotationWanted, this, [this](qint64 annotation) { openAnnotation(annotation); });
+        connect(reader, &ReaderTab::openPublicationWanted, this, [this](qint64 publication) { openPublication(publication); });
+        connect(reader, &ReaderTab::searchLibraryWanted, this, [this](const QString &words) {
+            // As a phrase, inside documents too, in the library's tab.
+            QString phrase = words;
+            phrase.replace(u'"', u' ');
+            m_searchInside->setChecked(true);
+            m_search->setText(u'"' + phrase.simplified() + u'"');
+            m_documentTabs->setCurrentIndex(0);
+        });
         connect(reader, &ReaderTab::textRecognised, this, [this](const QString &contentHash) {
             // Read into the index again, with its recognised words, once the reader's done with them.
             guarded(tr("Updating the index"), [&] { FullTextIndex(m_session.database()).forget(contentHash); });
@@ -2342,6 +2364,8 @@ void MainWindow::updateRulerAction()
     ReaderTab *reader = activeReader();
     m_ruler->setEnabled(reader != nullptr);
     m_ruler->setChecked(reader && reader->isRulerShown());
+    if (m_lookUpAction)
+        m_lookUpAction->setEnabled(reader != nullptr);
     if (m_readAloud) {
         m_readAloud->setEnabled(reader != nullptr && canReadAloud());
         m_stopReading->setEnabled(reader && reader->isReadingAloud());
@@ -3708,12 +3732,7 @@ void MainWindow::getOcrLanguage(const QString &code, std::function<void(bool)> d
 
 bool MainWindow::lookupsAreOnline()
 {
-    bool online = false;
-    guarded(tr("Reading the settings"), [&] {
-        online = m_session.settings().value(QStringLiteral("metadata.mode_chosen")).toBool()
-                 && m_session.settings().value(QStringLiteral("metadata.mode")).toString() != QLatin1StringView("offline");
-    });
-    return online;
+    return m_session.lookupsAreOnline();
 }
 
 void MainWindow::getNaturalVoices(std::function<void(bool)> done)

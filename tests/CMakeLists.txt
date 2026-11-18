@@ -93,6 +93,11 @@ add_dependencies(test_annotations papertrail-worker)
 add_test(NAME test_annotations COMMAND test_annotations)
 set_tests_properties(test_annotations PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 600)
 
+qt_add_executable(test_selection_lookup test_selection_lookup.cpp)
+target_link_libraries(test_selection_lookup PRIVATE papertrail_ui Qt6::Test)
+add_test(NAME test_selection_lookup COMMAND test_selection_lookup)
+set_tests_properties(test_selection_lookup PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 qt_add_executable(test_fulltext test_fulltext.cpp)
 target_link_libraries(test_fulltext PRIVATE papertrail_ui Qt6::Test)
 target_compile_definitions(test_fulltext PRIVATE

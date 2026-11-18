@@ -15,6 +15,8 @@ add_library(papertrail_metadata STATIC
     Providers.h
     RelatedFinder.cpp
     RelatedFinder.h
+    SelectionLookup.cpp
+    SelectionLookup.h
     Transport.cpp
     Transport.h)
 

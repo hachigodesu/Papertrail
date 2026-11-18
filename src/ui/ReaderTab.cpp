@@ -14,11 +14,13 @@
 #include "ui/Delegates.h"
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
+#include "ui/LookUpPanel.h"
 
 #include <QApplication>
 #include <QClipboard>
 #include <QDir>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QMessageBox>
 #include <QFileDialog>
@@ -692,6 +694,33 @@ void ReaderTab::buildSidePanel()
     connect(addButton, &QPushButton::clicked, this, &ReaderTab::addBookmark);
     bookmarks->addWidget(addButton);
     m_side->addTab(bookmarkPanel, tr("Bookmarks"));
+
+    m_lookUp = new LookUpPanel(m_session, m_publicationId, m_side);
+    connect(m_lookUp, &LookUpPanel::showPageWanted, this, &ReaderTab::showMatch);
+    connect(m_lookUp, &LookUpPanel::showAnnotationWanted, this, &ReaderTab::showAnnotation);
+    connect(m_lookUp, &LookUpPanel::openPageWanted, this, &ReaderTab::openMatchWanted);
+    connect(m_lookUp, &LookUpPanel::openAnnotationWanted, this, &ReaderTab::openAnnotationWanted);
+    connect(m_lookUp, &LookUpPanel::openPublicationWanted, this, &ReaderTab::openPublicationWanted);
+    connect(m_lookUp, &LookUpPanel::searchLibraryWanted, this, &ReaderTab::searchLibraryWanted);
+    connect(m_lookUp, &LookUpPanel::openLinkWanted, this, [this](const QUrl &url) { followExternalLink(url.toString()); });
+    m_side->addTab(m_lookUp, tr("Look up"));
+}
+
+void ReaderTab::lookUpSelection()
+{
+    if (m_view->hasSelection())
+        lookUp(m_view->selectedText());
+    else {
+        setSidePanelVisible(true);
+        m_side->setCurrentWidget(m_lookUp);
+    }
+}
+
+void ReaderTab::lookUp(const QString &words)
+{
+    setSidePanelVisible(true);
+    m_side->setCurrentWidget(m_lookUp);
+    m_lookUp->lookUp(words);
 }
 
 void ReaderTab::loadBookmarks()
@@ -2113,6 +2142,14 @@ void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
         }
         menu->addAction(tr("Underline"), this, [this] { annotateSelection(AnnotationType::Underline); });
         menu->addAction(tr("Add a note..."), this, &ReaderTab::askForNoteAndAnnotate);
+        // The words as they'll be looked up, shortened to fit in a menu, with & shown as itself.
+        QString words = metadata::lookupWords(m_view->selectedText(), LookUpPanel::kMaxWords, LookUpPanel::kMaxChars);
+        if (!words.isEmpty()) {
+            words = QFontMetrics(menu->font()).elidedText(words, Qt::ElideRight, menu->fontMetrics().averageCharWidth() * 30);
+            words.replace(u'&', QStringLiteral("&&"));
+            QAction *lookUpAction = menu->addAction(tr("Look up “%1”").arg(words), this, &ReaderTab::lookUpSelection);
+            lookUpAction->setObjectName(QStringLiteral("lookUpSelection"));
+        }
     }
     if (const std::optional<qint64> id = m_view->annotationAt(viewportPoint)) {
         const qint64 annotation = *id;

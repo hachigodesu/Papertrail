@@ -430,6 +430,7 @@ private:
     QAction *m_goTo = nullptr;
     QAction *m_fullScreen = nullptr;
     QAction *m_ruler = nullptr;
+    QAction *m_lookUpAction = nullptr;
     QAction *m_readAloud = nullptr;
     QAction *m_stopReading = nullptr;
     void updateRulerAction();

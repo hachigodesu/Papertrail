@@ -11,6 +11,8 @@ add_library(papertrail_core STATIC
     model/PublicationFields.cpp
     model/PublicationFields.h
     model/Publication.h
+    query/LibraryMentions.cpp
+    query/LibraryMentions.h
     query/LibraryQuery.cpp
     query/LibraryQuery.h
     query/PublicationFilter.h

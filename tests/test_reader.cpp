@@ -10,6 +10,7 @@
 #include "ui/DocumentClient.h"
 #include "ui/ImportThread.h"
 #include "ui/LibrarySession.h"
+#include "ui/LookUpPanel.h"
 #include "ui/MainWindow.h"
 #include "ui/PageView.h"
 #include "ui/PublicationListModel.h"
@@ -2485,6 +2486,57 @@ private slots:
         reader->searchBox()->clear();
         reader->applySearch();
         QCOMPARE(reader->searchStatus()->text(), QString());
+    }
+
+    void aSelectionCanBeLookedUp()
+    {
+        ReaderTab *reader = openSample(QStringLiteral("reader_doc.pdf"));
+        PageView *view = reader->pageView();
+        view->setScale(1.5);
+        view->goToPage(5);
+        QTRY_VERIFY_WITH_TIMEOUT(view->isPageLoaded(5), kWaitMs);
+        QAction *viewAction = m_window->findChild<QAction *>(QStringLiteral("lookUpSelectionAction"));
+        QVERIFY(viewAction);
+        QTRY_VERIFY(viewAction->isEnabled());
+
+        // Nothing chosen, nothing offered in the page's menu.
+        const QPoint from = view->viewportPointFor(5, QPointF(45, 58));
+        const QPoint to = view->viewportPointFor(5, QPointF(300, 68));
+        {
+            QMenu menu;
+            emit view->contextMenuWanted(&menu, from);
+            QVERIFY(!menu.findChild<QAction *>(QStringLiteral("lookUpSelection")));
+        }
+
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, from);
+        QMouseEvent move(QEvent::MouseMove, QPointF(to), view->viewport()->mapToGlobal(QPointF(to)), Qt::NoButton,
+                         Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(view->viewport(), &move);
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, to);
+        QTRY_VERIFY_WITH_TIMEOUT(view->hasSelection(), kWaitMs);
+
+        QMenu menu;
+        emit view->contextMenuWanted(&menu, from);
+        QAction *lookUp = menu.findChild<QAction *>(QStringLiteral("lookUpSelection"));
+        QVERIFY(lookUp);
+        QVERIFY2(lookUp->text().contains(QStringLiteral("The last page")), qPrintable(lookUp->text()));
+        QSignalSpy shown(reader->lookUpPanel(), &LookUpPanel::libraryShown);
+        lookUp->trigger();
+        QVERIFY(reader->lookUpPanel()->isVisible());
+        QVERIFY(reader->lookUpPanel()->words().startsWith(QStringLiteral("The last page")));
+        QVERIFY(shown.wait(kWaitMs));
+        // Offline, as a library is until a mode's chosen, so nothing is offered beyond the library.
+        QVERIFY(!reader->lookUpPanel()->findChild<QPushButton *>(QStringLiteral("lookUpWikipedia"))->isVisibleTo(reader));
+
+        // From the View menu too, with Search the library putting the words in the library's search box.
+        viewAction->trigger();
+        QVERIFY(reader->lookUpPanel()->isVisible());
+        reader->lookUpPanel()->findChild<QPushButton *>(QStringLiteral("lookUpSearchLibrary"))->click();
+        QTRY_COMPARE(m_window->documentTabs()->currentIndex(), 0);
+        bool searched = false;
+        for (QLineEdit *edit : m_window->findChildren<QLineEdit *>())
+            searched = searched || edit->text() == u'"' + reader->lookUpPanel()->words() + u'"';
+        QVERIFY(searched);
     }
 
     void textCanBeSelectedAndCopied()

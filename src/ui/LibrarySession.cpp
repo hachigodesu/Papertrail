@@ -156,4 +156,14 @@ LibrarySession::LibrarySession(const LibraryPaths &paths)
     m_query = std::make_unique<core::LibraryQuery>(*m_db);
 }
 
+bool LibrarySession::lookupsAreOnline()
+{
+    try {
+        return m_settings->value(QStringLiteral("metadata.mode_chosen")).toBool()
+               && m_settings->value(QStringLiteral("metadata.mode")).toString() != QLatin1StringView("offline");
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
 } // namespace papertrail::ui
