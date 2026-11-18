@@ -204,8 +204,9 @@ void LookupEngine::next()
                 m_asks << Ask::Arxiv;
             if (!m_publication.isbn13.isEmpty() || !m_publication.isbn10.isEmpty())
                 m_asks << Ask::OpenLibrary;
-            // Only worth searching on a title with enough words to tell it from others.
-            if (m_publication.title.count(u' ') >= 2)
+            // Only worth searching on a title with enough words to tell it from others. A datasheet's or manual's
+            // title is mostly a product's name, which sources of papers would only match to something else.
+            if (m_publication.title.count(u' ') >= 2 && m_publication.type != PublicationType::DatasheetManual)
                 m_asks << Ask::CrossrefTitle << Ask::OpenAlexTitle;
         }
 

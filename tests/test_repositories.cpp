@@ -78,6 +78,7 @@ private slots:
         p.standardBody = QStringLiteral("ISO");
         p.standardRevision = QStringLiteral("2015");
         p.standardStatus = QStringLiteral("Published");
+        p.productNumbers = QStringLiteral("PX-100, PX-100A");
         p.readStatus = ReadStatus::Reading;
         p.rating = 4;
         p.notes = QStringLiteral("Notes");
@@ -127,6 +128,7 @@ private slots:
         QCOMPARE(stored.standardBody, p.standardBody);
         QCOMPARE(stored.standardRevision, p.standardRevision);
         QCOMPARE(stored.standardStatus, p.standardStatus);
+        QCOMPARE(stored.productNumbers, p.productNumbers);
         QCOMPARE(stored.readStatus, ReadStatus::Reading);
         QCOMPARE(stored.rating, p.rating);
         QCOMPARE(stored.notes, p.notes);

@@ -422,8 +422,10 @@ std::optional<PublicationType> bibTeXType(const QString &type, bool &preprint)
         return PublicationType::CaseLaw;
     if (type == QLatin1StringView("periodical"))
         return PublicationType::JournalIssue;
+    if (type == QLatin1StringView("manual"))
+        return PublicationType::DatasheetManual;
     if (type == QLatin1StringView("unpublished") || type == QLatin1StringView("online") || type == QLatin1StringView("misc")
-        || type == QLatin1StringView("electronic") || type == QLatin1StringView("www") || type == QLatin1StringView("manual")) {
+        || type == QLatin1StringView("electronic") || type == QLatin1StringView("www")) {
         return PublicationType::Other;
     }
     return std::nullopt;
@@ -475,7 +477,7 @@ ImportedReference fromBibTeX(const RawEntry &raw)
 
     p.volume = text("volume");
     const QString number = text("number");
-    if (p.type == PublicationType::TechnicalReport)
+    if (p.type == PublicationType::TechnicalReport || p.type == PublicationType::DatasheetManual)
         p.reportNumber = number;
     else if (p.type == PublicationType::Standard)
         p.standardNumber = number;
@@ -524,8 +526,12 @@ ImportedReference fromBibTeX(const RawEntry &raw)
         p.degree = degree;
     if (p.type == PublicationType::Standard)
         p.standardBody = text("organization");
+    else if (p.type == PublicationType::DatasheetManual && !text("organization").isEmpty())
+        p.publisher = text("organization"); // A manual's maker, which is who publishes it.
     else if (p.publisher.isEmpty())
         p.publisher = text("organization");
+    if (p.type == PublicationType::DatasheetManual)
+        p.standardRevision = text("version");
     p.conferenceName = text("eventtitle");
     p.conferenceLocation = text("venue");
 
@@ -537,7 +543,17 @@ ImportedReference fromBibTeX(const RawEntry &raw)
                          || (!p.arxivId.isEmpty() && p.publisher.compare(QStringLiteral("arxiv"), Qt::CaseInsensitive) == 0);
     // A note that only gives the arXiv number says nothing of the user's own.
     static const QRegularExpression arxivNote(QStringLiteral("^arXiv:\\S+(?:\\s*\\[[^\\]]*\\])?$"), QRegularExpression::CaseInsensitiveOption);
-    const bool noteIsArxiv = arxivNote.match(text("note")).hasMatch();
+    bool noteIsArxiv = arxivNote.match(text("note")).hasMatch();
+    // Nor does one that only repeats a manual's document number and revision, as Papertrail's own export writes.
+    if (p.type == PublicationType::DatasheetManual) {
+        QStringList parts;
+        if (!p.reportNumber.isEmpty())
+            parts << QStringLiteral("Document no. ") + p.reportNumber;
+        if (!p.standardRevision.isEmpty())
+            parts << QStringLiteral("Rev. ") + p.standardRevision;
+        if (!parts.isEmpty() && text("note") == parts.join(QStringLiteral(", ")))
+            noteIsArxiv = true;
+    }
     if (container.compare(QStringLiteral("arxiv"), Qt::CaseInsensitive) == 0 || container.startsWith(QStringLiteral("arXiv"))) {
         p.containerTitle.clear();
         p.type = PublicationType::Other;
@@ -609,6 +625,11 @@ ImportedReference fromRis(const QList<QPair<QString, QString>> &lines, int line)
     bool preprint = false;
     const QString type = first({"TY"});
     p.type = risType(type, preprint);
+    // RIS has no type for a datasheet or manual, so Papertrail's export says so in a generic entry's type of work.
+    static const QRegularExpression manualWork(QStringLiteral("\\b(manual|datasheet|data sheet)\\b"),
+                                               QRegularExpression::CaseInsensitiveOption);
+    if (type == QLatin1StringView("GEN") && manualWork.match(first({"M3"})).hasMatch())
+        p.type = PublicationType::DatasheetManual;
     entry.preprintHint = preprint;
     entry.key = first({"ID"});
 
@@ -671,6 +692,8 @@ ImportedReference fromRis(const QList<QPair<QString, QString>> &lines, int line)
         p.arxivId = misc.mid(6).trimmed();
     else if (p.type == PublicationType::CaseLaw)
         p.caseNumber = misc;
+    else if (p.type == PublicationType::DatasheetManual)
+        p.reportNumber = misc;
     p.language = first({"LA"});
     p.abstract = first({"AB", "N2"});
 
@@ -678,8 +701,12 @@ ImportedReference fromRis(const QList<QPair<QString, QString>> &lines, int line)
         addTags(entry, keyword, QStringLiteral(";"));
     for (const QString &note : values.value(QStringLiteral("N1"))) {
         static const QRegularExpression neutral(QStringLiteral("^Neutral citation:\\s*(.+)$"), QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression revision(QStringLiteral("^Revision:\\s*(.+)$"), QRegularExpression::CaseInsensitiveOption);
         if (const QRegularExpressionMatch match = neutral.match(note); match.hasMatch() && p.type == PublicationType::CaseLaw)
             p.neutralCitation = match.captured(1).trimmed();
+        else if (const QRegularExpressionMatch rev = revision.match(note);
+                 rev.hasMatch() && p.type == PublicationType::DatasheetManual && p.standardRevision.isEmpty())
+            p.standardRevision = rev.captured(1).trimmed();
         else
             addNote(entry, note);
     }

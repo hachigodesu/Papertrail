@@ -202,6 +202,7 @@ private:
         if (roll <= 90) return PublicationType::Dissertation;
         if (roll <= 94) return PublicationType::TechnicalReport;
         if (roll <= 96) return PublicationType::Standard;
+        if (roll <= 97) return PublicationType::DatasheetManual;
         if (roll <= 99) return PublicationType::Preprint;
         return PublicationType::Other;
     }
@@ -256,6 +257,11 @@ private:
         case PublicationType::Standard:
             p.standardBody = QStringLiteral("ISO");
             p.standardNumber = QStringLiteral("ISO %1").arg(index);
+            break;
+        case PublicationType::DatasheetManual:
+            p.publisher = pickSkewed(m_publishers);
+            p.reportNumber = QStringLiteral("DS-%1").arg(index);
+            p.productNumbers = QStringLiteral("PX-%1, PX-%1A").arg(index);
             break;
         case PublicationType::Preprint:
             p.arxivId = QStringLiteral("26%1.%2").arg(between(10, 12)).arg(index, 5, 10, QChar(u'0'));

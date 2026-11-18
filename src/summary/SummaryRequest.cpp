@@ -265,6 +265,7 @@ QList<IdentifyingDetail> identifyingDetails(const Publication &p)
     add(QStringLiteral("Institution"), p.institution);
     add(QStringLiteral("Report number"), p.reportNumber);
     add(QStringLiteral("Standard number"), p.standardNumber);
+    add(QStringLiteral("Products covered"), p.productNumbers);
     // A web address for each identifier, because web fetch only goes to addresses that appear in the request.
     if (!p.doi.isEmpty())
         add(QStringLiteral("DOI"), QStringLiteral("https://doi.org/") + p.doi);

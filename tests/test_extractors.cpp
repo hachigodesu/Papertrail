@@ -398,6 +398,35 @@ private slots:
         row("long article", "pdf", 300, "review", "10.1/a", "", "", "", T::JournalArticle, false);
         // A short paper can't be a thesis, whatever it says.
         row("too short for thesis", "pdf", 7, "PhD thesis", "10.1/a", "", "", "", T::JournalArticle, true);
+        // A datasheet or manual says so in its heading, with a product's number or a revised document's. It's only
+        // ever a guess.
+        row("datasheet", "pdf", 20, "Example Devices\nPX-100 Pretend Voltage Regulator\nDatasheet\nFeatures", "", "", "",
+            "", T::DatasheetManual, false);
+        row("data sheet with a doi", "pdf", 20, "Example Devices\nData Sheet\nPX-100 and PX-100A", "10.1/a", "", "", "",
+            T::DatasheetManual, false);
+        row("manual by its revision", "pdf", 80, "Pretend Oscilloscope\nUser's Guide\ndoc. no. abcd-1234 revision 3", "",
+            "", "", "", T::DatasheetManual, false);
+        row("manual without numbers", "pdf", 80, "Pretend Oscilloscope\nService manual\nfor the workshop", "", "", "", "",
+            T::Other, false);
+        row("application note", "pdf", 4, "Example Devices\nApplication Note AN-12\nUsing the PX-100 datasheet", "", "", "",
+            "", T::Other, false);
+        // Papers that only mention them are still papers.
+        row("paper reading a data sheet", "pdf", 12,
+            "Measuring Pretend Flows\nAbstract: we read the data sheet of the PX-100 sensor", "10.1/a", "", "", "",
+            T::JournalArticle, true);
+        row("paper about datasheets", "pdf", 12, "Datasheets for Pretend Models\nAbstract: a made-up proposal", "10.1/a", "",
+            "", "", T::JournalArticle, true);
+        row("data sheet further down", "pdf", 12,
+            "Pretend Results\nA. Sample\nB. Example\nOne\nTwo\nThree\nFour\nFive\nSix\nSeven\nsee the data sheet of the PX-100",
+            "10.1/a", "", "", "", T::JournalArticle, true);
+        // A guideline or code of practice is a standard, with its number. Also only ever a guess.
+        row("guideline", "pdf", 40, "Pretend Care of Adults\nNICE guideline NG999\nPublished: 2020", "", "", "", "",
+            T::Standard, false);
+        row("code of practice", "pdf", 40, "Code of Practice 12\nPretend Lifting Operations", "", "", "", "", T::Standard,
+            false);
+        row("guideline without a number", "pdf", 5, "Guidelines for pretend writing", "", "", "", "", T::Other, false);
+        row("paper about a guideline", "pdf", 12, "Adherence to Pretend Guidelines\nAbstract: NICE guideline NG999 was read",
+            "10.1/a", "", "", "", T::JournalArticle, true);
     }
 
     void classifierRecognisesEachKind()

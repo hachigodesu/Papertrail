@@ -90,6 +90,7 @@ const QList<TextField> &textFields()
         {"neutralCitation", &Publication::neutralCitation},
         {"caseNumber", &Publication::caseNumber},
         {"caseCitationForm", &Publication::caseCitationForm},
+        {"productNumbers", &Publication::productNumbers},
         {"notes", &Publication::notes},
         {"extraJson", &Publication::extraJson},
     };

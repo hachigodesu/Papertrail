@@ -6,7 +6,7 @@
 [![AppImage](https://github.com/hachigodesu/Papertrail/actions/workflows/appimage.yml/badge.svg?branch=main)](https://github.com/hachigodesu/Papertrail/actions/workflows/appimage.yml)
 [![Flatpak](https://github.com/hachigodesu/Papertrail/actions/workflows/flatpak.yml/badge.svg?branch=main)](https://github.com/hachigodesu/Papertrail/actions/workflows/flatpak.yml)
 
-Papertrail is a library manager and reader for university students and researchers, for Windows and Linux. It indexes your journal articles, textbooks, theses, reports and standards **where they already are**, keeps their details, tags and notes in a library of its own, and opens them in a built-in reader.
+Papertrail is a library manager and reader for university students and researchers, for Windows and Linux. It indexes your journal articles, textbooks, theses, reports, standards, datasheets and manuals **where they already are**, keeps their details, tags and notes in a library of its own, and opens them in a built-in reader.
 
 **It never changes your files,** and it stays offline until you choose otherwise.
 
@@ -175,7 +175,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Indexes files where they are,** in any number of folders, including on other drives. Folders are watched for new and changed files, and scanned again when Papertrail opens.
 - **Formats:** PDF, EPUB, DjVu, MOBI, AZW3 (Kindle KF8), XPS, CBZ and FB2.
 - **Books downloaded as a zip of PDFs,** one per chapter, as ScienceDirect gives them, are read as one book. Papertrail works out the order of the parts from their printed page numbers and their names, and asks you to check it when the import finishes. The zip is never changed: the stitched PDF is kept in Papertrail's own folder, the order can be changed again whenever you like, with highlights, notes and bookmarks moving with their parts, and **Save the stitched PDF as...** saves a copy wherever you choose.
-- **Kinds of publication,** each with its own tab: journal issues, journal articles, preprints, conference papers and proceedings, textbooks and books, theses and dissertations, technical reports, standards, case law, and others.
+- **Kinds of publication,** each with its own tab: journal issues, journal articles, preprints, conference papers and proceedings, textbooks and books, theses and dissertations, technical reports, standards and guidelines, datasheets and manuals, case law, and others.
 - **Details from your files:** titles, authors, DOIs, ISBNs and arXiv numbers are read from each document's metadata and first pages, and its kind is worked out from its first page. Anything guessed is marked for you to check.
 - **Duplicates join up:** the same file in two folders is one publication with two locations, matched by its contents. Another format of the same work, such as a PDF and an EPUB, can join it too, and be separated again.
 - **Covers** from each document's first page.
@@ -247,6 +247,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Reference lists** for any selection, in the style's order, with 2020a and 2020b where needed.
 - **Export** BibTeX, RIS (for Zotero, Mendeley and EndNote) or CSL-JSON, for what you've chosen or, from its menu in the sidebar, for a whole collection.
 - **Case law** is cited in the Bluebook's form, or OSCOLA's if you choose it for a case, in every style. With lookups online, a case's details come from a source of judgments for its jurisdiction: Find Case Law for the UK, for cases you choose to look up, EUR-Lex for the EU's courts, and CourtListener for the US or CanLII for Canada with a free key of your own.
+- **Datasheets and manuals** are cited under their manufacturer, with their document number and revision, and exported as BibTeX's `@manual`. The products they cover can be searched for. They're only looked up online by a DOI or ISBN they already carry.
 
 ### Summaries from Claude
 

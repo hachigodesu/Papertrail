@@ -154,7 +154,7 @@ private slots:
     void readsJabRefBibTeX()
     {
         const ParsedReferences parsed = parseReferences(fixture(QStringLiteral("jabref.bib")));
-        QCOMPARE(parsed.entries.size(), 2);
+        QCOMPARE(parsed.entries.size(), 3);
         const ImportedReference *standard = withKey(parsed, QStringLiteral("ESB1234"));
         QCOMPARE(standard->publication.type, PublicationType::Standard);
         QCOMPARE(standard->publication.standardBody, QStringLiteral("Example Standards Body"));
@@ -168,6 +168,15 @@ private slots:
         QCOMPARE(judgment->publication.containerTitle, QStringLiteral("F.4th"));
         QCOMPARE(judgment->publication.pages, QStringLiteral("345-360"));
         QCOMPARE(judgment->publication.day.value_or(0), 14);
+
+        // A manual is a datasheet or manual, under its maker, and a note of the user's own stays a note.
+        const ImportedReference *manual = withKey(parsed, QStringLiteral("PX100"));
+        QCOMPARE(manual->publication.type, PublicationType::DatasheetManual);
+        QCOMPARE(manual->publication.publisher, QStringLiteral("Example Devices"));
+        QCOMPARE(manual->publication.reportNumber, QStringLiteral("EXD-0042"));
+        QCOMPARE(manual->publication.standardRevision, QStringLiteral("C"));
+        QCOMPARE(manual->publication.place, QStringLiteral("Leeds"));
+        QCOMPARE(manual->note, QStringLiteral("Kept beside the bench."));
     }
 
     void readsRisFromZoteroAndEndNote()

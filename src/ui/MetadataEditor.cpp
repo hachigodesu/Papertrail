@@ -112,7 +112,7 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
                                                 T::Preprint, T::CaseLaw};
     const QList<PublicationType> bookLike = {T::Textbook, T::Book, T::BookChapter, T::ConferenceProceedings};
     const QList<PublicationType> published = {T::JournalIssue, T::ConferenceProceedings, T::Textbook, T::Book,
-                                              T::BookChapter, T::TechnicalReport, T::Standard};
+                                              T::BookChapter, T::TechnicalReport, T::Standard, T::DatasheetManual};
 
     addText(main, QStringLiteral("container"), tr("Journal or source"), &Publication::containerTitle, inContainer);
     addText(main, QStringLiteral("volume"), tr("Volume"), &Publication::volume, inContainer);
@@ -120,7 +120,7 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
     addText(main, QStringLiteral("pages"), tr("Pages"), &Publication::pages, inContainer);
     addText(main, QStringLiteral("publisher"), tr("Publisher"), &Publication::publisher, published);
     addText(main, QStringLiteral("place"), tr("Place"), &Publication::place, bookLike);
-    addText(main, QStringLiteral("edition"), tr("Edition"), &Publication::edition, bookLike);
+    addText(main, QStringLiteral("edition"), tr("Edition"), &Publication::edition, bookLike + QList{T::DatasheetManual});
     addText(main, QStringLiteral("series"), tr("Series"), &Publication::series, bookLike);
     addText(main, QStringLiteral("conference"), tr("Conference"), &Publication::conferenceName,
             {T::ConferencePaper, T::ConferenceProceedings});
@@ -130,15 +130,28 @@ MetadataEditor::MetadataEditor(const Publication &publication, QWidget *parent)
             {T::Thesis, T::Dissertation, T::TechnicalReport});
     addText(main, QStringLiteral("department"), tr("Department"), &Publication::department, {T::Thesis, T::Dissertation});
     addText(main, QStringLiteral("degree"), tr("Degree"), &Publication::degree, {T::Thesis, T::Dissertation});
-    addText(main, QStringLiteral("report_number"), tr("Report number"), &Publication::reportNumber, {T::TechnicalReport});
+    addText(main, QStringLiteral("report_number"), tr("Report number"), &Publication::reportNumber,
+            {T::TechnicalReport, T::DatasheetManual});
     addText(main, QStringLiteral("standard_number"), tr("Standard number"), &Publication::standardNumber, {T::Standard});
     addText(main, QStringLiteral("standard_body"), tr("Issuing body"), &Publication::standardBody, {T::Standard});
-    addText(main, QStringLiteral("standard_revision"), tr("Revision"), &Publication::standardRevision, {T::Standard});
+    addText(main, QStringLiteral("standard_revision"), tr("Revision"), &Publication::standardRevision,
+            {T::Standard, T::DatasheetManual});
     addText(main, QStringLiteral("standard_status"), tr("Status"), &Publication::standardStatus, {T::Standard});
     addText(main, QStringLiteral("court"), tr("Court"), &Publication::court, {T::CaseLaw});
     addText(main, QStringLiteral("jurisdiction"), tr("Jurisdiction"), &Publication::jurisdiction, {T::CaseLaw});
     addText(main, QStringLiteral("neutral_citation"), tr("Neutral citation"), &Publication::neutralCitation, {T::CaseLaw});
     addText(main, QStringLiteral("case_number"), tr("Case number"), &Publication::caseNumber, {T::CaseLaw});
+    addText(main, QStringLiteral("product_numbers"), tr("Products covered"), &Publication::productNumbers,
+            {T::DatasheetManual});
+    // A datasheet's or manual's publisher is the company that makes what it's about, and its report number its own.
+    for (TextField &text : m_textFields) {
+        if (text.name == QLatin1StringView("publisher"))
+            text.datasheetLabel = tr("Manufacturer");
+        else if (text.name == QLatin1StringView("report_number"))
+            text.datasheetLabel = tr("Document number");
+    }
+    if (QLineEdit *products = field(QStringLiteral("product_numbers")))
+        products->setToolTip(tr("The products, parts or models it covers, such as \"LM317, LM317A\""));
     // Every case can be cited either way, whichever court decided it.
     m_caseForm = new QComboBox(mainPage);
     m_caseForm->addItem(tr("Bluebook (US)"), QString());
@@ -192,7 +205,7 @@ void MetadataEditor::addText(QFormLayout *form, const QString &name, const QStri
 {
     auto *edit = new QLineEdit(m_original.*member);
     form->addRow(label, edit);
-    m_textFields << TextField{name, member, suits, form, edit};
+    m_textFields << TextField{name, member, suits, form, edit, label, {}};
 }
 
 void MetadataEditor::addPeople(QFormLayout *form, const QString &name, const QString &label,
@@ -212,6 +225,10 @@ void MetadataEditor::updateVisibleFields()
     for (const TextField &field : m_textFields) {
         field.form->setRowVisible(field.edit,
                                   field.suits.isEmpty() || field.suits.contains(type) || !field.edit->text().isEmpty());
+        if (!field.datasheetLabel.isEmpty()) {
+            if (auto *label = qobject_cast<QLabel *>(field.form->labelForField(field.edit)))
+                label->setText(type == PublicationType::DatasheetManual ? field.datasheetLabel : field.label);
+        }
     }
     for (const PeopleField &field : m_peopleFields) {
         field.form->setRowVisible(field.edit, field.suits.isEmpty() || field.suits.contains(type)

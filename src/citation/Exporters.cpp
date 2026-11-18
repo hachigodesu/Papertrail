@@ -108,6 +108,17 @@ bool isDoctoral(const CitationItem &item)
     return level == DegreeLevel::Doctoral || (level == DegreeLevel::Unknown && item.type == core::PublicationType::Dissertation);
 }
 
+// What a datasheet's or manual's @manual entry says in its note: its document number and revision.
+QString manualNote(const CitationItem &item)
+{
+    QStringList parts;
+    if (!item.reportNumber.isEmpty())
+        parts << QStringLiteral("Document no. ") + item.reportNumber;
+    if (!item.revision.isEmpty())
+        parts << QStringLiteral("Rev. ") + item.revision;
+    return parts.join(QStringLiteral(", "));
+}
+
 } // namespace
 
 QString bibTeXText(const QString &text, bool protectCapitals)
@@ -214,6 +225,7 @@ QByteArray toBibTeX(const QList<CitationItem> &items)
                                                                                  : QStringLiteral("phdthesis");
             break;
         case Kind::Report: type = QStringLiteral("techreport"); break;
+        case Kind::Manual: type = QStringLiteral("manual"); break;
         case Kind::Issue:
         case Kind::Standard:
         case Kind::Preprint:
@@ -252,7 +264,7 @@ QByteArray toBibTeX(const QList<CitationItem> &items)
         if (item.month)
             fields << std::make_pair(QStringLiteral("month"), monthMacro(*item.month));
         field(QStringLiteral("volume"), item.volume);
-        if (item.kind == Kind::Report)
+        if (item.kind == Kind::Report || item.kind == Kind::Manual)
             field(QStringLiteral("number"), item.reportNumber);
         else if (item.kind == Kind::Standard)
             field(QStringLiteral("number"), item.standardNumber);
@@ -275,6 +287,12 @@ QByteArray toBibTeX(const QList<CitationItem> &items)
             field(QStringLiteral("organization"), item.standardBody);
             field(QStringLiteral("publisher"), item.publisher);
             field(QStringLiteral("type"), QStringLiteral("Standard"));
+        } else if (item.kind == Kind::Manual) {
+            // Its maker is the organisation @manual names. Classic BibTeX knows neither number nor version, so
+            // they're in the note too.
+            field(QStringLiteral("organization"), item.publisher);
+            field(QStringLiteral("version"), item.revision);
+            field(QStringLiteral("note"), manualNote(item));
         } else {
             field(QStringLiteral("publisher"), item.publisher);
         }
@@ -342,6 +360,7 @@ QByteArray toRis(const QList<CitationItem> &items)
         case Kind::Preprint: type = QStringLiteral("UNPB"); break;
         case Kind::Document: type = QStringLiteral("GEN"); break;
         case Kind::Case: type = QStringLiteral("CASE"); break;
+        case Kind::Manual: type = QStringLiteral("GEN"); break; // RIS has no type for one.
         }
         line(QStringLiteral("TY"), type);
         for (const PersonName &person : item.authors)
@@ -383,6 +402,13 @@ QByteArray toRis(const QList<CitationItem> &items)
         } else if (item.kind == Kind::Standard) {
             line(QStringLiteral("PB"), item.publisher.isEmpty() ? item.standardBody : item.publisher);
             line(QStringLiteral("A2"), item.standardBody);
+        } else if (item.kind == Kind::Manual) {
+            // Its maker, its document number, and what kind of thing it is, which reading it back goes by.
+            line(QStringLiteral("PB"), item.publisher);
+            line(QStringLiteral("M1"), item.reportNumber);
+            line(QStringLiteral("M3"), QStringLiteral("Manual"));
+            if (!item.revision.isEmpty())
+                line(QStringLiteral("N1"), QStringLiteral("Revision: ") + item.revision);
         } else if (item.kind == Kind::Case) {
             // The court, the case's number, and the neutral citation, for which there's no tag of its own.
             line(QStringLiteral("PB"), item.court);
@@ -450,6 +476,7 @@ QByteArray toCslJson(const QList<CitationItem> &items)
         case Kind::Preprint: type = QStringLiteral("article"); break;
         case Kind::Document: type = QStringLiteral("document"); break;
         case Kind::Case: type = QStringLiteral("legal_case"); break;
+        case Kind::Manual: type = QStringLiteral("report"); break; // CSL has no type for one.
         }
         object.insert(QStringLiteral("id"), keys.at(i));
         object.insert(QStringLiteral("type"), type);
@@ -487,8 +514,10 @@ QByteArray toCslJson(const QList<CitationItem> &items)
         set(QStringLiteral("event-place"), item.conferenceLocation);
         if (item.kind == Kind::Thesis)
             set(QStringLiteral("genre"), item.degree);
-        if (item.kind == Kind::Report)
+        if (item.kind == Kind::Report || item.kind == Kind::Manual)
             set(QStringLiteral("number"), item.reportNumber);
+        if (item.kind == Kind::Manual)
+            set(QStringLiteral("version"), item.revision);
         if (item.kind == Kind::Standard) {
             set(QStringLiteral("number"), item.standardNumber);
             set(QStringLiteral("authority"), item.standardBody);

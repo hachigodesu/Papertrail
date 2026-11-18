@@ -64,6 +64,7 @@ const std::array kTextColumns = {
     TextColumn{"neutral_citation", &Publication::neutralCitation},
     TextColumn{"case_number", &Publication::caseNumber},
     TextColumn{"case_citation_form", &Publication::caseCitationForm},
+    TextColumn{"product_numbers", &Publication::productNumbers},
     TextColumn{"notes", &Publication::notes},
     TextColumn{"extra_json", &Publication::extraJson},
 };

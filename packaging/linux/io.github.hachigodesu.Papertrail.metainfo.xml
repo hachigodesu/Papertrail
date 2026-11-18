@@ -12,7 +12,8 @@
   <description>
     <p>
       Papertrail is a library manager and reader for university students and researchers. It indexes your
-      journal articles, textbooks, theses, reports and standards where they already are, and never changes them.
+      journal articles, textbooks, theses, reports, standards, datasheets and manuals where they already are, and never
+      changes them.
     </p>
     <ul>
       <li>Browse, filter, tag and search a library of tens of thousands of publications</li>

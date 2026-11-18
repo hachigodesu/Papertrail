@@ -29,10 +29,11 @@ QString typeLabel(PublicationType type)
     case PublicationType::Thesis: return tr("Thesis");
     case PublicationType::Dissertation: return tr("Dissertation");
     case PublicationType::TechnicalReport: return tr("Technical report");
-    case PublicationType::Standard: return tr("Standard");
+    case PublicationType::Standard: return tr("Standard or guideline");
     case PublicationType::Preprint: return tr("Preprint");
     case PublicationType::Other: return tr("Other");
     case PublicationType::CaseLaw: return tr("Case law");
+    case PublicationType::DatasheetManual: return tr("Datasheet or manual");
     }
     return tr("Other");
 }
@@ -149,7 +150,8 @@ QString tabLabel(LibraryTab tab)
     case LibraryTab::Textbooks: return tr("Textbooks");
     case LibraryTab::ThesesAndDissertations: return tr("Theses && Dissertations");
     case LibraryTab::TechnicalReports: return tr("Technical Reports");
-    case LibraryTab::Standards: return tr("Standards");
+    case LibraryTab::Standards: return tr("Standards && Guidelines");
+    case LibraryTab::DatasheetsManuals: return tr("Datasheets && Manuals");
     case LibraryTab::CaseLaw: return tr("Case Law");
     case LibraryTab::Other: return tr("Other");
     }

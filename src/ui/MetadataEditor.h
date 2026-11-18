@@ -50,6 +50,8 @@ private:
         QList<core::PublicationType> suits; // Empty means every type.
         QFormLayout *form;
         QLineEdit *edit;
+        QString label;
+        QString datasheetLabel; // What it's called for a datasheet or manual, if that differs.
     };
     struct PeopleField {
         QString name;

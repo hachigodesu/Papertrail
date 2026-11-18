@@ -401,6 +401,104 @@ private slots:
         QCOMPARE(count("SELECT count(*) FROM annotation"), qint64(0));
     }
 
+    void datasheetsAreAddedKeepingEverythingThatWasThere()
+    {
+        Database db(path());
+        migrate(db, migrationsBefore(24));
+        QCOMPARE(db.userVersion(), 23);
+
+        // A library as 1.5.0 left it: a case, and an article in an issue, with a file, a tag, a note, a highlight, a
+        // bookmark and a pair said to be different.
+        db.exec("INSERT INTO publication (id, uuid, type, title, notes, title_sort, created_at, updated_at) VALUES "
+                "(1, 'u1', 'journal_volume', 'A Made-Up Issue', 'A made-up note', 'a made-up issue', 1, 1), "
+                "(2, 'u2', 'journal_article', 'Bending Made-Up Beams', NULL, 'bending made-up beams', 1, 1), "
+                "(3, 'u3', 'case_law', 'Made-Up Party v Another', NULL, 'made-up party v another', 1, 1)");
+        db.exec("UPDATE publication SET parent_id = 1, page_start = 2, page_end = 5, doi = '10.1000/beams' WHERE id = 2");
+        db.exec("UPDATE publication SET court = 'Made-Up Court', neutral_citation = '[2020] UKSC 99', "
+                "case_citation_form = 'uk' WHERE id = 3");
+        db.exec("INSERT INTO library_root (id, uuid, name, path, created_at) VALUES (1, 'r1', 'Docs', '/made/up', 1)");
+        db.exec("INSERT INTO file (id, root_id, relative_path, file_name, size, modified_at, format, sha256) "
+                "VALUES (1, 1, 'issue.pdf', 'issue.pdf', 10, 1, 'pdf', 'abc')");
+        db.exec("INSERT INTO publication_file (publication_id, file_id, is_primary) VALUES (1, 1, 1)");
+        db.exec("INSERT INTO tag (id, uuid, name, created_at) VALUES (1, 't1', 'Beams', 1)");
+        db.exec("INSERT INTO publication_tag (publication_id, tag_id) VALUES (2, 1)");
+        db.exec("INSERT INTO annotation (uuid, publication_id, content_hash, location_json, type, selected_text, created_at, "
+                "updated_at) VALUES ('a1', 2, 'abc', '{\"parts\":[]}', 'highlight', 'made-up words', 1, 1)");
+        db.exec("INSERT INTO bookmark (uuid, publication_id, content_hash, page, y, label, created_at, updated_at) "
+                "VALUES ('b1', 2, 'abc', 3, 0.5, 'Made-up place', 1, 1)");
+        db.exec("INSERT INTO distinct_publications (first_id, second_id, created_at) VALUES (1, 2, 1)");
+        const auto count = [&](const char *sql) {
+            auto select = db.prepare(sql);
+            select->step();
+            return select->int64At(0);
+        };
+        const auto everything = [&] {
+            return QList<qint64>{count("SELECT count(*) FROM publication"), count("SELECT count(*) FROM publication_file"),
+                                 count("SELECT count(*) FROM publication_tag"), count("SELECT count(*) FROM annotation"),
+                                 count("SELECT count(*) FROM bookmark"), count("SELECT count(*) FROM distinct_publications"),
+                                 count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'beams'"),
+                                 count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'UKSC'"),
+                                 count("SELECT count(*) FROM publication_note_fts WHERE publication_note_fts MATCH 'note'")};
+        };
+        const QList<qint64> before = everything();
+        const qint64 indexes = count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'index'");
+        const qint64 triggers = count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'trigger'");
+
+        migrateLibrary(db);
+        QCOMPARE(db.userVersion(), libraryMigrations().back().version);
+        QCOMPARE(everything(), before);
+        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'index'"), indexes);
+        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'trigger'"), triggers);
+        QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE name = 'publication_new'"), qint64(0));
+        QCOMPARE(count("PRAGMA foreign_keys"), qint64(1));
+        auto dangling = db.prepare("PRAGMA foreign_key_check");
+        QVERIFY(!dangling->step());
+        const std::optional<Publication> article = PublicationRepository(db).get(2);
+        QCOMPARE(article->parentId.value_or(0), qint64(1));
+        QCOMPARE(article->doi, QStringLiteral("10.1000/beams"));
+        // The case keeps what only cases have.
+        const std::optional<Publication> judgment = PublicationRepository(db).get(3);
+        QCOMPARE(judgment->type, PublicationType::CaseLaw);
+        QCOMPARE(judgment->court, QStringLiteral("Made-Up Court"));
+        QCOMPARE(judgment->caseCitationForm, QStringLiteral("uk"));
+
+        // A datasheet can be kept now, and searching finds it by the products it covers and its maker.
+        Publication datasheet;
+        datasheet.type = PublicationType::DatasheetManual;
+        datasheet.title = QStringLiteral("Pretend Voltage Regulator");
+        datasheet.publisher = QStringLiteral("Example Devices");
+        datasheet.reportNumber = QStringLiteral("EXD-0042");
+        datasheet.productNumbers = QStringLiteral("PX100, PX100A");
+        const qint64 id = PublicationRepository(db).create(datasheet);
+        QCOMPARE(PublicationRepository(db).get(id)->type, PublicationType::DatasheetManual);
+        QCOMPARE(PublicationRepository(db).get(id)->productNumbers, QStringLiteral("PX100, PX100A"));
+        QCOMPARE(count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'PX100A'"), qint64(1));
+        QCOMPARE(count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'publisher:devices'"), qint64(1));
+        // Changing what it covers changes what finds it.
+        Publication changed = *PublicationRepository(db).get(id);
+        changed.productNumbers = QStringLiteral("PX200");
+        PublicationRepository(db).update(changed);
+        QCOMPARE(count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'PX100A'"), qint64(0));
+        QCOMPARE(count("SELECT count(*) FROM publication_fts WHERE publication_fts MATCH 'PX200'"), qint64(1));
+
+        // Running it again, from 23 or from before case law, changes nothing, and keeps what's in the new column.
+        for (const int version : {23, 19}) {
+            db.setUserVersion(version);
+            migrateLibrary(db);
+            QCOMPARE(PublicationRepository(db).get(id)->productNumbers, QStringLiteral("PX200"));
+            QCOMPARE(PublicationRepository(db).get(3)->court, QStringLiteral("Made-Up Court"));
+            QCOMPARE(count("SELECT count(*) FROM publication"), before.first() + 1);
+            QCOMPARE(count("SELECT count(*) FROM sqlite_schema WHERE tbl_name = 'publication' AND type = 'trigger'"),
+                     triggers);
+        }
+
+        // Deleting the issue still takes its article, and the article's highlight and bookmark, with it.
+        db.exec("DELETE FROM publication WHERE id = 1");
+        QCOMPARE(count("SELECT count(*) FROM publication WHERE id = 2"), qint64(0));
+        QCOMPARE(count("SELECT count(*) FROM annotation"), qint64(0));
+        QCOMPARE(count("SELECT count(*) FROM bookmark"), qint64(0));
+    }
+
     void bookmarksRelatedPapersAndRatingSortsAreAddedAndCanBeAddedAgain()
     {
         Database db(path());

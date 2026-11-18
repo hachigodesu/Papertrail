@@ -57,6 +57,7 @@ const std::array kTextFields = {
     TextField{"neutral_citation", &Publication::neutralCitation},
     TextField{"case_number", &Publication::caseNumber},
     TextField{"case_citation_form", &Publication::caseCitationForm},
+    TextField{"product_numbers", &Publication::productNumbers},
 };
 
 const std::array kNumberFields = {

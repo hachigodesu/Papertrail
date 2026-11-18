@@ -262,8 +262,9 @@ private slots:
         addPublication(QStringLiteral("A Dissertation"), PublicationType::Dissertation);
         addPublication(QStringLiteral("A Textbook"), PublicationType::Textbook);
         addPublication(QStringLiteral("A Preprint"), PublicationType::Preprint);
+        addPublication(QStringLiteral("A Datasheet"), PublicationType::DatasheetManual);
         openWindow();
-        QTRY_COMPARE_WITH_TIMEOUT(rows(), 5, kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 6, kLongWaitMs);
 
         // A preprint of an article is kept apart from the published articles.
         m_window->setTab(LibraryTab::JournalArticles);
@@ -282,8 +283,21 @@ private slots:
         QCOMPARE(title(0), QStringLiteral("A Textbook"));
         m_window->setTab(LibraryTab::Standards);
         QTRY_COMPARE_WITH_TIMEOUT(rows(), 0, kLongWaitMs);
+        m_window->setTab(LibraryTab::DatasheetsManuals);
+        QTRY_COMPARE_WITH_TIMEOUT(title_(0), QStringLiteral("A Datasheet"), kLongWaitMs);
+        QCOMPARE(rows(), 1);
         m_window->setTab(LibraryTab::All);
-        QTRY_COMPARE_WITH_TIMEOUT(rows(), 5, kLongWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 6, kLongWaitMs);
+
+        // Datasheets and manuals come straight after standards and guidelines, with ampersands that aren't shortcuts.
+        QTabBar *tabs = m_window->tabBar();
+        int standards = -1;
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (tabs->tabText(i) == QStringLiteral("Standards && Guidelines"))
+                standards = i;
+        }
+        QVERIFY(standards > 0);
+        QCOMPARE(tabs->tabText(standards + 1), QStringLiteral("Datasheets && Manuals"));
     }
 
     void searchBoxFiltersAndSortsByBestMatch()
@@ -704,6 +718,36 @@ private slots:
         QVERIFY(editor.isFieldShown(QStringLiteral("standard_number")));
         QVERIFY(!editor.isFieldShown(QStringLiteral("institution")));
         QVERIFY(!editor.isFieldShown(QStringLiteral("advisors")));
+    }
+
+    void editorNamesADatasheetsFieldsForIt()
+    {
+        Publication p;
+        p.type = PublicationType::DatasheetManual;
+        p.title = QStringLiteral("PX-100 Pretend Voltage Regulator");
+        MetadataEditor editor(p);
+        for (const char *name : {"publisher", "report_number", "standard_revision", "product_numbers", "edition"})
+            QVERIFY2(editor.isFieldShown(QString::fromLatin1(name)), name);
+        QVERIFY(!editor.isFieldShown(QStringLiteral("standard_body")));
+        QVERIFY(!editor.isFieldShown(QStringLiteral("institution")));
+        const auto labelOf = [&](const QString &name) {
+            for (QLabel *label : editor.findChildren<QLabel *>()) {
+                if (label->buddy() == editor.field(name))
+                    return label->text();
+            }
+            return QString();
+        };
+        QCOMPARE(labelOf(QStringLiteral("publisher")), QStringLiteral("Manufacturer"));
+        QCOMPARE(labelOf(QStringLiteral("report_number")), QStringLiteral("Document number"));
+        QCOMPARE(labelOf(QStringLiteral("standard_revision")), QStringLiteral("Revision"));
+
+        editor.field(QStringLiteral("product_numbers"))->setText(QStringLiteral("PX-100, PX-100A"));
+        QCOMPARE(editor.result().productNumbers, QStringLiteral("PX-100, PX-100A"));
+
+        // Another type calls them what it usually does.
+        editor.typeBox()->setCurrentIndex(editor.typeBox()->findData(int(PublicationType::TechnicalReport)));
+        QCOMPARE(labelOf(QStringLiteral("publisher")), QStringLiteral("Publisher"));
+        QCOMPARE(labelOf(QStringLiteral("report_number")), QStringLiteral("Report number"));
     }
 
     void editorKeepsValuesInFieldsThatAreHidden()
