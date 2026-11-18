@@ -446,12 +446,13 @@ OCR for scanned documents, Zotero/Mendeley/BibTeX import, full CSL citation styl
 - **1.2.0:** related papers from OpenAlex, added without a file if wanted; Smart Jump from a table of contents, and to a section's or appendix's heading by way of the contents however far away, passing over contents pages and running heads; bookmarks; full screen; pages turned a quarter at a time; forward history; sorting by rating and last opened, a rating filter, recently opened, and Rating, Last opened and Progress columns; and Show its articles by the issue itself.
 - **1.3.0:** the words of scanned documents recognised with Tesseract, in the background and as they're read, with English included and 26 more languages fetched when chosen, and an old paper whose own text is poor recognised again in full when asked.
 - **1.4.0:** reading aloud, marking each sentence, with the system's voices or Kokoro's natural voices fetched when asked; a reading ruler taking a figure or a table whole; every highlight in a window of its own; checking the library, with publications marked as not the same (migration 22); court cases looked up in Find Case Law, EUR-Lex, CourtListener and CanLII, and never in sources of papers; the scanned pages of partly scanned documents recognised in the background; and an OpenAlex key of the user's own.
+- **1.5.0:** a book downloaded as a zip of PDFs, one a chapter as ScienceDirect gives them, read as one book in an order worked out from the parts and checked by the user, stitched again with highlights, bookmarks and places moving with their parts (migration 23); a collection's menu exporting its citations and showing its highlights; and text turned about 45 degrees drawn from its outlines.
 
 Considered and declined: **publication types of the user's own,** and removing the built-in ones, because citations, exports and article splitting depend on the fixed types.
 
 ### Ideas to explore later
 
-Candidates for 1.5.0 and after. Sizes are rough.
+Candidates for 1.6.0 and after. Sizes are rough.
 
 - **Open-access copies:** PDFs fetched through Unpaywall for publications with no file, saved to a folder the user chooses. Unpaywall requires an email address with each request, so it would only work once one is entered.
 - **Sentence-case titles** where a citation style asks for them, such as APA. Risky with names and acronyms.
