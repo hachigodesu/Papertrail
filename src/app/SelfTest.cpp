@@ -1,5 +1,7 @@
 #include "SelfTest.h"
 
+#include "citation/CslEngine.h"
+#include "citation/CslStyles.h"
 #include "core/model/Publication.h"
 #include "core/query/LibraryQuery.h"
 #include "core/repo/PublicationRepository.h"
@@ -15,6 +17,7 @@
 #include <QSslSocket>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QThread>
 
 #include <cstdio>
 #include <exception>
@@ -56,6 +59,36 @@ void checkDocument(Report &report, import::WorkerClient &worker, const QDir &fol
     const QImage image(cover);
     report.check(inspection.result.coverWritten && !image.isNull(), name + QStringLiteral(" has a cover that can be shown"),
                  image.isNull() ? QStringLiteral("no image") : QStringLiteral("%1x%2").arg(image.width()).arg(image.height()));
+}
+
+// A reference in a CSL style that comes with it, through citeproc-js in QuickJS, on a thread with the stack it needs.
+QString checkCsl(QString *detail)
+{
+    QString problem;
+    QThread *thread = QThread::create([&] {
+        citation::CitationItem item;
+        item.kind = citation::CitationItem::Kind::Article;
+        item.title = QStringLiteral("Fatigue of Steel Beams");
+        item.authors = {{QStringLiteral("Example"), QStringLiteral("Ada")}};
+        item.year = 2021;
+        item.containerTitle = QStringLiteral("Journal of Imaginary Findings");
+        const std::optional<citation::CslLayout> layout
+            = citation::resolveCslStyle(QStringLiteral("http://www.zotero.org/styles/nature"), QString(), {}, &problem);
+        citation::CslEngine engine;
+        if (!layout || !engine.useStyle(*layout, &problem))
+            return;
+        const std::optional<citation::FormattedReferences> references = engine.references({item}, {}, &problem);
+        if (!references)
+            return;
+        *detail = references->entries.value(0).plain();
+        if (!detail->contains(QStringLiteral("Fatigue of Steel Beams")))
+            problem = QStringLiteral("it gave %1").arg(*detail);
+    });
+    thread->setStackSize(uint(citation::CslEngine::kCslStackBytes));
+    thread->start();
+    thread->wait();
+    delete thread;
+    return problem;
 }
 
 } // namespace
@@ -120,6 +153,12 @@ bool runSelfTest(const QString &reportPath)
                 const QString problem =
                     ui::checkNaturalVoice(paths.workerPath, ui::LibraryPaths::forThisCopy().voicesDirectory, &detail);
                 report.check(problem.isEmpty(), QStringLiteral("the natural voices' program runs"), problem.isEmpty() ? detail : problem);
+            }
+
+            {
+                QString detail;
+                const QString problem = checkCsl(&detail);
+                report.check(problem.isEmpty(), QStringLiteral("a reference can be made in a CSL style"), problem.isEmpty() ? detail : problem);
             }
 
             ui::LibrarySession session(paths);

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info>
+    <title>Made-up Tiny Style</title>
+    <id>http://example.org/styles/tiny</id>
+    <updated>2026-11-19T00:00:00+00:00</updated>
+  </info>
+  <citation>
+    <layout prefix="(" suffix=")" delimiter="; ">
+      <names variable="author"><name form="short"/></names>
+      <date variable="issued" pref

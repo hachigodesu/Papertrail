@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info>
+    <title>Made-up Style Calling Itself</title>
+    <id>http://example.org/styles/recursive</id>
+    <updated>2026-11-19T00:00:00+00:00</updated>
+  </info>
+  <macro name="again"><text macro="again"/></macro>
+  <citation><layout><text macro="again"/></layout></citation>
+</style>

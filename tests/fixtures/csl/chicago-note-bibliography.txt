@@ -1,0 +1,78 @@
+[article-seven-authors]
+ref: Alpha, Anna, Bo Beta, Cy Gamma, Di Delta, Ed Epsilon, Flo Zeta, and Gus Eta. “Collaborative Pretend Measurements.” *Journal of Imaginary Findings* 4, no. 1 (2022): 1496–1500. https://example.org/paper.
+cite: Alpha et al., “Collaborative Pretend Measurements.”
+
+[report]
+ref: “Annual Report on Pretend Data.” London: Example Agency, 2020. https://example.org/report.pdf.
+cite: “Annual Report on Pretend Data.”
+
+[article-print]
+ref: Dent, Carla. “Why Do Models Fail?” *Made-Up Review* 12 (2019): 101–8.
+cite: Dent, “Why Do Models Fail?”
+
+[edited-book]
+ref: Editor, Eve, and Frank Compiler, eds. *Collected Pretend Essays*. Example Press, 2015.
+cite: Editor and Compiler, *Collected Pretend Essays*.
+
+[article-no-author]
+ref: “Editorial.” *Pretend Letters* 1, no. 1 (2020): 1.
+cite: “Editorial.”
+
+[article]
+ref: Example, Ada Beatrice, and Ben Sample. “Lattice Vibrations in Pretend Crystals.” *Journal of Imaginary Findings* 3, no. 2 (May 2021): 43–70. https://doi.org/10.5555/jif.2021.0002.
+cite: Example and Sample, “Lattice Vibrations in Pretend Crystals.”
+
+[document]
+ref: Example Charity. “Guidance on Pretend Things.” Accessed November 7, 2026. https://example.org/guidance.
+cite: Example Charity, “Guidance on Pretend Things.”
+
+[book]
+ref: Fiction, Dana. *Imaginary Structures: A Practical Guide*. 3rd ed. Bristol: Example Press, 2018.
+cite: Fiction, *Imaginary Structures: A Practical Guide*.
+
+[preprint]
+ref: Haddad, Noor. “Sampling Made Simple.” arXiv, January 2021. https://arxiv.org/abs/2101.00001.
+cite: Haddad, “Sampling Made Simple.”
+
+[issue]
+ref: “Journal of Imaginary Findings.” Example Press, May 2021.
+cite: “Journal of Imaginary Findings.”
+
+[proceedings]
+ref: Lee, Kim, ed. *Proceedings of the Made-Up Conference on Examples*. Paris: Example Society, 2016.
+cite: Lee, *Proceedings of the Made-Up Conference on Examples*.
+
+[case_uk]
+ref: *Made-Up Holdings Ltd v Another Example Plc* [2021] EWCA Civ 1234, [2021] 1 WLR 567
+cite: Made-Up Holdings Ltd v. Another Example Plc, 1 WLR.
+
+[dissertation]
+ref: Novak, Mia. “Pretend Materials in Practice.” MSc, Example Institute, 2017.
+cite: Novak, “Pretend Materials in Practice.”
+
+[thesis]
+ref: O’Neill, Liam. “Pretend Materials Under Stress.” PhD, University of Examples, 2020. https://repository.example.org/123.
+cite: O’Neill, “Pretend Materials Under Stress.”
+
+[manual]
+ref: “PX-100 Pretend Voltage Regulator.” Leeds: Example Devices, 2023. https://example.org/px100.pdf.
+cite: “PX-100 Pretend Voltage Regulator.”
+
+[case_us]
+ref: *Sample v. Example County Board*, 12 F.4th 345 (9th Cir. 2021)
+cite: Sample v Example County Board, 12 F.4th.
+
+[standard]
+ref: “Specification for Pretend Bolts.” Example Standards Body, 2019.
+cite: “Specification for Pretend Bolts.”
+
+[paper]
+ref: Tanaka, Hiro, Ines Garcia, and Jo Park. “Fast Pretend Sorting.” In *Proceedings of the Made-Up Conference on Examples*, 195–203. Example Society, 2016. https://doi.org/10.5555/mce.2016.17.
+cite: Tanaka, Garcia, and Park, “Fast Pretend Sorting.”
+
+[chapter]
+ref: Writer, Gina. “A Chapter on Nothing.” In *Collected Pretend Essays*, edited by Eve Editor, 37–49. Leeds: Example Press, 2015.
+cite: Writer, “A Chapter on Nothing.”
+
+[all]
+cite: Example and Sample, “Lattice Vibrations in Pretend Crystals”; Dent, “Why Do Models Fail?”; Alpha et al., “Collaborative Pretend Measurements”; “Editorial”; Fiction, *Imaginary Structures: A Practical Guide*; Editor and Compiler, *Collected Pretend Essays*; Writer, “A Chapter on Nothing”; Tanaka, Garcia, and Park, “Fast Pretend Sorting”; Lee, *Proceedings of the Made-Up Conference on Examples*; “Journal of Imaginary Findings”; O’Neill, “Pretend Materials Under Stress”; Novak, “Pretend Materials in Practice”; “Annual Report on Pretend Data”; “Specification for Pretend Bolts”; Haddad, “Sampling Made Simple”; Example Charity, “Guidance on Pretend Things”; Sample v Example County Board, 12 F.4th; Made-Up Holdings Ltd v. Another Example Plc, 1 WLR; “PX-100 Pretend Voltage Regulator.”

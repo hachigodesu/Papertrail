@@ -155,6 +155,8 @@ modules:
       - -DFETCHCONTENT_SOURCE_DIR_SQLITE=/run/build/papertrail/deps/sqlite
       - -DFETCHCONTENT_SOURCE_DIR_LIBMOBI=/run/build/papertrail/deps/libmobi
       - -DFETCHCONTENT_SOURCE_DIR_QTKEYCHAIN=/run/build/papertrail/deps/qtkeychain
+      - -DFETCHCONTENT_SOURCE_DIR_QUICKJS=/run/build/papertrail/deps/quickjs
+      - -DFETCHCONTENT_SOURCE_DIR_CITEPROC=/run/build/papertrail/deps/citeproc
       - -DFETCHCONTENT_SOURCE_DIR_SHERPAONNX=/run/build/papertrail/deps/sherpaonnx
     sources:
       - type: dir
@@ -174,6 +176,15 @@ modules:
         url: https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz
         sha256: f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22
         dest: deps/qtkeychain
+      # QuickJS-ng and citeproc-js, for CSL styles, as cmake/QuickJS.cmake and cmake/Citeproc.cmake pin.
+      - type: archive
+        url: https://github.com/quickjs-ng/quickjs/archive/refs/tags/v0.17.0.tar.gz
+        sha256: 559bc4c420475e55c7ab4510adbc562f55d7524d75e8e89d79ce4bb02f5687d9
+        dest: deps/quickjs
+      - type: archive
+        url: https://registry.npmjs.org/citeproc/-/citeproc-2.4.63.tgz
+        sha256: 7f2b7714bfd1f4480aad9c34972eb5d48dc1b85876ba21b5aa9aee74156e2ccf
+        dest: deps/citeproc
       # sherpa-onnx's own build of its C library, for the natural voices, as cmake/SherpaOnnx.cmake pins.
       - type: archive
         only-arches: [x86_64]

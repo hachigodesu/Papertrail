@@ -7,6 +7,10 @@
 #include "ui/BackupsDialog.h"
 #include "ui/BulkChanges.h"
 #include "ui/CitationActions.h"
+#include "citation/CslThread.h"
+#include "citation/CslStyles.h"
+#include "core/repo/CslStyleRepository.h"
+#include "ui/CitationStylesDialog.h"
 #include "ui/TransferDialogs.h"
 #include "ui/DetailsPanel.h"
 #include "ui/FilterSidebar.h"
@@ -67,6 +71,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QTextBrowser>
 #include <QtTest>
 
 using namespace papertrail;
@@ -1853,6 +1858,126 @@ private slots:
         QVERIFY(!citations->copyReferences(tooMany));
     }
 
+    void cslStylesAreCopiedInTheBackgroundAndCanBeAdded()
+    {
+        const qint64 id = addCitable(QStringLiteral("Dent"), QStringLiteral("Carla"), QStringLiteral("Why Do Models Fail"), 2019);
+        openWindow();
+        CitationActions *citations = m_window->citations();
+        const QString nature = citation::cslStyleKey(QStringLiteral("http://www.zotero.org/styles/nature"));
+        citations->setStyleKey(nature);
+        QCOMPARE(m_session->settings().value(QStringLiteral("citation.style")).toString(), nature);
+        QCOMPARE(citations->recentStyleKeys(), QStringList{nature});
+
+        // Copied once citeproc-js has made it, without the window waiting.
+        QSignalSpy copied(citations, &CitationActions::copyFinished);
+        QVERIFY(citations->copyReferences({id}));
+        QVERIFY(citations->isCopying());
+        QVERIFY(copied.wait(60000));
+        QCOMPARE(copied.last().at(0).toBool(), true);
+        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("1. Dent, C. Why Do Models Fail.")),
+                 qPrintable(QApplication::clipboard()->text()));
+        QVERIFY(QApplication::clipboard()->mimeData()->html().contains(QStringLiteral("<i>Made-Up Review</i>")));
+        QVERIFY(citations->copyInTextCitation({id}));
+        QVERIFY(copied.wait(60000));
+        QVERIFY2(QApplication::clipboard()->mimeData()->html().contains(QStringLiteral("<sup>1</sup>")),
+                 qPrintable(QApplication::clipboard()->mimeData()->html()));
+
+        // The menu says which, and offers it again among the hand-written ones.
+        QMenu menu;
+        citations->fillCiteMenu(&menu, 1, [id] { return QList<qint64>{id}; });
+        QCOMPARE(menu.findChild<QAction *>(QStringLiteral("copyReferences"))->text(), QStringLiteral("Copy reference (Nature)"));
+        QMenu *styles = menu.findChild<QMenu *>(QStringLiteral("citationStyles"));
+        QVERIFY(styles);
+        int checkable = 0;
+        for (QAction *action : styles->actions()) {
+            checkable += action->isCheckable() ? 1 : 0;
+            if (action->data().toString() == nature)
+                QVERIFY(action->isChecked());
+        }
+        QCOMPARE(checkable, 5);
+
+        // A note style's citation is its note.
+        citations->setStyleKey(citation::cslStyleKey(QStringLiteral("http://www.zotero.org/styles/chicago-note-bibliography")));
+        QMenu notes;
+        citations->fillCiteMenu(&notes, 1, [id] { return QList<qint64>{id}; });
+        QVERIFY(notes.findChild<QAction *>(QStringLiteral("copyInText"))->text().startsWith(QStringLiteral("Copy note (")));
+
+        // A style this library doesn't have is said so, and Harvard is used.
+        citations->setStyleKey(citation::cslStyleKey(QStringLiteral("http://example.org/styles/gone")));
+        QSignalSpy said(citations, &CitationActions::message);
+        QVERIFY(citations->copyReferences({id}));
+        QVERIFY(!citations->isCopying());
+        QVERIFY(QApplication::clipboard()->text().startsWith(QStringLiteral("Dent, C., 2019.")));
+        QVERIFY(said.first().at(0).toString().contains(QStringLiteral("Harvard is used instead")));
+
+        // The styles dialog previews the publications chosen, and adds a style from a file once it's been tried.
+        CitationStylesDialog *dialog = citations->showStylesDialog({id});
+        QVERIFY(dialog);
+        QSignalSpy previewed(dialog, &CitationStylesDialog::previewShown);
+        dialog->choose(nature);
+        QVERIFY(previewed.wait(60000));
+        QVERIFY2(dialog->preview()->toPlainText().contains(QStringLiteral("Why Do Models Fail")), qPrintable(dialog->preview()->toPlainText()));
+        dialog->search()->setText(QStringLiteral("nature"));
+        int shown = 0;
+        for (int g = 0; g < dialog->styleList()->topLevelItemCount(); ++g) {
+            for (int i = 0; i < dialog->styleList()->topLevelItem(g)->childCount(); ++i)
+                shown += dialog->styleList()->topLevelItem(g)->child(i)->isHidden() ? 0 : 1;
+        }
+        QCOMPARE(shown, 1);
+        dialog->search()->clear();
+
+        QSignalSpy added(dialog, &CitationStylesDialog::addFinished);
+        const QString folder = QStringLiteral(PAPERTRAIL_TEST_FIXTURES "/csl/styles/");
+        dialog->addStyleFile(folder + QStringLiteral("not-a-style.csl"));
+        QCOMPARE(added.size(), 1);
+        QCOMPARE(added.last().at(0).toBool(), false);
+        dialog->addStyleFile(folder + QStringLiteral("orphan.csl"));
+        QVERIFY(added.last().at(1).toString().contains(QStringLiteral("Add its parent style first")));
+        dialog->addStyleFile(QStringLiteral(PAPERTRAIL_TEST_FIXTURES "/../../data/csl/styles/nature.csl"));
+        QVERIFY(added.last().at(1).toString().contains(QStringLiteral("comes with Papertrail already")));
+        dialog->addStyleFile(folder + QStringLiteral("tiny.csl"));
+        QVERIFY(added.wait(60000));
+        QVERIFY2(added.last().at(0).toBool(), qPrintable(added.last().at(1).toString()));
+        const QString tiny = citation::cslStyleKey(QStringLiteral("http://example.org/styles/tiny"));
+        QCOMPARE(dialog->chosenKey(), tiny);
+        // A style that fans out until it's stopped isn't kept.
+        citations->cslThread()->setLimits(std::chrono::milliseconds(2000), std::chrono::milliseconds(0));
+        dialog->addStyleFile(folder + QStringLiteral("fan-out.csl"));
+        QVERIFY(added.wait(60000));
+        QCOMPARE(added.last().at(0).toBool(), false);
+        citations->cslThread()->setLimits(std::chrono::milliseconds(60000), std::chrono::milliseconds(100));
+        QCOMPARE(core::CslStyleRepository(m_session->database()).all().size(), 1);
+
+        dialog->useChosen();
+        QCOMPARE(citations->styleKey(), tiny);
+        QCOMPARE(citations->styleTitle(tiny), QStringLiteral("Made-up Tiny Style"));
+
+        // Settings offers it among the rest, and the language styles write in.
+        SettingsActions actions;
+        actions.citations = citations;
+        SettingsDialog settings(*m_session, actions, m_window.get());
+        QComboBox *box = settings.citationStyleBox();
+        QVERIFY(box);
+        QCOMPARE(box->currentData().toString(), tiny);
+        box->setCurrentIndex(box->findData(nature));
+        emit box->activated(box->currentIndex());
+        QCOMPARE(citations->styleKey(), nature);
+        QComboBox *locale = settings.citationLocaleBox();
+        locale->setCurrentIndex(locale->findData(QStringLiteral("de-DE")));
+        emit locale->activated(locale->currentIndex());
+        QCOMPARE(m_session->settings().value(QStringLiteral("citation.locale")).toString(), QStringLiteral("de-DE"));
+        m_session->settings().setValue(QStringLiteral("citation.locale"), QString());
+
+        // Removing the style in use goes back to Harvard.
+        citations->setStyleKey(tiny);
+        dialog->choose(tiny);
+        dialog->removeChosen();
+        QVERIFY(core::CslStyleRepository(m_session->database()).all().isEmpty());
+        QCOMPARE(citations->styleKey(), QStringLiteral("harvard"));
+        QVERIFY(!citations->recentStyleKeys().contains(tiny));
+        dialog->close();
+    }
+
     void theCiteMenuOffersStylesAndSaysWhatsChosen()
     {
         const qint64 id = addCitable(QStringLiteral("Dent"), QStringLiteral("Carla"), QStringLiteral("Why Do Models Fail"), 2019);
@@ -1870,10 +1995,17 @@ private slots:
                 styles = action->menu();
         }
         QVERIFY(styles);
-        QCOMPARE(styles->actions().size(), 4);
-        for (QAction *action : styles->actions())
+        // The four hand-written styles, then a way to every other.
+        QList<QAction *> choices;
+        for (QAction *action : styles->actions()) {
+            if (action->isCheckable())
+                choices << action;
+        }
+        QCOMPARE(choices.size(), 4);
+        for (QAction *action : choices)
             QCOMPARE(action->isChecked(), action->text() == QStringLiteral("IEEE"));
-        styles->actions().at(3)->trigger();
+        QCOMPARE(styles->actions().last()->text(), QStringLiteral("More styles..."));
+        choices.at(3)->trigger();
         QCOMPARE(citations->style(), citation::CitationStyle::Chicago);
 
         menu.actions().at(0)->trigger();

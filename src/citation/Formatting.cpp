@@ -7,19 +7,27 @@ namespace papertrail::citation {
 
 RichText &RichText::add(const QString &text, bool italicText)
 {
-    if (text.isEmpty())
+    Run run;
+    run.text = text;
+    run.italic = italicText;
+    return add(run);
+}
+
+RichText &RichText::add(const Run &run)
+{
+    if (run.text.isEmpty())
         return *this;
-    if (!m_runs.isEmpty() && m_runs.last().italic == italicText)
-        m_runs.last().text += text;
+    if (!m_runs.isEmpty() && m_runs.last().sameStyle(run))
+        m_runs.last().text += run.text;
     else
-        m_runs << Run{text, italicText};
+        m_runs << run;
     return *this;
 }
 
 RichText &RichText::append(const RichText &other)
 {
     for (const Run &run : other.m_runs)
-        add(run.text, run.italic);
+        add(run);
     return *this;
 }
 
@@ -74,8 +82,20 @@ QString RichText::plain() const
 QString RichText::html() const
 {
     QString text;
-    for (const Run &run : m_runs)
-        text += run.italic ? QStringLiteral("<i>") + run.text.toHtmlEscaped() + QStringLiteral("</i>") : run.text.toHtmlEscaped();
+    for (const Run &run : m_runs) {
+        QString part = run.text.toHtmlEscaped();
+        if (run.italic)
+            part = QStringLiteral("<i>") + part + QStringLiteral("</i>");
+        if (run.bold)
+            part = QStringLiteral("<b>") + part + QStringLiteral("</b>");
+        if (run.smallCaps)
+            part = QStringLiteral("<span style=\"font-variant:small-caps\">") + part + QStringLiteral("</span>");
+        if (run.position == Position::Superscript)
+            part = QStringLiteral("<sup>") + part + QStringLiteral("</sup>");
+        else if (run.position == Position::Subscript)
+            part = QStringLiteral("<sub>") + part + QStringLiteral("</sub>");
+        text += part;
+    }
     return text.simplified();
 }
 

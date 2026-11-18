@@ -1,0 +1,78 @@
+[article-seven-authors]
+ref: Alpha, Anna, et al. “Collaborative Pretend Measurements.” *Journal of Imaginary Findings*, vol. 4, no. 1, 2022, pp. 1496–500, https://example.org/paper.
+cite: (Alpha et al.)
+
+[report]
+ref: *Annual Report on Pretend Data*. EA-2020-04, Example Agency, 2020, https://example.org/report.pdf.
+cite: (*Annual Report on Pretend Data*)
+
+[article-print]
+ref: Dent, Carla. “Why Do Models Fail?” *Made-Up Review*, vol. 12, 2019, pp. 101–08.
+cite: (Dent)
+
+[edited-book]
+ref: Editor, Eve, and Frank Compiler, editors. *Collected Pretend Essays*. Example Press, 2015.
+cite: (Editor and Compiler)
+
+[article-no-author]
+ref: “Editorial.” *Pretend Letters*, vol. 1, no. 1, 2020, p. 1.
+cite: (“Editorial”)
+
+[article]
+ref: Example, Ada Beatrice, and Ben Sample. “Lattice Vibrations in Pretend Crystals.” *Journal of Imaginary Findings*, vol. 3, no. 2, May 2021, pp. 43–70, https://doi.org/10.5555/jif.2021.0002.
+cite: (Example and Sample)
+
+[document]
+ref: Example Charity. “Guidance on Pretend Things.” https://example.org/guidance. Accessed 7 Nov. 2026.
+cite: (Example Charity)
+
+[standard]
+ref: Example Standards Body. *Specification for Pretend Bolts*. ESB 1234, Example Standards Body, 2019.
+cite: (Example Standards Body)
+
+[book]
+ref: Fiction, Dana. *Imaginary Structures: A Practical Guide*. 3rd ed., Example Press, 2018.
+cite: (Fiction)
+
+[preprint]
+ref: Haddad, Noor. “Sampling Made Simple.” arXiv:2101.00001, arXiv, Jan. 2021, https://arxiv.org/abs/2101.00001.
+cite: (Haddad)
+
+[issue]
+ref: *Journal of Imaginary Findings*. vol. 3, no. 2, May 2021.
+cite: (*Journal of Imaginary Findings*)
+
+[proceedings]
+ref: Lee, Kim, editor. *Proceedings of the Made-Up Conference on Examples*. Example Society, 2016.
+cite: (Lee)
+
+[case_uk]
+ref: *Made-Up Holdings Ltd v Another Example Plc* [2021] EWCA Civ 1234, [2021] 1 WLR 567
+cite: (*Made-Up Holdings Ltd v. Another Example Plc*)
+
+[dissertation]
+ref: Novak, Mia. *Pretend Materials in Practice*. 2017. Example Institute, MSc.
+cite: (Novak)
+
+[thesis]
+ref: O’Neill, Liam. *Pretend Materials Under Stress*. 2020, https://repository.example.org/123. University of Examples, PhD.
+cite: (O’Neill)
+
+[manual]
+ref: *PX-100 Pretend Voltage Regulator*. Version C, EXD-0042, Example Devices, 2023, https://example.org/px100.pdf.
+cite: (*PX-100 Pretend Voltage Regulator*)
+
+[case_us]
+ref: *Sample v. Example County Board*, 12 F.4th 345 (9th Cir. 2021)
+cite: (*Sample v Example County Board*)
+
+[paper]
+ref: Tanaka, Hiro, et al. “Fast Pretend Sorting.” *Proceedings of the Made-Up Conference on Examples*, 2016, pp. 195–203, https://doi.org/10.5555/mce.2016.17.
+cite: (Tanaka et al.)
+
+[chapter]
+ref: Writer, Gina. “A Chapter on Nothing.” *Collected Pretend Essays*, edited by Eve Editor, Example Press, 2015, pp. 37–49.
+cite: (Writer)
+
+[all]
+cite: (Example and Sample; Dent; Alpha et al.; “Editorial”; Fiction; Editor and Compiler; Writer; Tanaka et al.; Lee; *Journal of Imaginary Findings*; O’Neill; Novak; *Annual Report on Pretend Data*; Example Standards Body; Haddad; Example Charity; *Sample v Example County Board*; *Made-Up Holdings Ltd v. Another Example Plc*; *PX-100 Pretend Voltage Regulator*)

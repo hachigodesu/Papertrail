@@ -33,7 +33,15 @@ bool isValid(const SettingDefinition &definition, const QJsonValue &value)
 {
     if (value.type() != definition.defaultValue.type())
         return false;
-    return definition.allowedValues.isEmpty() || definition.allowedValues.contains(value.toString());
+    if (definition.allowedValues.isEmpty() || definition.allowedValues.contains(value.toString()))
+        return true;
+    // A value ending in * allows anything starting with what's before it, and something more.
+    const QString text = value.toString();
+    for (const QString &allowed : definition.allowedValues) {
+        if (allowed.endsWith(u'*') && text.size() >= allowed.size() && text.startsWith(allowed.chopped(1)))
+            return true;
+    }
+    return false;
 }
 
 // QJsonDocument only stores objects and arrays, so each value is held in a one-item array.
@@ -108,8 +116,13 @@ const QList<SettingDefinition> &settingDefinitions()
         // and which Wikipedia, as its language's code. Empty means the window's language.
         {QStringLiteral("lookup.online"), false, K::Value, {}},
         {QStringLiteral("lookup.language"), QStringLiteral(""), K::Value, {}},
+        // One of the hand-written styles, or "csl:" and a CSL style's id, bundled or added to this library.
         {QStringLiteral("citation.style"), QStringLiteral("harvard"), K::Value,
-         {QStringLiteral("harvard"), QStringLiteral("apa"), QStringLiteral("ieee"), QStringLiteral("chicago")}},
+         {QStringLiteral("harvard"), QStringLiteral("apa"), QStringLiteral("ieee"), QStringLiteral("chicago"), QStringLiteral("csl:*")}},
+        // The locale CSL styles are shown in, such as "de-DE". Empty means each style's own.
+        {QStringLiteral("citation.locale"), QStringLiteral(""), K::Value, {}},
+        // The CSL styles chosen most recently, newest first, one key a line, for the Style menu.
+        {QStringLiteral("citation.recent_styles"), QStringLiteral(""), K::Value, {}},
     };
     return definitions;
 }

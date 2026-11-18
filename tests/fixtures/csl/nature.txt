@@ -1,0 +1,78 @@
+[article]
+ref: 1. Example, A. B. & Sample, B. Lattice Vibrations in Pretend Crystals. *Journal of Imaginary Findings* **3**, 43–70 (2021).
+cite: ^1^
+
+[article-print]
+ref: 2. Dent, C. Why Do Models Fail? *Made-Up Review* **12**, 101–108 (2019).
+cite: ^1^
+
+[article-seven-authors]
+ref: 3. Alpha, A. *et al.* Collaborative Pretend Measurements. *Journal of Imaginary Findings* **4**, 1496–1500 (2022).
+cite: ^1^
+
+[article-no-author]
+ref: 4. Editorial. *Pretend Letters* **1**, 1 (2020).
+cite: ^1^
+
+[book]
+ref: 5. Fiction, D. *Imaginary Structures: A Practical Guide*. (Example Press, Bristol, 2018).
+cite: ^1^
+
+[edited-book]
+ref: 6. *Collected Pretend Essays*. (Example Press, 2015).
+cite: ^1^
+
+[chapter]
+ref: 7. Writer, G. A Chapter on Nothing. in *Collected Pretend Essays* (ed. Editor, E.) 37–49 (Example Press, Leeds, 2015).
+cite: ^1^
+
+[paper]
+ref: 8. Tanaka, H., Garcia, I. & Park, J. Fast Pretend Sorting. in *Proceedings of the Made-Up Conference on Examples* 195–203 (Example Society, 2016). doi:10.5555/mce.2016.17.
+cite: ^1^
+
+[proceedings]
+ref: 9. *Proceedings of the Made-Up Conference on Examples*. (Example Society, Paris, 2016).
+cite: ^1^
+
+[issue]
+ref: 10. Journal of Imaginary Findings. vol. 3 (2021).
+cite: ^1^
+
+[thesis]
+ref: 11. O’Neill, L. Pretend Materials Under Stress. (University of Examples, 2020).
+cite: ^1^
+
+[dissertation]
+ref: 12. Novak, M. Pretend Materials in Practice. (Example Institute, 2017).
+cite: ^1^
+
+[report]
+ref: 13. *Annual Report on Pretend Data*. https://example.org/report.pdf (2020).
+cite: ^1^
+
+[standard]
+ref: 14. Specification for Pretend Bolts. (2019).
+cite: ^1^
+
+[preprint]
+ref: 15. Haddad, N. Sampling Made Simple. Preprint at https://arxiv.org/abs/2101.00001 (2021).
+cite: ^1^
+
+[document]
+ref: 16. Example Charity. Guidance on Pretend Things.
+cite: ^1^
+
+[case_us]
+ref: 17. *Sample v. Example County Board*, 12 F.4th 345 (9th Cir. 2021)
+cite: ^1^
+
+[case_uk]
+ref: 18. *Made-Up Holdings Ltd v Another Example Plc* [2021] EWCA Civ 1234, [2021] 1 WLR 567
+cite: ^1^
+
+[manual]
+ref: 19. *PX-100 Pretend Voltage Regulator*. https://example.org/px100.pdf (2023).
+cite: ^1^
+
+[all]
+cite: ^1–19^

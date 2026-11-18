@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE style [<!ENTITY big "big">]>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info><title>Made-up &big; Style</title><id>http://example.org/styles/dtd</id></info>
+  <citation><layout><text value="x"/></layout></citation>
+</style>

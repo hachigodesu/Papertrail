@@ -9,15 +9,26 @@
 
 namespace papertrail::citation {
 
-// Text with italic parts, which is all the styling a reference needs.
+// Text with italic parts, which is all the styling the hand-written styles need, and bold, small capitals,
+// superscript and subscript, which CSL styles can ask for too.
 class RichText {
 public:
+    enum class Position { Baseline, Superscript, Subscript };
     struct Run {
         QString text;
         bool italic = false;
+        bool bold = false;
+        bool smallCaps = false;
+        Position position = Position::Baseline;
+
+        bool sameStyle(const Run &other) const
+        {
+            return italic == other.italic && bold == other.bold && smallCaps == other.smallCaps && position == other.position;
+        }
     };
 
     RichText &add(const QString &text, bool italic = false);
+    RichText &add(const Run &run); // Joined to the last run if it's styled the same.
     RichText &italic(const QString &text) { return add(text, true); }
     RichText &append(const RichText &other);
 
@@ -27,7 +38,7 @@ public:
     bool isEmpty() const;
     QChar lastChar() const;
     QString plain() const;
-    QString html() const; // Escaped, with <i> for italics.
+    QString html() const; // Escaped, with <i>, <b>, <sup>, <sub> and a span for small capitals.
     const QList<Run> &runs() const { return m_runs; }
 
 private:

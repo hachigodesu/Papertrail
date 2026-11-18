@@ -474,6 +474,14 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
                                {QStringLiteral("recordedAt"), double(s.int64At(6))}};
         });
 
+    // CSL styles added from files, whole, since another computer won't have them.
+    const QJsonArray cslStyleArray = rows(db, "SELECT id, title, xml, added_at FROM csl_style ORDER BY id", [](Statement &s) {
+        return QJsonObject{{QStringLiteral("id"), s.textAt(0)},
+                           {QStringLiteral("title"), s.textAt(1)},
+                           {QStringLiteral("xml"), s.textAt(2)},
+                           {QStringLiteral("addedAt"), double(s.int64At(3))}};
+    });
+
     const QJsonArray summaryArray = rows(
         db,
         "SELECT s.uuid, p.uuid, s.model, s.effort, s.basis, s.identification_unsure, s.summary_text, s.sources_json, "
@@ -535,6 +543,7 @@ QByteArray buildBundle(Database &db, ExportReport &report, const Progress &progr
     zip.add(QStringLiteral("bookmarks.json"), json(bookmarkArray));
     zip.add(QStringLiteral("distinct.json"), json(distinctArray));
     zip.add(QStringLiteral("stitching.json"), json(stitchArray));
+    zip.add(QStringLiteral("csl_styles.json"), json(cslStyleArray));
     zip.add(QStringLiteral("reading.json"), json(readingArray));
     zip.add(QStringLiteral("provenance.json"), json(provenanceArray));
     zip.add(QStringLiteral("summaries.json"), json(summaryArray));
@@ -612,6 +621,8 @@ std::optional<Bundle> readBundle(const QByteArray &data, QString *error)
         return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
     if (zip.contains(QStringLiteral("stitching.json")) && !array(QStringLiteral("stitching.json"), bundle.stitchOrders))
         return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
+    if (zip.contains(QStringLiteral("csl_styles.json")) && !array(QStringLiteral("csl_styles.json"), bundle.cslStyles))
+        return fail(QStringLiteral("This export is damaged: %1.").arg(zip.error().isEmpty() ? QStringLiteral("a part can't be read") : zip.error()));
     if (zip.contains(QStringLiteral("settings.json"))) {
         const std::optional<QByteArray> part = zip.read(QStringLiteral("settings.json"));
         if (!part)
@@ -668,8 +679,11 @@ public:
             importSummaries();
             importDistinct();
         }
-        if (m_options.parts.settings)
+        if (m_options.parts.settings) {
+            // Before the settings, which may choose one of them.
+            importCslStyles();
             m_report.settings = core::SettingsStore(m_db).importAll(m_bundle.settings);
+        }
         return true;
     }
 
@@ -1240,6 +1254,36 @@ private:
         }
         object.insert(QStringLiteral("parts"), parts);
         return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+    }
+
+    // ---- CSL styles added from files. One here is only replaced by a later one with the same id. Each is checked
+    // again before it's used, so here it only has to look like a style.
+    void importCslStyles()
+    {
+        constexpr qsizetype kMaxStyle = 1024 * 1024;
+        auto existing = m_db.prepare("SELECT added_at FROM csl_style WHERE id = ?");
+        auto put = m_db.prepare("INSERT INTO csl_style (id, title, xml, added_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE "
+                                "SET title = excluded.title, xml = excluded.xml, added_at = excluded.added_at");
+        for (const QJsonValue &value : m_bundle.cslStyles) {
+            const QJsonObject style = value.toObject();
+            const QString id = style.value(QStringLiteral("id")).toString().trimmed();
+            const QString title = style.value(QStringLiteral("title")).toString().simplified();
+            const QString xml = style.value(QStringLiteral("xml")).toString();
+            const qint64 addedAt = int64Value(style.value(QStringLiteral("addedAt")));
+            if (id.isEmpty() || id.size() > 2000 || title.isEmpty() || xml.isEmpty() || xml.toUtf8().size() > kMaxStyle
+                || !xml.contains(QStringLiteral("<style")))
+                continue;
+            existing->reset();
+            existing->bind(1, id);
+            if (existing->step() && existing->int64At(0) >= addedAt)
+                continue;
+            put->reset();
+            put->bind(1, id);
+            put->bind(2, title.left(500));
+            put->bind(3, xml);
+            put->bind(4, addedAt);
+            put->step();
+        }
     }
 
     // ---- Pairs said not to be the same work. Only adds, and only where both are here.

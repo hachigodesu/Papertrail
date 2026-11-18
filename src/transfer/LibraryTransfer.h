@@ -62,6 +62,7 @@ struct Bundle {
     QJsonArray removed; // Files of publications removed by hand, by contents, so they stay out here too.
     QJsonArray distinctPublications; // From 1.4.0 on: pairs said not to be the same work, by uuid.
     QJsonArray stitchOrders; // From 1.5.0 on: the order of each book in a zip's parts, by the zip's contents.
+    QJsonArray cslStyles; // From 1.6.0 on: CSL styles added from files, whole, by their ids.
     QJsonObject settings;
 };
 

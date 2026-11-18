@@ -6,6 +6,7 @@
 #include "core/repo/FileRepository.h"
 #include "core/repo/BookmarkRepository.h"
 #include "core/repo/CollectionRepository.h"
+#include "core/repo/CslStyleRepository.h"
 #include "core/repo/PublicationMerge.h"
 #include "core/repo/PublicationRepository.h"
 #include "core/repo/ReadingStateRepository.h"
@@ -1111,6 +1112,28 @@ private:
         insert->bind(1, kind);
         insert->bind(2, payload);
         insert->step();
+    }
+
+    void addedCslStylesAreKeptWhole()
+    {
+        CslStyleRepository styles(*m_db);
+        QVERIFY(styles.all().isEmpty());
+        const QByteArray xml = "<?xml version=\"1.0\"?><style xmlns=\"http://purl.org/net/xbiblio/csl\"/>";
+        styles.put(QStringLiteral("http://example.org/styles/b"), QStringLiteral("Made-up B"), xml, 5);
+        styles.put(QStringLiteral("http://example.org/styles/a"), QStringLiteral("Made-up A"), xml + " ", 6);
+        const QList<AddedCslStyle> all = styles.all();
+        QCOMPARE(all.size(), 2);
+        QCOMPARE(all.first().title, QStringLiteral("Made-up A")); // By title.
+        QVERIFY(all.first().xml.isEmpty());                    // Without its XML.
+        QCOMPARE(styles.xml(QStringLiteral("http://example.org/styles/b")), xml);
+        QCOMPARE(styles.get(QStringLiteral("http://example.org/styles/b"))->addedAt, qint64(5));
+        // The same id again replaces it.
+        styles.put(QStringLiteral("http://example.org/styles/b"), QStringLiteral("Made-up B, newer"), xml, 9);
+        QCOMPARE(styles.all().size(), 2);
+        QCOMPARE(styles.get(QStringLiteral("http://example.org/styles/b"))->title, QStringLiteral("Made-up B, newer"));
+        styles.remove(QStringLiteral("http://example.org/styles/b"));
+        QVERIFY(styles.xml(QStringLiteral("http://example.org/styles/b")).isEmpty());
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, styles.put(QString(), QStringLiteral("x"), xml));
     }
 
     int count(const char *sql)

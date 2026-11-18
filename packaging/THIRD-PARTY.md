@@ -12,6 +12,9 @@ Packages of Papertrail include other free software. Each package includes the li
 | DjVuLibre | Reading DjVu | GPL-2.0-or-later | https://djvu.sourceforge.net |
 | libmobi | Reading Kindle KF8 books | LGPL-3.0-or-later | https://github.com/bfabiszewski/libmobi |
 | SQLite | The library's database | Public domain | https://sqlite.org |
+| QuickJS-ng 0.17.0 | Running citeproc-js, with no access to files or the network | MIT | https://github.com/quickjs-ng/quickjs |
+| citeproc-js 2.4.63 | Citing in CSL styles | AGPL-3.0-or-later (offered under CPAL-1.0 or AGPL-3.0-or-later) | https://github.com/Juris-M/citeproc-js |
+| CSL styles and locales | The CSL citation styles and their languages that come with Papertrail | CC-BY-SA-3.0 | https://github.com/citation-style-language/styles |
 | QtKeychain | Keeping the Claude API key in the system's credential store | BSD-3-Clause | https://github.com/frankosterfeld/qtkeychain |
 | zlib | Library exports | Zlib | https://zlib.net |
 | Tesseract | Recognising the text of scanned pages | Apache-2.0 | https://github.com/tesseract-ocr/tesseract |

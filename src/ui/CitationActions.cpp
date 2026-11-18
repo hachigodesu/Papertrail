@@ -1,6 +1,9 @@
 #include "ui/CitationActions.h"
 
+#include "citation/CslThread.h"
 #include "core/db/Database.h"
+#include "core/repo/CslStyleRepository.h"
+#include "ui/CitationStylesDialog.h"
 #include "ui/LibrarySession.h"
 
 #include <QActionGroup>
@@ -37,18 +40,95 @@ CitationActions::~CitationActions()
     }
 }
 
+QString CitationActions::styleKey() const
+{
+    try {
+        return m_session.settings().value(QStringLiteral("citation.style")).toString();
+    } catch (const std::exception &) {
+        return citation::styleKey(CitationStyle::Harvard);
+    }
+}
+
+void CitationActions::setStyleKey(const QString &key)
+{
+    try {
+        m_session.settings().setValue(QStringLiteral("citation.style"), key);
+        if (isCslStyleKey(key)) {
+            QStringList recent = recentStyleKeys();
+            recent.removeAll(key);
+            recent.prepend(key);
+            m_session.settings().setValue(QStringLiteral("citation.recent_styles"), recent.mid(0, kRecentStyles).join(u'\n'));
+        }
+        emit styleChanged(key);
+    } catch (const std::exception &error) {
+        emit message(tr("The citation style couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
+    }
+}
+
 CitationStyle CitationActions::style() const
 {
-    return styleFromKey(m_session.settings().value(QStringLiteral("citation.style")).toString()).value_or(CitationStyle::Harvard);
+    return styleFromKey(styleKey()).value_or(CitationStyle::Harvard);
 }
 
 void CitationActions::setStyle(CitationStyle chosen)
 {
-    try {
-        m_session.settings().setValue(QStringLiteral("citation.style"), styleKey(chosen));
-    } catch (const std::exception &error) {
-        emit message(tr("The citation style couldn't be saved: %1").arg(QString::fromUtf8(error.what())));
+    setStyleKey(citation::styleKey(chosen));
+}
+
+QString CitationActions::styleTitle(const QString &key) const
+{
+    if (const std::optional<CitationStyle> builtIn = styleFromKey(key))
+        return styleName(*builtIn);
+    const QString id = cslStyleId(key);
+    for (const CslStyleInfo &style : bundledCslStyles()) {
+        if (style.id == id)
+            return style.title;
     }
+    try {
+        if (const std::optional<core::AddedCslStyle> added = core::CslStyleRepository(m_session.database()).get(id))
+            return added->title;
+    } catch (const std::exception &) {
+    }
+    return id.isEmpty() ? styleName(CitationStyle::Harvard) : id;
+}
+
+QStringList CitationActions::recentStyleKeys() const
+{
+    QStringList recent;
+    try {
+        for (const QString &key : m_session.settings().value(QStringLiteral("citation.recent_styles")).toString().split(u'\n')) {
+            if (isCslStyleKey(key) && !recent.contains(key))
+                recent << key;
+        }
+    } catch (const std::exception &) {
+    }
+    return recent.mid(0, kRecentStyles);
+}
+
+std::optional<CslLayout> CitationActions::cslLayout(const QString &key, QString *error) const
+{
+    QString locale;
+    try {
+        locale = m_session.settings().value(QStringLiteral("citation.locale")).toString();
+    } catch (const std::exception &) {
+    }
+    core::Database &db = m_session.database();
+    return resolveCslStyle(cslStyleId(key), locale, [&db](const QString &id) {
+        try {
+            return core::CslStyleRepository(db).xml(id);
+        } catch (const std::exception &) {
+            return QByteArray();
+        }
+    }, error);
+}
+
+CslThread *CitationActions::cslThread()
+{
+    if (!m_csl) {
+        m_csl = new CslThread(this);
+        connect(m_csl, &CslThread::finished, this, &CitationActions::onCslFinished);
+    }
+    return m_csl;
 }
 
 StyleOptions CitationActions::styleOptions() const
@@ -93,25 +173,50 @@ void CitationActions::fillCiteMenu(QMenu *menu, qint64 count, const IdSource &id
         exporting->setEnabled(count > 0 && !isExporting());
         return;
     }
-    const QString name = styleName(style());
+    const QString current = styleKey();
+    const QString name = styleTitle(current);
+    // A note style's citation is its footnote.
+    bool note = false;
+    if (isCslStyleKey(current)) {
+        if (const std::optional<CslLayout> layout = cslLayout(current))
+            note = readCslStyle(layout->xml).value_or(CslStyleInfo{}).isNote;
+    }
     QAction *references = menu->addAction(count == 1 ? tr("Copy reference (%1)").arg(name)
                                                      : tr("Copy %1 references (%2)").arg(count).arg(name),
                                           this, [this, ids] { copyReferences(ids()); });
-    QAction *inText = menu->addAction(tr("Copy in-text citation (%1)").arg(name), this, [this, ids] { copyInTextCitation(ids()); });
+    references->setObjectName(QStringLiteral("copyReferences"));
+    QAction *inText = menu->addAction(note ? tr("Copy note (%1)").arg(name) : tr("Copy in-text citation (%1)").arg(name), this,
+                                      [this, ids] { copyInTextCitation(ids()); });
+    inText->setObjectName(QStringLiteral("copyInText"));
     references->setEnabled(canCopy);
     inText->setEnabled(canCopy);
     if (count > kMaxToCopy)
         references->setToolTip(tr("Too many to copy at once. Export them to a file instead."));
 
     QMenu *styles = menu->addMenu(tr("Style"));
+    styles->setObjectName(QStringLiteral("citationStyles"));
     auto *group = new QActionGroup(styles);
     group->setExclusive(true);
-    for (const CitationStyle option : allCitationStyles()) {
-        QAction *action = styles->addAction(styleName(option), this, [this, option] { setStyle(option); });
+    const auto offer = [&](const QString &key) {
+        QAction *action = styles->addAction(styleTitle(key), this, [this, key] { setStyleKey(key); });
         action->setCheckable(true);
-        action->setChecked(option == style());
+        action->setChecked(key == current);
+        action->setData(key);
         group->addAction(action);
+    };
+    for (const CitationStyle option : allCitationStyles())
+        offer(citation::styleKey(option));
+    QStringList recent = recentStyleKeys();
+    if (isCslStyleKey(current) && !recent.contains(current))
+        recent.prepend(current);
+    if (!recent.isEmpty()) {
+        styles->addSeparator();
+        for (const QString &key : recent.mid(0, kRecentStyles))
+            offer(key);
     }
+    styles->addSeparator();
+    QAction *more = styles->addAction(tr("More styles..."), this, [this, ids] { showStylesDialog(ids()); });
+    more->setObjectName(QStringLiteral("moreCitationStyles"));
     menu->addSeparator();
     QAction *exporting = menu->addAction(count == 1 ? tr("Export citation...") : tr("Export %1 citations...").arg(count), this,
                                          [this, ids] { askAndExport(ids()); });
@@ -134,7 +239,55 @@ void putOnClipboard(const QList<RichText> &entries)
     QApplication::clipboard()->setMimeData(data);
 }
 
+// A reference is only as good as the details it's made from, and some of these have gaps.
+QString lackingText(const QList<CitationItem> &items)
+{
+    const auto lacking = std::count_if(items.cbegin(), items.cend(), [](const CitationItem &item) { return lacksDetails(item); });
+    if (lacking == 0)
+        return {};
+    return u' '
+        + (items.size() == 1 ? CitationActions::tr("It's missing details such as its authors, year or journal.")
+                             : CitationActions::tr("%1 of them are missing details such as their authors, year or journal.").arg(lacking))
+        + u' ' + CitationActions::tr("Look up details online can fill them in.");
+}
+
 } // namespace
+
+std::optional<CslLayout> CitationActions::cslToCopyIn()
+{
+    const QString key = styleKey();
+    if (!isCslStyleKey(key))
+        return std::nullopt;
+    QString error;
+    std::optional<CslLayout> layout = cslLayout(key, &error);
+    if (!layout)
+        emit message(tr("%1 can't be used, so Harvard is used instead: %2").arg(styleTitle(key), error));
+    return layout;
+}
+
+void CitationActions::startCslCopy(const CslLayout &layout, const QList<CitationItem> &items, bool references)
+{
+    m_copyRequest = cslThread()->render(QStringLiteral("copy"), references ? CslThread::Kind::References : CslThread::Kind::Citation,
+                                        layout, items, styleOptions());
+    emit message(references ? (items.size() == 1 ? tr("Copying a reference in %1...").arg(layout.style.title)
+                                                 : tr("Copying %1 references in %2...").arg(items.size()).arg(layout.style.title))
+                            : tr("Copying a citation in %1...").arg(layout.style.title));
+}
+
+void CitationActions::onCslFinished(qint64 request, const QList<RichText> &entries, const QList<int> &, const QString &error)
+{
+    if (request != m_copyRequest)
+        return;
+    m_copyRequest = 0;
+    if (!error.isEmpty()) {
+        emit message(tr("Nothing was copied: %1").arg(error));
+        emit copyFinished(false);
+        return;
+    }
+    putOnClipboard(entries);
+    emit message(m_copyText);
+    emit copyFinished(true);
+}
 
 bool CitationActions::copyReferences(const QList<qint64> &ids)
 {
@@ -143,18 +296,17 @@ bool CitationActions::copyReferences(const QList<qint64> &ids)
     const QList<CitationItem> items = itemsFor(ids);
     if (items.isEmpty())
         return false;
-    putOnClipboard(formatReferences(items, style(), styleOptions()).entries);
-    QString text = items.size() == 1 ? tr("Copied a reference in %1.").arg(styleName(style()))
-                                     : tr("Copied %1 references in %2.").arg(items.size()).arg(styleName(style()));
-    // A reference is only as good as the details it's made from, and some of these have gaps.
-    const auto lacking = std::count_if(items.cbegin(), items.cend(), [](const CitationItem &item) { return lacksDetails(item); });
-    if (lacking > 0) {
-        text += u' '
-            + (items.size() == 1 ? tr("It's missing details such as its authors, year or journal.")
-                                 : tr("%1 of them are missing details such as their authors, year or journal.").arg(lacking))
-            + u' ' + tr("Look up details online can fill them in.");
+    if (const std::optional<CslLayout> layout = cslToCopyIn()) {
+        m_copyText = (items.size() == 1 ? tr("Copied a reference in %1.").arg(layout->style.title)
+                                        : tr("Copied %1 references in %2.").arg(items.size()).arg(layout->style.title))
+            + lackingText(items);
+        startCslCopy(*layout, items, true);
+        return true;
     }
-    emit message(text);
+    putOnClipboard(formatReferences(items, style(), styleOptions()).entries);
+    const QString name = styleName(style());
+    emit message((items.size() == 1 ? tr("Copied a reference in %1.").arg(name) : tr("Copied %1 references in %2.").arg(items.size()).arg(name))
+                 + lackingText(items));
     return true;
 }
 
@@ -184,9 +336,28 @@ bool CitationActions::copyInTextCitation(const QList<qint64> &ids)
     const QList<CitationItem> items = itemsFor(ids);
     if (items.isEmpty())
         return false;
+    if (const std::optional<CslLayout> layout = cslToCopyIn()) {
+        const bool note = readCslStyle(layout->xml).value_or(CslStyleInfo{}).isNote;
+        m_copyText = note ? tr("Copied a note in %1.").arg(layout->style.title) : tr("Copied an in-text citation in %1.").arg(layout->style.title);
+        startCslCopy(*layout, items, false);
+        return true;
+    }
     putOnClipboard({combinedInTextCitation(items, style(), styleOptions())});
     emit message(tr("Copied an in-text citation in %1.").arg(styleName(style())));
     return true;
+}
+
+CitationStylesDialog *CitationActions::showStylesDialog(const QList<qint64> &ids)
+{
+    if (!m_stylesDialog) {
+        m_stylesDialog = new CitationStylesDialog(m_session, *this, m_window);
+        m_stylesDialog->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    m_stylesDialog->showPreviewOf(itemsFor(ids.mid(0, CitationStylesDialog::kMaxPreviewed)));
+    m_stylesDialog->show();
+    m_stylesDialog->raise();
+    m_stylesDialog->activateWindow();
+    return m_stylesDialog;
 }
 
 namespace {

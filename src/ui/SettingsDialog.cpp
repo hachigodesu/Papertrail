@@ -4,7 +4,11 @@
 
 #include <QSlider>
 
+#include "citation/CslStyles.h"
+#include "citation/Styles.h"
+#include "core/repo/CslStyleRepository.h"
 #include "core/settings/SettingsStore.h"
+#include "ui/CitationActions.h"
 #include "metadata/NaturalVoices.h"
 #include "metadata/OcrLanguages.h"
 #include "ui/LibrarySession.h"
@@ -219,6 +223,48 @@ SettingsDialog::SettingsDialog(LibrarySession &session, const SettingsActions &a
         layout->addWidget(scanned);
     }
 
+    if (CitationActions *citations = actions.citations) {
+        auto *citing = new QGroupBox(tr("Citations"), this);
+        auto *citingForm = new QFormLayout(citing);
+        auto *styleRow = new QHBoxLayout;
+        m_citationStyle = new QComboBox(citing);
+        m_citationStyle->setObjectName(QStringLiteral("citationStyle"));
+        m_citationStyle->setAccessibleName(tr("Citation style"));
+        m_citationStyle->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        m_citationStyle->setMinimumContentsLength(30);
+        fillCitationStyles(citations);
+        connect(m_citationStyle, &QComboBox::activated, this, [this, citations] {
+            citations->setStyleKey(m_citationStyle->currentData().toString());
+        });
+        // The styles dialog can add, remove or choose one while this is open.
+        connect(citations, &CitationActions::styleChanged, this, [this, citations] { fillCitationStyles(citations); });
+        styleRow->addWidget(m_citationStyle, 1);
+        auto *more = new QPushButton(tr("More styles..."), citing);
+        more->setObjectName(QStringLiteral("moreCitationStyles"));
+        more->setToolTip(tr("Every style, with a preview, and adding one from a file"));
+        connect(more, &QPushButton::clicked, this, [citations] { citations->showStylesDialog(); });
+        styleRow->addWidget(more);
+        citingForm->addRow(tr("Style:"), styleRow);
+
+        m_citationLocale = new QComboBox(citing);
+        m_citationLocale->setObjectName(QStringLiteral("citationLocale"));
+        m_citationLocale->setToolTip(tr("The language CSL styles write words such as \"edited by\" and months in"));
+        m_citationLocale->addItem(tr("Each style's own"), QString());
+        for (const citation::CslLocale &locale : citation::cslLocales())
+            m_citationLocale->addItem(QStringLiteral("%1 (%2)").arg(locale.name, locale.code), locale.code);
+        QString chosenLocale;
+        try {
+            chosenLocale = m_session.settings().value(QStringLiteral("citation.locale")).toString();
+        } catch (const std::exception &) {
+        }
+        m_citationLocale->setCurrentIndex(qMax(0, m_citationLocale->findData(chosenLocale)));
+        connect(m_citationLocale, &QComboBox::activated, this, [this] {
+            save(QStringLiteral("citation.locale"), m_citationLocale->currentData().toString());
+        });
+        citingForm->addRow(tr("Language for CSL styles:"), m_citationLocale);
+        layout->addWidget(citing);
+    }
+
     auto *online = new QGroupBox(tr("Online"), this);
     auto *onlineColumn = new QVBoxLayout(online);
     auto *onlineLayout = new QHBoxLayout;
@@ -356,6 +402,35 @@ QComboBox *SettingsDialog::choiceFor(const QString &key, const QList<QPair<QStri
     box->setCurrentIndex(qMax(0, box->findData(stored)));
     connect(box, &QComboBox::currentIndexChanged, this, [this, box, key] { save(key, box->currentData().toString()); });
     return box;
+}
+
+void SettingsDialog::fillCitationStyles(CitationActions *citations)
+{
+    if (!m_citationStyle)
+        return;
+    const QString current = citations->styleKey();
+    m_citationStyle->clear();
+    for (const citation::CitationStyle style : citation::allCitationStyles())
+        m_citationStyle->addItem(citation::styleName(style), citation::styleKey(style));
+    m_citationStyle->insertSeparator(m_citationStyle->count());
+    QList<QPair<QString, QString>> csl;
+    try {
+        for (const core::AddedCslStyle &style : core::CslStyleRepository(m_session.database()).all())
+            csl << qMakePair(style.title, citation::cslStyleKey(style.id));
+    } catch (const std::exception &) {
+    }
+    for (const citation::CslStyleInfo &style : citation::bundledCslStyles())
+        csl << qMakePair(style.title, citation::cslStyleKey(style.id));
+    std::sort(csl.begin(), csl.end(), [](const auto &a, const auto &b) { return QString::localeAwareCompare(a.first, b.first) < 0; });
+    for (const auto &[title, key] : std::as_const(csl))
+        m_citationStyle->addItem(title, key);
+    int index = m_citationStyle->findData(current);
+    if (index < 0) {
+        // Chosen, but no longer in this library.
+        m_citationStyle->addItem(citations->styleTitle(current), current);
+        index = m_citationStyle->count() - 1;
+    }
+    m_citationStyle->setCurrentIndex(index);
 }
 
 void SettingsDialog::save(const QString &key, const QJsonValue &value)

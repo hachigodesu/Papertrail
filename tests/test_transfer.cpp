@@ -770,6 +770,65 @@ private slots:
         QCOMPARE(highlightPage(to), 0);
     }
 
+    void addedCslStylesGoWithTheLibrary()
+    {
+        Library from;
+        addMadeUpStyle(from, 5);
+        SettingsStore(*from.db).setValue(QStringLiteral("citation.style"), QStringLiteral("csl:http://example.org/styles/made-up"));
+        ExportReport report;
+        QString error;
+        std::optional<Bundle> bundle = readBundle(buildBundle(*from.db, report), &error);
+        QVERIFY2(bundle, qPrintable(error));
+        QCOMPARE(bundle->cslStyles.size(), 1);
+
+        Library to;
+        importBundle(*to.db, *bundle, {});
+        QCOMPARE(to.text("SELECT title FROM csl_style"), QStringLiteral("Made-up Exported Style"));
+        QVERIFY(to.text("SELECT xml FROM csl_style").contains(QStringLiteral("made-up")));
+        QCOMPARE(SettingsStore(*to.db).value(QStringLiteral("citation.style")).toString(), QStringLiteral("csl:http://example.org/styles/made-up"));
+
+        // One here is only replaced by a later one.
+        to.db->exec("UPDATE csl_style SET title = 'Changed here', added_at = 9");
+        importBundle(*to.db, *bundle, {});
+        QCOMPARE(to.text("SELECT title FROM csl_style"), QStringLiteral("Changed here"));
+        to.db->exec("UPDATE csl_style SET added_at = 1");
+        importBundle(*to.db, *bundle, {});
+        QCOMPARE(to.text("SELECT title FROM csl_style"), QStringLiteral("Made-up Exported Style"));
+
+        // Something that isn't a style is left out.
+        QJsonObject junk{{QStringLiteral("id"), QStringLiteral("x")}, {QStringLiteral("title"), QStringLiteral("x")},
+                         {QStringLiteral("xml"), QStringLiteral("not xml")}, {QStringLiteral("addedAt"), 1}};
+        bundle->cslStyles = {junk};
+        Library other;
+        importBundle(*other.db, *bundle, {});
+        QCOMPARE(other.scalar("SELECT count(*) FROM csl_style"), qint64(0));
+    }
+
+    void anExportWithAddedStylesStillImports()
+    {
+        // Made once by 1.6.0, the first to keep them, and kept for the same reason as the others.
+        QString error;
+        const std::optional<Bundle> bundle
+            = readBundleFile(QStringLiteral(PAPERTRAIL_TEST_FIXTURES "/transfer/library-v1-csl.papertrail"), &error);
+        QVERIFY2(bundle, qPrintable(error));
+        QCOMPARE(bundle->cslStyles.size(), 1);
+        Library to;
+        importBundle(*to.db, *bundle, {});
+        QCOMPARE(to.scalar("SELECT count(*) FROM csl_style"), qint64(1));
+        QCOMPARE(to.text("SELECT id FROM csl_style"), QStringLiteral("http://example.org/styles/made-up"));
+    }
+
+    void writeCslFixtureWhenAsked()
+    {
+        const QString path = qEnvironmentVariable("PAPERTRAIL_WRITE_CSL_FIXTURE");
+        if (path.isEmpty())
+            QSKIP("Only when PAPERTRAIL_WRITE_CSL_FIXTURE is set");
+        Library from;
+        addMadeUpStyle(from, 5);
+        SettingsStore(*from.db).setValue(QStringLiteral("library.last_import_folder"), QStringLiteral("/a/made-up/folder"));
+        exportLibrary(*from.db, path);
+    }
+
     // Writes the fixture above, when asked, as writeFixtureWhenAsked does.
     void writeStitchingFixtureWhenAsked()
     {
@@ -797,6 +856,18 @@ private slots:
     }
 
 private:
+    static void addMadeUpStyle(Library &library, qint64 addedAt)
+    {
+        auto insert = library.db->prepare("INSERT INTO csl_style (id, title, xml, added_at) VALUES (?, ?, ?, ?)");
+        insert->bind(1, QStringLiteral("http://example.org/styles/made-up"));
+        insert->bind(2, QStringLiteral("Made-up Exported Style"));
+        insert->bind(3, QStringLiteral("<?xml version=\"1.0\"?><style xmlns=\"http://purl.org/net/xbiblio/csl\" class=\"in-text\">"
+                                       "<info><title>Made-up Exported Style</title><id>http://example.org/styles/made-up</id></info>"
+                                       "<citation><layout><text variable=\"title\"/></layout></citation></style>"));
+        insert->bind(4, addedAt);
+        insert->step();
+    }
+
     // The made-up book in a zip, imported, with its contents' hash.
     static QString stitchedBook(Library &library)
     {

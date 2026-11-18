@@ -36,6 +36,8 @@ papertrail_core_test(test_stitching papertrail_import)
 papertrail_core_test(test_import papertrail_import)
 papertrail_core_test(test_citations papertrail_citation)
 target_compile_definitions(test_citations PRIVATE PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+papertrail_core_test(test_csl papertrail_citation)
+target_compile_definitions(test_csl PRIVATE PAPERTRAIL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 papertrail_core_test(test_transfer papertrail_transfer papertrail_import)
 target_compile_definitions(test_transfer PRIVATE
     PAPERTRAIL_WORKER_PATH="$<TARGET_FILE:papertrail-worker>"

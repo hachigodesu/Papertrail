@@ -1220,6 +1220,7 @@ void MainWindow::showSettings()
     actions.getLanguage = [this](const QString &code, std::function<void(bool)> done) { getOcrLanguage(code, std::move(done)); };
     actions.getNaturalVoices = [this](std::function<void(bool)> done) { getNaturalVoices(std::move(done)); };
     actions.removeNaturalVoices = [this] { return removeNaturalVoices(); };
+    actions.citations = m_citations;
     actions.recognitionChanged = [this] {
         m_index->stopIndexing();
         kickIndexing();

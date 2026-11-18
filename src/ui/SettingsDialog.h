@@ -18,6 +18,7 @@ class QPushButton;
 
 namespace papertrail::ui {
 
+class CitationActions;
 class LibrarySession;
 
 // The window's switches and the ways to the other settings, gathered in one place.
@@ -38,6 +39,8 @@ struct SettingsActions {
     std::function<void(std::function<void(bool ready)> done)> getNaturalVoices;
     // Deletes them from this computer, after asking.
     std::function<bool()> removeNaturalVoices;
+    // Citation styles: the one chosen, and the dialog with every style. Without it, there's no Citations section.
+    CitationActions *citations = nullptr;
 };
 
 class SettingsDialog : public QDialog {
@@ -55,6 +58,8 @@ public:
     QListWidget *languageList() const { return m_languages; }
     QComboBox *voiceBox() const { return m_voice; }
     QPushButton *naturalVoicesButton() const { return m_naturalVoices; }
+    QComboBox *citationStyleBox() const { return m_citationStyle; }
+    QComboBox *citationLocaleBox() const { return m_citationLocale; }
 
 private:
     QCheckBox *boxFor(QAction *action, const QString &text, const QString &explanation);
@@ -69,6 +74,9 @@ private:
     QComboBox *m_pageColours = nullptr;
     QComboBox *m_ruler = nullptr;
     QComboBox *m_voice = nullptr;
+    QComboBox *m_citationStyle = nullptr;
+    QComboBox *m_citationLocale = nullptr;
+    void fillCitationStyles(CitationActions *citations);
     QSlider *m_speechRate = nullptr;
     QPushButton *m_naturalVoices = nullptr;
     void fillVoices();

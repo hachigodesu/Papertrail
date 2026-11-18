@@ -56,6 +56,17 @@ private slots:
         QCOMPARE(m_settings->value(QStringLiteral("citation.style")).toString(), QStringLiteral("harvard"));
     }
 
+    void aCslStyleCanBeChosenByItsId()
+    {
+        m_settings->setValue(QStringLiteral("citation.style"), QStringLiteral("csl:http://www.zotero.org/styles/nature"));
+        QCOMPARE(m_settings->value(QStringLiteral("citation.style")).toString(), QStringLiteral("csl:http://www.zotero.org/styles/nature"));
+        // "csl:" alone, or anything else, isn't a style.
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, m_settings->setValue(QStringLiteral("citation.style"), QStringLiteral("csl:")));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, m_settings->setValue(QStringLiteral("citation.style"), QStringLiteral("nature")));
+        m_settings->setValue(QStringLiteral("citation.locale"), QStringLiteral("de-DE"));
+        QCOMPARE(m_settings->value(QStringLiteral("citation.locale")).toString(), QStringLiteral("de-DE"));
+    }
+
     void badKeysAndValuesAreRefused()
     {
         QVERIFY_THROWS_EXCEPTION(std::invalid_argument, m_settings->value(QStringLiteral("no.such.key")));

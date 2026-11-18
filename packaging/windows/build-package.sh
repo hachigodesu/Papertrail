@@ -110,11 +110,14 @@ for package in $(sort -u "$stage/packages"); do
     fi
     [ "$found" = 1 ] || missing="$missing $short"
 done
-for library in libmobi qtkeychain; do
+for library in libmobi qtkeychain quickjs citeproc; do
     mkdir -p "$app/licenses/$library"
     cp "$build/_deps/$library-src/"{COPYING,LICENSE}* "$app/licenses/$library/" 2>/dev/null || true
     [ -n "$(ls -A "$app/licenses/$library")" ] || missing="$missing $library"
 done
+# The CSL styles and locales built into the program, under CC BY-SA 3.0.
+mkdir -p "$app/licenses/csl-styles"
+cp "$src/data/csl/SOURCE.md" "$app/licenses/csl-styles/"
 if [ -n "$missing" ]; then
     echo "FAILED: no licence text found for:$missing" >&2
     exit 1

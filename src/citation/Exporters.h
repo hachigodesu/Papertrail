@@ -3,6 +3,7 @@
 #include "citation/CitationItem.h"
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -22,6 +23,8 @@ QStringList citationKeys(const QList<CitationItem> &items);
 QByteArray toBibTeX(const QList<CitationItem> &items);
 QByteArray toRis(const QList<CitationItem> &items);
 QByteArray toCslJson(const QList<CitationItem> &items);
+// One item as CSL-JSON, as the export writes it and CSL styles are rendered from.
+QJsonObject cslJsonItem(const CitationItem &item, const QString &id);
 QByteArray exportCitations(const QList<CitationItem> &items, ExportFormat format);
 
 // Text for BibTeX with its special characters escaped. `protectCapitals` keeps acronyms and names such as

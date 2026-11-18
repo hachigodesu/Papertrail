@@ -953,6 +953,17 @@ CREATE TABLE IF NOT EXISTS skipped_zip (
 ) STRICT;
 )sql";
 
+// CSL styles added to this library from files, kept whole so they travel with its export and backups. The bundled
+// styles are built into Papertrail and never stored here.
+const char *const kMigration25 = R"sql(
+CREATE TABLE IF NOT EXISTS csl_style (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    xml         TEXT NOT NULL,
+    added_at    INTEGER NOT NULL
+) STRICT;
+)sql";
+
 // Publications the user has said aren't the same work, though they share an identifier, so checking the library
 // doesn't offer to combine them again. Pairs by id, smaller first, gone with either.
 const char *const kMigration22 = R"sql(
@@ -1088,6 +1099,7 @@ const std::vector<Migration> &libraryMigrations()
         {22, kMigration22},
         {23, kMigration23},
         {24, nullptr, addDatasheets, true},
+        {25, kMigration25},
     };
     return migrations;
 }

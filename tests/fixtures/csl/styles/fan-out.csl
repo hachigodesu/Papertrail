@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info>
+    <title>Made-up Style That Fans Out</title>
+    <id>http://example.org/styles/fan-out</id>
+    <updated>2026-11-19T00:00:00+00:00</updated>
+  </info>
+  <macro name="m0"><group><text macro="m1"/><text macro="m1"/><text macro="m1"/><text macro="m1"/></group></macro>
+  <macro name="m1"><group><text macro="m2"/><text macro="m2"/><text macro="m2"/><text macro="m2"/></group></macro>
+  <macro name="m2"><group><text macro="m3"/><text macro="m3"/><text macro="m3"/><text macro="m3"/></group></macro>
+  <macro name="m3"><group><text macro="m4"/><text macro="m4"/><text macro="m4"/><text macro="m4"/></group></macro>
+  <macro name="m4"><group><text macro="m5"/><text macro="m5"/><text macro="m5"/><text macro="m5"/></group></macro>
+  <macro name="m5"><group><text macro="m6"/><text macro="m6"/><text macro="m6"/><text macro="m6"/></group></macro>
+  <macro name="m6"><group><text macro="m7"/><text macro="m7"/><text macro="m7"/><text macro="m7"/></group></macro>
+  <macro name="m7"><group><text macro="m8"/><text macro="m8"/><text macro="m8"/><text macro="m8"/></group></macro>
+  <macro name="m8"><group><text macro="m9"/><text macro="m9"/><text macro="m9"/><text macro="m9"/></group></macro>
+  <macro name="m9"><group><text macro="m10"/><text macro="m10"/><text macro="m10"/><text macro="m10"/></group></macro>
+  <macro name="m10"><group><text macro="m11"/><text macro="m11"/><text macro="m11"/><text macro="m11"/></group></macro>
+  <macro name="m11"><group><text variable="title"/></group></macro>
+  <citation><layout><text macro="m0"/></layout></citation>
+  <bibliography><layout><text macro="m0"/></layout></bibliography>
+</style>

@@ -437,110 +437,118 @@ QByteArray toRis(const QList<CitationItem> &items)
     return out.toUtf8();
 }
 
+namespace {
+
+QJsonArray cslNames(const QList<PersonName> &people)
+{
+    QJsonArray array;
+    for (const PersonName &person : people) {
+        if (isOrganisation(person))
+            array.append(QJsonObject{{QStringLiteral("literal"), person.family.trimmed()}});
+        else
+            array.append(QJsonObject{{QStringLiteral("family"), person.family.trimmed()},
+                                     {QStringLiteral("given"), person.given.trimmed()}});
+    }
+    return array;
+}
+
+} // namespace
+
+QJsonObject cslJsonItem(const CitationItem &item, const QString &id)
+{
+    QJsonObject object;
+    const auto set = [&](const QString &name, const QString &value) {
+        if (!value.trimmed().isEmpty())
+            object.insert(name, value.trimmed());
+    };
+
+    QString type;
+    switch (item.kind) {
+    case Kind::Article: type = QStringLiteral("article-journal"); break;
+    case Kind::Book:
+    case Kind::EditedBook:
+    case Kind::Proceedings: type = QStringLiteral("book"); break;
+    case Kind::Chapter: type = QStringLiteral("chapter"); break;
+    case Kind::Paper: type = QStringLiteral("paper-conference"); break;
+    case Kind::Issue: type = QStringLiteral("periodical"); break;
+    case Kind::Thesis: type = QStringLiteral("thesis"); break;
+    case Kind::Report: type = QStringLiteral("report"); break;
+    case Kind::Standard: type = QStringLiteral("standard"); break;
+    case Kind::Preprint: type = QStringLiteral("article"); break;
+    case Kind::Document: type = QStringLiteral("document"); break;
+    case Kind::Case: type = QStringLiteral("legal_case"); break;
+    case Kind::Manual: type = QStringLiteral("report"); break; // CSL has no type for one.
+    }
+    object.insert(QStringLiteral("id"), id);
+    object.insert(QStringLiteral("type"), type);
+    set(QStringLiteral("title"), item.kind == Kind::Issue && item.title.isEmpty() ? item.containerTitle : item.title);
+    if (!item.authors.isEmpty())
+        object.insert(QStringLiteral("author"), cslNames(item.authors));
+    if (!item.editors.isEmpty() && item.kind != Kind::Article)
+        object.insert(QStringLiteral("editor"), cslNames(item.editors));
+    if (item.year) {
+        QJsonArray parts = {*item.year};
+        if (item.month) {
+            parts.append(*item.month);
+            if (item.day)
+                parts.append(*item.day);
+        }
+        object.insert(QStringLiteral("issued"), QJsonObject{{QStringLiteral("date-parts"), QJsonArray{parts}}});
+    }
+    if (item.kind != Kind::Issue || item.containerTitle != item.title)
+        set(QStringLiteral("container-title"), item.containerTitle);
+    set(QStringLiteral("volume"), item.volume);
+    set(QStringLiteral("issue"), item.issue);
+    set(QStringLiteral("page"), joinedPages(item.pages, QStringLiteral("-")));
+    set(QStringLiteral("edition"), item.edition);
+    set(QStringLiteral("collection-title"), item.series);
+    if (item.kind == Kind::Thesis)
+        set(QStringLiteral("publisher"), item.institution.isEmpty() ? item.publisher : item.institution);
+    else if (item.kind == Kind::Report && !item.institution.isEmpty())
+        set(QStringLiteral("publisher"), item.institution);
+    else if (item.kind == Kind::Preprint && item.publisher.isEmpty() && !item.arxivId.isEmpty())
+        set(QStringLiteral("publisher"), QStringLiteral("arXiv"));
+    else
+        set(QStringLiteral("publisher"), item.publisher);
+    set(QStringLiteral("publisher-place"), item.place);
+    set(QStringLiteral("event-title"), item.conferenceName);
+    set(QStringLiteral("event-place"), item.conferenceLocation);
+    if (item.kind == Kind::Thesis)
+        set(QStringLiteral("genre"), item.degree);
+    if (item.kind == Kind::Report || item.kind == Kind::Manual)
+        set(QStringLiteral("number"), item.reportNumber);
+    if (item.kind == Kind::Manual)
+        set(QStringLiteral("version"), item.revision);
+    if (item.kind == Kind::Standard) {
+        set(QStringLiteral("number"), item.standardNumber);
+        set(QStringLiteral("authority"), item.standardBody);
+    }
+    if (item.kind == Kind::Preprint)
+        set(QStringLiteral("number"), item.arxivId.isEmpty() ? QString() : QStringLiteral("arXiv:") + item.arxivId);
+    if (item.kind == Kind::Case) {
+        set(QStringLiteral("authority"), item.court);
+        set(QStringLiteral("jurisdiction"), item.jurisdiction);
+        set(QStringLiteral("number"), item.caseNumber);
+        if (!item.neutralCitation.isEmpty())
+            set(QStringLiteral("note"), QStringLiteral("Neutral citation: ") + item.neutralCitation);
+    }
+    set(QStringLiteral("DOI"), item.doi);
+    set(QStringLiteral("URL"), item.url.isEmpty() && !item.arxivId.isEmpty() ? item.link() : item.url);
+    set(QStringLiteral("ISBN"), item.isbn);
+    set(QStringLiteral("ISSN"), item.issn);
+    set(QStringLiteral("PMID"), item.pmid);
+    set(QStringLiteral("language"), item.language);
+    set(QStringLiteral("keyword"), item.keywords.join(QStringLiteral(", ")));
+    set(QStringLiteral("abstract"), item.abstract);
+    return object;
+}
+
 QByteArray toCslJson(const QList<CitationItem> &items)
 {
     const QStringList keys = citationKeys(items);
-    const auto names = [](const QList<PersonName> &people) {
-        QJsonArray array;
-        for (const PersonName &person : people) {
-            if (isOrganisation(person))
-                array.append(QJsonObject{{QStringLiteral("literal"), person.family.trimmed()}});
-            else
-                array.append(QJsonObject{{QStringLiteral("family"), person.family.trimmed()},
-                                         {QStringLiteral("given"), person.given.trimmed()}});
-        }
-        return array;
-    };
-
     QJsonArray array;
-    for (qsizetype i = 0; i < items.size(); ++i) {
-        const CitationItem &item = items.at(i);
-        QJsonObject object;
-        const auto set = [&](const QString &name, const QString &value) {
-            if (!value.trimmed().isEmpty())
-                object.insert(name, value.trimmed());
-        };
-
-        QString type;
-        switch (item.kind) {
-        case Kind::Article: type = QStringLiteral("article-journal"); break;
-        case Kind::Book:
-        case Kind::EditedBook:
-        case Kind::Proceedings: type = QStringLiteral("book"); break;
-        case Kind::Chapter: type = QStringLiteral("chapter"); break;
-        case Kind::Paper: type = QStringLiteral("paper-conference"); break;
-        case Kind::Issue: type = QStringLiteral("periodical"); break;
-        case Kind::Thesis: type = QStringLiteral("thesis"); break;
-        case Kind::Report: type = QStringLiteral("report"); break;
-        case Kind::Standard: type = QStringLiteral("standard"); break;
-        case Kind::Preprint: type = QStringLiteral("article"); break;
-        case Kind::Document: type = QStringLiteral("document"); break;
-        case Kind::Case: type = QStringLiteral("legal_case"); break;
-        case Kind::Manual: type = QStringLiteral("report"); break; // CSL has no type for one.
-        }
-        object.insert(QStringLiteral("id"), keys.at(i));
-        object.insert(QStringLiteral("type"), type);
-        set(QStringLiteral("title"), item.kind == Kind::Issue && item.title.isEmpty() ? item.containerTitle : item.title);
-        if (!item.authors.isEmpty())
-            object.insert(QStringLiteral("author"), names(item.authors));
-        if (!item.editors.isEmpty() && item.kind != Kind::Article)
-            object.insert(QStringLiteral("editor"), names(item.editors));
-        if (item.year) {
-            QJsonArray parts = {*item.year};
-            if (item.month) {
-                parts.append(*item.month);
-                if (item.day)
-                    parts.append(*item.day);
-            }
-            object.insert(QStringLiteral("issued"), QJsonObject{{QStringLiteral("date-parts"), QJsonArray{parts}}});
-        }
-        if (item.kind != Kind::Issue || item.containerTitle != item.title)
-            set(QStringLiteral("container-title"), item.containerTitle);
-        set(QStringLiteral("volume"), item.volume);
-        set(QStringLiteral("issue"), item.issue);
-        set(QStringLiteral("page"), joinedPages(item.pages, QStringLiteral("-")));
-        set(QStringLiteral("edition"), item.edition);
-        set(QStringLiteral("collection-title"), item.series);
-        if (item.kind == Kind::Thesis)
-            set(QStringLiteral("publisher"), item.institution.isEmpty() ? item.publisher : item.institution);
-        else if (item.kind == Kind::Report && !item.institution.isEmpty())
-            set(QStringLiteral("publisher"), item.institution);
-        else if (item.kind == Kind::Preprint && item.publisher.isEmpty() && !item.arxivId.isEmpty())
-            set(QStringLiteral("publisher"), QStringLiteral("arXiv"));
-        else
-            set(QStringLiteral("publisher"), item.publisher);
-        set(QStringLiteral("publisher-place"), item.place);
-        set(QStringLiteral("event-title"), item.conferenceName);
-        set(QStringLiteral("event-place"), item.conferenceLocation);
-        if (item.kind == Kind::Thesis)
-            set(QStringLiteral("genre"), item.degree);
-        if (item.kind == Kind::Report || item.kind == Kind::Manual)
-            set(QStringLiteral("number"), item.reportNumber);
-        if (item.kind == Kind::Manual)
-            set(QStringLiteral("version"), item.revision);
-        if (item.kind == Kind::Standard) {
-            set(QStringLiteral("number"), item.standardNumber);
-            set(QStringLiteral("authority"), item.standardBody);
-        }
-        if (item.kind == Kind::Preprint)
-            set(QStringLiteral("number"), item.arxivId.isEmpty() ? QString() : QStringLiteral("arXiv:") + item.arxivId);
-        if (item.kind == Kind::Case) {
-            set(QStringLiteral("authority"), item.court);
-            set(QStringLiteral("jurisdiction"), item.jurisdiction);
-            set(QStringLiteral("number"), item.caseNumber);
-            if (!item.neutralCitation.isEmpty())
-                set(QStringLiteral("note"), QStringLiteral("Neutral citation: ") + item.neutralCitation);
-        }
-        set(QStringLiteral("DOI"), item.doi);
-        set(QStringLiteral("URL"), item.url.isEmpty() && !item.arxivId.isEmpty() ? item.link() : item.url);
-        set(QStringLiteral("ISBN"), item.isbn);
-        set(QStringLiteral("ISSN"), item.issn);
-        set(QStringLiteral("PMID"), item.pmid);
-        set(QStringLiteral("language"), item.language);
-        set(QStringLiteral("keyword"), item.keywords.join(QStringLiteral(", ")));
-        set(QStringLiteral("abstract"), item.abstract);
-        array.append(object);
-    }
+    for (qsizetype i = 0; i < items.size(); ++i)
+        array.append(cslJsonItem(items.at(i), keys.at(i)));
     return QJsonDocument(array).toJson(QJsonDocument::Indented);
 }
 
