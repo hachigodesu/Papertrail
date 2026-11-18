@@ -28,6 +28,8 @@ add_library(papertrail_ui STATIC
     MetadataEditor.cpp
     MarkedCopy.cpp
     MarkedCopy.h
+    PdfCopyDialog.cpp
+    PdfCopyDialog.h
     MetadataEditor.h
     SummariesDialog.cpp
     SummariesDialog.h

@@ -101,7 +101,7 @@ private slots:
         QVERIFY(dir.isValid());
         import::WorkerClient worker(QStringLiteral(PAPERTRAIL_WORKER_PATH));
         QRandomGenerator random(m_seed);
-        int tried = 0, read = 0, refused = 0, crashed = 0, timedOut = 0;
+        int tried = 0, read = 0, refused = 0, crashed = 0, timedOut = 0, copies = 0;
         QStringList slow;
         for (const QString &sample : std::as_const(m_samples)) {
             QFile file(sample);
@@ -128,12 +128,29 @@ private slots:
                     worker.pageTexts(path, path + QStringLiteral(".epub"), 0, 3, kInspectTimeoutMs);
                 if (timer.elapsed() > kMostPerRequestMs)
                     slow << copy.name;
+
+                // A PDF copy of a book that isn't a PDF, which reads every page.
+                if (suffix != QLatin1StringView("pdf") && suffix != QLatin1StringView("zip") && suffix != QLatin1StringView("txt")) {
+                    timer.restart();
+                    const QString pdf = path + QStringLiteral(".copy.pdf");
+                    const auto copied = worker.pdfCopy(path, path + QStringLiteral(".epub"), pdf, {}, kInspectTimeoutMs);
+                    switch (copied.failure) {
+                    case import::WorkerFailure::None: ++copies; break;
+                    case import::WorkerFailure::Crashed: ++crashed; break;
+                    case import::WorkerFailure::TimedOut: ++timedOut; break;
+                    default: break;
+                    }
+                    QVERIFY2(!QFileInfo::exists(pdf + QStringLiteral(".part")), qPrintable(copy.name));
+                    if (timer.elapsed() > kMostPerRequestMs)
+                        slow << copy.name + QStringLiteral(" (PDF copy)");
+                    QFile::remove(pdf);
+                }
                 ++tried;
                 QFile::remove(path);
             }
         }
-        qInfo("Import: %d damaged files, %d read, %d refused, %d crashed the worker, %d timed out", tried, read, refused, crashed,
-              timedOut);
+        qInfo("Import: %d damaged files, %d read, %d refused, %d crashed the worker, %d timed out, %d copied to PDF", tried, read,
+              refused, crashed, timedOut, copies);
         QVERIFY2(slow.isEmpty(), qPrintable(QStringLiteral("Took too long: ") + slow.join(QStringLiteral("; "))));
 
         // And afterwards, a good file reads as it should.

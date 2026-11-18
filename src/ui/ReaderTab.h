@@ -236,6 +236,8 @@ signals:
     void recogniseDocumentWanted();
     // Order of its parts was chosen, for a book downloaded as a zip of PDFs.
     void stitchOrderWanted(const QString &contentHash);
+    // Save a PDF copy... was chosen, for a book that isn't a PDF.
+    void pdfCopyWanted();
 
 private:
     struct Hit {

@@ -123,6 +123,28 @@ public:
     MarkedCopy markedCopy(const QString &path, const QString &out, const QJsonArray &marks, int timeoutMs,
                           const QString &convertedPath = QString());
 
+    // How a PDF copy of a book is made. Only a reflowable book uses the page, type and margin, in points, and only a
+    // DjVu the rest.
+    struct PdfCopySettings {
+        double pageWidth = 595;
+        double pageHeight = 842;
+        double fontSize = 12;
+        double margin = 54;
+        int dpi = 300; // The most a DjVu's pages are kept at, or 0 for the file's own.
+        bool searchable = true;
+    };
+    struct PdfCopy {
+        WorkerFailure failure = WorkerFailure::None;
+        QString error;
+        int pages = 0;
+        int unreadablePages = 0; // Left blank in the copy.
+    };
+    // Writes a PDF copy of a book that isn't a PDF at `out`, which appears only once it's complete. `progress` hears
+    // how many pages of how many are done, and `timeoutMs` is the longest the worker may say nothing. With
+    // `ocrFolder`, a DjVu's words come from those recognised on it where it has some.
+    PdfCopy pdfCopy(const QString &path, const QString &convertedPath, const QString &out, const PdfCopySettings &settings,
+                    int timeoutMs, const std::function<void(int done, int of)> &progress = {}, const QString &ocrFolder = QString());
+
     // Runs the worker below normal priority, for slow work in the background such as recognising text. From the next
     // time it starts.
     void setLowPriority(bool low) { m_lowPriority = low; }
@@ -136,7 +158,9 @@ private:
         QString error;
         QJsonObject body;
     };
-    Reply call(QJsonObject request, int timeoutMs);
+    // `timeoutMs` is how long the worker may go without answering. A request that says how it's getting on, with lines
+    // of {"id", "progress", "of"} before its reply, has each of those heard by `progress`, and the wait starts again.
+    Reply call(QJsonObject request, int timeoutMs, const std::function<void(int, int)> &progress = {});
     bool ensureRunning();
     void stop();
 

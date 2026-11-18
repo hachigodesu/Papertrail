@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace papertrail::engine {
@@ -203,6 +204,49 @@ public:
         return {info.width * 72.0 / info.dpi, info.height * 72.0 / info.dpi};
     }
 
+    // The page as its own pixels: grey for a bitonal page, which is only black and white, else colour.
+    DjvuPagePixels pixelsForCopy(int pageNumber, int mostDpi)
+    {
+        // Far more than any real page at 600 dpi, so a file claiming a vast page can't use up the memory.
+        constexpr double kMostPixels = 120.0 * 1000 * 1000;
+        ddjvu_pageinfo_t info{};
+        if (!pageInfo(pageNumber, info) || info.width <= 0 || info.height <= 0)
+            throw EngineError("could not read page size");
+        ddjvu_page_t *page = ddjvu_page_create_by_pageno(m_doc, pageNumber);
+        if (!page)
+            throw EngineError("could not load page");
+        while (ddjvu_job_status(ddjvu_page_job(page)) < DDJVU_JOB_OK)
+            waitForMessages(m_ctx);
+        if (ddjvu_job_status(ddjvu_page_job(page)) >= DDJVU_JOB_FAILED) {
+            ddjvu_page_release(page);
+            throw EngineError("could not decode page");
+        }
+
+        DjvuPagePixels result;
+        result.size = QSizeF(info.width * 72.0 / info.dpi, info.height * 72.0 / info.dpi);
+        double scale = mostDpi > 0 && mostDpi < info.dpi ? double(mostDpi) / info.dpi : 1.0;
+        const double pixels = double(info.width) * info.height * scale * scale;
+        if (pixels > kMostPixels)
+            scale *= std::sqrt(kMostPixels / pixels);
+        result.width = std::max(1, int(info.width * scale));
+        result.height = std::max(1, int(info.height * scale));
+        result.dpi = std::max(1, int(std::lround(info.dpi * scale)));
+        result.bitonal = ddjvu_page_get_type(page) == DDJVU_PAGETYPE_BITONAL;
+        result.channels = result.bitonal ? 1 : 3;
+        result.pixels.resize(qsizetype(result.width) * result.height * result.channels);
+
+        ddjvu_format_t *format = ddjvu_format_create(result.bitonal ? DDJVU_FORMAT_GREY8 : DDJVU_FORMAT_RGB24, 0, nullptr);
+        ddjvu_format_set_row_order(format, 1);
+        ddjvu_rect_t rect{0, 0, unsigned(result.width), unsigned(result.height)};
+        const int rendered = ddjvu_page_render(page, DDJVU_RENDER_COLOR, &rect, &rect, format,
+                                               unsigned(result.width) * unsigned(result.channels), result.pixels.data());
+        ddjvu_format_release(format);
+        ddjvu_page_release(page);
+        if (!rendered)
+            throw EngineError("could not render page");
+        return result;
+    }
+
     QString largestTextOnPage(int) override { return {}; } // DjVu text has no font sizes.
     QMap<QString, QString> metadata() override { return {}; }
     QByteArray xmpPacket() override { return {}; }
@@ -286,6 +330,14 @@ private:
 };
 
 } // namespace
+
+DjvuPagePixels renderDjvuPage(Document &document, int page, int mostDpi)
+{
+    auto *djvu = dynamic_cast<DjvuDocument *>(&document);
+    if (!djvu)
+        throw EngineError("this isn't a DjVu document");
+    return djvu->pixelsForCopy(page, mostDpi);
+}
 
 DjvuBackend::DjvuBackend()
     : m_ctx(ddjvu_context_create("papertrail"))

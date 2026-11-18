@@ -54,7 +54,7 @@ void WorkerClient::stop()
     m_process.reset();
 }
 
-WorkerClient::Reply WorkerClient::call(QJsonObject request, int timeoutMs)
+WorkerClient::Reply WorkerClient::call(QJsonObject request, int timeoutMs, const std::function<void(int, int)> &progress)
 {
     if (!ensureRunning()) {
         const QString error = m_process ? m_process->errorString() : QString();
@@ -66,13 +66,21 @@ WorkerClient::Reply WorkerClient::call(QJsonObject request, int timeoutMs)
     request.insert(QStringLiteral("id"), id);
     m_process->write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
 
-    const QDeadlineTimer deadline(timeoutMs);
+    QDeadlineTimer deadline(timeoutMs);
     while (true) {
         while (m_process->canReadLine()) {
             const QJsonDocument document = QJsonDocument::fromJson(m_process->readLine());
             // A library could print something of its own, so anything else is skipped.
             if (document.isObject() && document.object().value(QStringLiteral("id")).toInteger() == id) {
                 const QJsonObject body = document.object();
+                // How it's getting on, which is never the reply. Only a request that asked to hear it waits longer for it.
+                if (body.contains(QStringLiteral("progress")) && !body.contains(QStringLiteral("ok"))) {
+                    if (progress) {
+                        deadline.setRemainingTime(timeoutMs);
+                        progress(body.value(QStringLiteral("progress")).toInt(), body.value(QStringLiteral("of")).toInt());
+                    }
+                    continue;
+                }
                 if (!body.value(QStringLiteral("ok")).toBool()) {
                     return {WorkerFailure::Rejected, body.value(QStringLiteral("error")).toString(), body};
                 }
@@ -187,6 +195,32 @@ WorkerClient::MarkedCopy WorkerClient::markedCopy(const QString &path, const QSt
     request.insert(QStringLiteral("marks"), marks);
     const Reply reply = call(request, timeoutMs);
     return MarkedCopy{reply.failure, reply.error};
+}
+
+WorkerClient::PdfCopy WorkerClient::pdfCopy(const QString &path, const QString &convertedPath, const QString &out,
+                                            const PdfCopySettings &settings, int timeoutMs,
+                                            const std::function<void(int, int)> &progress, const QString &ocrFolder)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("op"), QStringLiteral("pdfcopy"));
+    request.insert(QStringLiteral("path"), path);
+    request.insert(QStringLiteral("convertedPath"), convertedPath);
+    request.insert(QStringLiteral("out"), out);
+    request.insert(QStringLiteral("pageWidth"), settings.pageWidth);
+    request.insert(QStringLiteral("pageHeight"), settings.pageHeight);
+    request.insert(QStringLiteral("fontSize"), settings.fontSize);
+    request.insert(QStringLiteral("margin"), settings.margin);
+    request.insert(QStringLiteral("dpi"), settings.dpi);
+    request.insert(QStringLiteral("searchable"), settings.searchable);
+    if (!ocrFolder.isEmpty())
+        request.insert(QStringLiteral("ocrFolder"), ocrFolder);
+    const Reply reply = call(request, timeoutMs, progress);
+    PdfCopy copy;
+    copy.failure = reply.failure;
+    copy.error = reply.error;
+    copy.pages = reply.body.value(QStringLiteral("pages")).toInt();
+    copy.unreadablePages = reply.body.value(QStringLiteral("unreadable")).toInt();
+    return copy;
 }
 
 WorkerClient::ZipCheck WorkerClient::zipCheck(const QString &path, int timeoutMs)

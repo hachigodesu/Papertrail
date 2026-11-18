@@ -16,6 +16,8 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -472,6 +474,69 @@ QJsonObject markedCopy(engine::Engine &engine, const QJsonObject &request)
     return reply;
 }
 
+// Writes a PDF copy of a book in another format, for reading where Papertrail isn't. It's written beside `out` and
+// renamed into place once complete. Before the reply, lines of {"id", "progress", "of"} say how far it's got, so a
+// long book doesn't look like a worker that's stopped answering.
+QJsonObject pdfCopy(engine::Engine &engine, const QJsonObject &request)
+{
+    const QString path = request.value(QStringLiteral("path")).toString();
+    const QString out = request.value(QStringLiteral("out")).toString();
+    if (out.isEmpty())
+        return failure(QStringLiteral("there's nowhere to write the copy"));
+    const QFileInfo source(path);
+    const QFileInfo target(out);
+    if (QDir::cleanPath(target.absoluteFilePath()).compare(QDir::cleanPath(source.absoluteFilePath()), Qt::CaseInsensitive) == 0
+        || (target.exists() && target.canonicalFilePath() == source.canonicalFilePath())) {
+        return failure(QStringLiteral("the copy can't replace the original"));
+    }
+    const QString format = formatFromSuffix(path);
+    if (format == QLatin1StringView("pdf") || format == QLatin1StringView("zip"))
+        return failure(QStringLiteral("this is already a PDF"));
+
+    engine::PdfCopyOptions options;
+    options.pageWidth = request.value(QStringLiteral("pageWidth")).toDouble(options.pageWidth);
+    options.pageHeight = request.value(QStringLiteral("pageHeight")).toDouble(options.pageHeight);
+    options.fontSize = request.value(QStringLiteral("fontSize")).toDouble(options.fontSize);
+    options.margin = request.value(QStringLiteral("margin")).toDouble(options.margin);
+    options.dpi = qBound(0, request.value(QStringLiteral("dpi")).toInt(options.dpi), 1200);
+    options.searchable = request.value(QStringLiteral("searchable")).toBool(options.searchable);
+    const QString recognised = request.value(QStringLiteral("ocrFolder")).toString();
+    if (!recognised.isEmpty()) {
+        options.recognisedWords = [recognised](int page) { return worker::readRecognised(recognised, page); };
+        options.preferRecognised = worker::recognisingEveryPage(recognised);
+    }
+
+    const QJsonValue id = request.value(QStringLiteral("id"));
+    QElapsedTimer sinceLast;
+    sinceLast.start();
+    const auto progress = [&](int done, int of) {
+        // Often enough to show it moving, but not a line for every page of a long book.
+        if (done < of && done > 1 && sinceLast.elapsed() < 200)
+            return;
+        sinceLast.restart();
+        QJsonObject line;
+        line.insert(QStringLiteral("id"), id);
+        line.insert(QStringLiteral("progress"), done);
+        line.insert(QStringLiteral("of"), of);
+        std::cout << QJsonDocument(line).toJson(QJsonDocument::Compact).constData() << std::endl;
+        worker::applyPageFaults(path, done);
+    };
+
+    engine::PdfCopyResult result;
+    try {
+        // A Kindle book MuPDF can't read itself is copied from the EPUB made from it.
+        const QString readable = worker::readablePath(engine, path, request.value(QStringLiteral("convertedPath")).toString());
+        result = engine.writePdfCopy(readable, out, options, progress);
+    } catch (const engine::EngineError &error) {
+        return failure(QString::fromUtf8(error.what()));
+    }
+    QJsonObject reply;
+    reply.insert(QStringLiteral("ok"), true);
+    reply.insert(QStringLiteral("pages"), result.pages);
+    reply.insert(QStringLiteral("unreadable"), result.unreadablePages);
+    return reply;
+}
+
 // Fault injection for testing how the app copes with a worker that dies or hangs. It only ever
 // happens with this environment variable set, which the app itself never does.
 void applyTestFaults(const QString &path)
@@ -530,6 +595,8 @@ int main(int argc, char *argv[])
             reply = pageCover(engine, object);
         } else if (op == QStringLiteral("markedcopy")) {
             reply = markedCopy(engine, object);
+        } else if (op == QStringLiteral("pdfcopy")) {
+            reply = pdfCopy(engine, object);
         } else if (op == QStringLiteral("zipcheck")) {
             reply = worker::zipCheck(engine, path);
         } else if (op == QStringLiteral("zipparts")) {
