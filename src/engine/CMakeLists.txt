@@ -6,6 +6,7 @@ add_library(papertrail_engine STATIC
     DjvuDocument.cpp
     Document.h
     Engine.cpp
+    PdfCopy.cpp
     Kf8Converter.cpp
     MuPdfDocument.cpp
     Ocr.cpp

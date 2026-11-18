@@ -8,7 +8,9 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 
 namespace papertrail::engine {
@@ -94,6 +96,33 @@ struct MarkToWrite {
 struct StitchSource {
     QString path;
     QString title;
+};
+
+struct TextWord;
+
+// How a PDF copy of a book is made. Only a reflowable book uses the page, type and margin, and only a DjVu the rest.
+struct PdfCopyOptions {
+    double pageWidth = 595; // In points.
+    double pageHeight = 842;
+    double fontSize = 12;
+    double margin = 54; // On each side, in points.
+    // The most dots per inch a DjVu's pages are kept at, or 0 for the file's own. Never more than the file's own.
+    int dpi = 300;
+    // Whether a DjVu's words are written as text that can't be seen, over the pictures of its pages.
+    bool searchable = true;
+    // Words recognised on a DjVu's pages, used where a page has no hidden text of its own, or wherever it has some
+    // with `preferRecognised`. Nothing, for a page with none.
+    std::function<std::optional<QList<TextWord>>(int page)> recognisedWords;
+    bool preferRecognised = false;
+};
+
+// How far a PDF copy has got: pages written, of how many.
+using PdfCopyProgress = std::function<void(int done, int of)>;
+
+// What came of a PDF copy.
+struct PdfCopyResult {
+    int pages = 0;
+    int unreadablePages = 0; // Pages that couldn't be read, left blank in the copy.
 };
 
 // One open document. Nothing here ever writes to the document's file.
@@ -190,6 +219,13 @@ public:
     // Writes one PDF of these PDFs' pages in order, with an outline item for each, holding its own outline. The
     // file appears only once it's complete. Throws EngineError.
     void stitchPdfs(const QList<StitchSource> &parts, const QString &outPath);
+
+    // Writes a PDF of a book in another format: an EPUB, Kindle book, FB2, XPS, CBZ or DjVu. A reflowable book is
+    // laid out at the options' page size, keeping its text as text; a DjVu's pages become pictures, with its words over
+    // them as text that can't be seen. It's written beside `outPath` and appears there only once it's complete. A path
+    // naming the source itself is refused. Throws EngineError.
+    PdfCopyResult writePdfCopy(const QString &path, const QString &outPath, const PdfCopyOptions &options,
+                               const PdfCopyProgress &progress = {});
 
     // Writes the file only if encoding succeeds, replacing any earlier version.
     void saveJpeg(const RenderedPage &page, const QString &path, int quality = 80);

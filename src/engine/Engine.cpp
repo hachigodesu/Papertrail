@@ -148,6 +148,12 @@ void Engine::stitchPdfs(const QList<StitchSource> &parts, const QString &outPath
     engine::stitchPdfs(d->ctx, parts, outPath);
 }
 
+PdfCopyResult Engine::writePdfCopy(const QString &path, const QString &outPath, const PdfCopyOptions &options,
+                                   const PdfCopyProgress &progress)
+{
+    return engine::writePdfCopy(d->ctx, d->djvu, path, outPath, options, progress);
+}
+
 void Engine::saveJpeg(const RenderedPage &page, const QString &path, int quality)
 {
     QFileInfo target(path);

@@ -52,6 +52,7 @@ class RelatedPapersDialog;
 class BulkChanges;
 class DailyBackupThread;
 class MarkedCopyActions;
+class PdfCopyActions;
 class RemovedPublicationsDialog;
 class CoverCache;
 class DetailsPanel;
@@ -218,6 +219,9 @@ public:
     RemovedPublicationsDialog *removedDialog() const { return m_removedDialog; }
 
     MarkedCopyActions *markedCopy() const { return m_markedCopy; }
+    PdfCopyActions *pdfCopy() const { return m_pdfCopy; }
+    // Save a PDF copy..., of a book that isn't a PDF: of `fileId` if given, else the publication's.
+    void savePdfCopy(qint64 publicationId, qint64 fileId = 0);
 
     // Summaries at half price for what's chosen, after confirming, and collecting them as they come back.
     void showBatchSummaryDialog();
@@ -424,6 +428,7 @@ private:
     CitationActions *m_citations = nullptr;
     DailyBackupThread *m_dailyBackup = nullptr;
     MarkedCopyActions *m_markedCopy = nullptr;
+    PdfCopyActions *m_pdfCopy = nullptr;
     summary::SummaryBatches *m_batches = nullptr;
     QTimer *m_batchTimer = nullptr;
     QPushButton *m_summaryStatus = nullptr;

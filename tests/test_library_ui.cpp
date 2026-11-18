@@ -19,6 +19,7 @@
 #include "ui/LibrarySession.h"
 #include "ui/LibraryFoldersDialog.h"
 #include "ui/MainWindow.h"
+#include "ui/PdfCopyDialog.h"
 #include "ui/MetadataEditor.h"
 #include "ui/PublicationListModel.h"
 #include "ui/ReferenceImportDialog.h"
@@ -925,6 +926,49 @@ private slots:
         QCOMPARE(m_window->stitchDialog()->list()->count(), 10);
         m_window->stitchDialog()->button(QStringLiteral("later"))->click();
         QTRY_VERIFY_WITH_TIMEOUT(m_window->stitchDialog() == nullptr, kLongWaitMs);
+    }
+
+    void aBookThatIsntAPdfCanBeSavedAsOne()
+    {
+        const QString folder = copySamples({QStringLiteral("book.epub"), QStringLiteral("article.pdf")});
+        const auto before = hashTree(folder);
+        openWindow();
+        m_window->addFolder(folder);
+        QTRY_COMPARE_WITH_TIMEOUT(rows(), 2, kLongWaitMs);
+
+        // Offered for the EPUB, and not for the PDF.
+        QAbstractItemView *view = m_window->gridView()->isVisible() ? static_cast<QAbstractItemView *>(m_window->gridView())
+                                                                    : static_cast<QAbstractItemView *>(m_window->listView());
+        qint64 book = 0;
+        for (int row = 0; row < 2; ++row) {
+            const qint64 id = *m_window->model()->idAt(row);
+            const bool epub = m_session->files().filesFor(id).first().format == QLatin1StringView("epub");
+            if (epub)
+                book = id;
+            selectRows(row, row);
+            QStringList names;
+            QTimer::singleShot(200, this, [&names] {
+                if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+                    for (QAction *item : menu->actions())
+                        names << item->objectName();
+                    menu->close();
+                }
+            });
+            emit view->customContextMenuRequested(view->visualRect(m_window->model()->index(row, 0)).center());
+            QCOMPARE(names.contains(QStringLiteral("savePdfCopy")), epub);
+        }
+        QVERIFY(book != 0);
+
+        QTemporaryDir elsewhere;
+        const QString out = elsewhere.filePath(QStringLiteral("Copy.pdf"));
+        QSignalSpy finished(m_window->pdfCopy(), &PdfCopyActions::finished);
+        const std::optional<qint64> file = m_window->pdfCopy()->fileFor(book);
+        QVERIFY(file);
+        QVERIFY(m_window->pdfCopy()->save(*file, out, {}));
+        QVERIFY(finished.wait(kLongWaitMs));
+        QVERIFY2(finished.first().at(0).toBool(), qPrintable(finished.first().at(1).toString()));
+        QVERIFY(QFileInfo(out).size() > 0);
+        QCOMPARE(hashTree(folder), before);
     }
 
     void aPartLeftOutWarnsOfItsHighlights()

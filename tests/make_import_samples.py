@@ -324,6 +324,95 @@ def reader_djvu(path, work):
     subprocess.run(["djvused", str(path), "-f", str(work / "script.txt")], check=True)
 
 
+def pdf_copy_links_epub(path):
+    """A short book with a link within it, a link out to the web, one somewhere unsafe, and a nested table of
+    contents, for a PDF copy to keep."""
+    paragraph = "This made-up chapter is only here to be copied into a PDF and read again. " * 6
+    chapters = {
+        "one.xhtml": ("Linked Chapter One",
+                      '<p>See <a href="two.xhtml#target">the target in chapter two</a> for more.</p>'
+                      '<p>Or read <a href="https://example.org/made-up-book">the made-up web page</a>.</p>'
+                      '<p>Never <a href="javascript:alert(1)">this one</a>.</p>' + f"<p>{paragraph}</p>" * 3),
+        "two.xhtml": ("Linked Chapter Two",
+                      f"<p>{paragraph}</p>" * 2 + '<h2 id="target">The Target Section</h2>'
+                      "<p>The word copyfindme is only in this section.</p>"),
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(zipfile.ZipInfo("mimetype", (2020, 1, 1, 0, 0, 0)), "application/epub+zip", zipfile.ZIP_STORED)
+
+        def add(name, text):
+            z.writestr(zipfile.ZipInfo(name, (2020, 1, 1, 0, 0, 0)), text)
+
+        add("META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+            '</rootfiles></container>')
+        items = "".join(f'<item id="{n[:-6]}" href="{n}" media-type="application/xhtml+xml"/>' for n in chapters)
+        items += '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+        spine = "".join(f'<itemref idref="{n[:-6]}"/>' for n in chapters)
+        add("OEBPS/content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">'
+            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">made-up-links</dc:identifier>'
+            '<dc:title>A Made-up Linked Book</dc:title><dc:language>en</dc:language></metadata>'
+            f'<manifest>{items}</manifest><spine>{spine}</spine></package>')
+        for name, (title, body) in chapters.items():
+            add(f"OEBPS/{name}",
+                '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>'
+                f'{title}</title></head><body><h1>{title}</h1>{body}</body></html>')
+        add("OEBPS/nav.xhtml",
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body>'
+            '<nav epub:type="toc"><h1>Contents</h1><ol>'
+            '<li><a href="one.xhtml">Linked Chapter One</a></li>'
+            '<li><a href="two.xhtml">Linked Chapter Two</a>'
+            '<ol><li><a href="two.xhtml#target">The Target Section</a></li></ol></li>'
+            '</ol></nav></body></html>')
+
+
+def bitonal_djvu(path, work):
+    """A black and white page at 300 dpi, as a scanned book's often is, with made-up bars where lines of type would be,
+    hidden text over them (one word in Greek), and a table of contents. Needs DjVuLibre's cjb2 and djvused."""
+    if not shutil.which("cjb2"):
+        print("cjb2 not found: skipping the bitonal DjVu sample")
+        return
+    width, height = 1200, 1500  # 4 by 5 inches.
+    stride = (width + 7) // 8
+    bits = bytearray(stride * height)
+
+    def bar(x0, y0, x1, y1):
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                bits[y * stride + x // 8] |= 0x80 >> (x % 8)
+
+    # Lines of "words", from the top, in pixels down from the top left.
+    lines = [(150, 60), (260, 40), (330, 40), (400, 40)]
+    for top, size in lines:
+        x = 150
+        for word_length in (180, 120, 240, 90):
+            bar(x, top, x + word_length, top + size)
+            x += word_length + 40
+    pbm = work / "page.pbm"
+    pbm.write_bytes(f"P4\n{width} {height}\n".encode("ascii") + bytes(bits))
+    subprocess.run(["cjb2", "-dpi", "300", str(pbm), str(path)], check=True)
+
+    def word(x0, top, length, size, text):
+        # DjVu's boxes are in pixels up from the bottom left.
+        return f'(word {x0} {height - top - size} {x0 + length} {height - top} "{text}")'
+
+    first, second = lines[0], lines[1]
+    text = (f'(page 0 0 {width} {height} '
+            f'(line 150 {height - first[0] - first[1]} 900 {height - first[0]} '
+            + word(150, first[0], 180, first[1], "Bitonal") + " " + word(370, first[0], 120, first[1], "copied")
+            + " " + word(530, first[0], 240, first[1], "pageword") + ") "
+            f'(line 150 {height - second[0] - second[1]} 900 {height - second[0]} '
+            + word(150, second[0], 180, second[1], "\\316\\272\\317\\215\\316\\274\\316\\261") + "))")
+    (work / "text.txt").write_text(text, encoding="ascii")
+    (work / "outline.txt").write_text('(bookmarks ("The Only Page" "#1"))', encoding="ascii")
+    script = [f'set-outline {work / "outline.txt"}', "select 1", f'set-txt {work / "text.txt"}', "save"]
+    (work / "script.txt").write_text("\n".join(s.replace("\\", "/") for s in script) + "\n")
+    subprocess.run(["djvused", str(path), "-f", str(work / "script.txt")], check=True)
+
+
 def rc4(key, data):
     state = list(range(256))
     j = 0
@@ -1191,6 +1280,9 @@ def main():
 
     (out / "ignored_notes.txt").write_text("Not a supported document type.\n", encoding="ascii")
     make_djvu(out)
+    pdf_copy_links_epub(out / "pdf_copy_links.epub")
+    with tempfile.TemporaryDirectory() as work:
+        bitonal_djvu(out / "bitonal.djvu", Path(work))
     sciencedirect_book_zip(out / "sciencedirect_book.zip")
     not_a_book_zips(out)
 

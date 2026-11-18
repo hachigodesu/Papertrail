@@ -35,6 +35,7 @@
 #include "ui/BatchSummaryDialog.h"
 #include "summary/SummaryBatches.h"
 #include "ui/MarkedCopy.h"
+#include "ui/PdfCopyDialog.h"
 #include "ui/HighlightsWindow.h"
 #include "ui/CitationActions.h"
 #include "ui/TransferDialogs.h"
@@ -226,6 +227,16 @@ MainWindow::MainWindow(LibrarySession &session, QWidget *parent)
             return;
         }
         QMessageBox box(QMessageBox::Warning, tr("Save a copy with highlights"), message, QMessageBox::Ok, this);
+        box.setTextFormat(Qt::PlainText);
+        box.exec();
+    });
+    m_pdfCopy = new PdfCopyActions(session, this);
+    connect(m_pdfCopy, &PdfCopyActions::finished, this, [this](bool ok, const QString &message) {
+        if (ok) {
+            statusBar()->showMessage(message, 15000);
+            return;
+        }
+        QMessageBox box(QMessageBox::Warning, tr("Save a PDF copy"), message, QMessageBox::Ok, this);
         box.setTextFormat(Qt::PlainText);
         box.exec();
     });
@@ -2112,6 +2123,7 @@ ReaderTab *MainWindow::createReader(qint64 id, qint64 fileId, bool articleOnly)
             m_search->setText(u'"' + phrase.simplified() + u'"');
             m_documentTabs->setCurrentIndex(0);
         });
+        connect(reader, &ReaderTab::pdfCopyWanted, this, [this, id, fileId] { savePdfCopy(id, fileId); });
         connect(reader, &ReaderTab::textRecognised, this, [this](const QString &contentHash) {
             // Read into the index again, with its recognised words, once the reader's done with them.
             guarded(tr("Updating the index"), [&] { FullTextIndex(m_session.database()).forget(contentHash); });
@@ -2722,6 +2734,15 @@ void MainWindow::showContextMenu(const QPoint &position)
                     ->setObjectName(QStringLiteral("saveStitched"));
                 break;
             }
+            // A book that isn't a PDF, to read where Papertrail isn't. A book in a zip has its stitched PDF.
+            for (const FileRecord &file : choices) {
+                if (!pdfCopyKindFor(file.format) || file.sha256.isEmpty())
+                    continue;
+                const qint64 fileId = file.id;
+                menu.addAction(tr("Save a PDF copy..."), this, [this, publication, fileId] { savePdfCopy(publication, fileId); })
+                    ->setObjectName(QStringLiteral("savePdfCopy"));
+                break;
+            }
             menu.addAction(tr("Summarize later at half price..."), this, &MainWindow::showBatchSummaryDialog);
             bool marked = false;
             guarded(tr("Reading the highlights"), [&] { marked = markedPdfFor(m_session, publication).has_value(); });
@@ -3278,6 +3299,11 @@ void MainWindow::writeStitchOrders()
             removeOtherStitchedCopies(converted, order);
         }
     });
+}
+
+void MainWindow::savePdfCopy(qint64 publicationId, qint64 fileId)
+{
+    m_pdfCopy->askAndSave(publicationId, fileId > 0 ? std::optional<qint64>(fileId) : std::nullopt);
 }
 
 void MainWindow::saveStitchedCopy(qint64 publicationId)

@@ -253,6 +253,8 @@ signals:
     void openAnnotationWanted(qint64 annotationId);
     void openPublicationWanted(qint64 publicationId);
     void searchLibraryWanted(const QString &words);
+    // Save a PDF copy... was chosen, for a book that isn't a PDF.
+    void pdfCopyWanted();
 
 private:
     struct Hit {

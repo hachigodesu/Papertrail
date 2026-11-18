@@ -16,6 +16,7 @@
 #include "ui/Labels.h"
 #include "ui/LibrarySession.h"
 #include "ui/LookUpPanel.h"
+#include "ui/PdfCopyDialog.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -2225,6 +2226,11 @@ void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
                                              [this] { emit stitchOrderWanted(m_contentHash); });
             order->setObjectName(QStringLiteral("stitchOrder"));
         }
+    }
+    // A book that isn't a PDF, to read where Papertrail isn't.
+    if (m_ready && pdfCopyKindFor(m_format)) {
+        menu->addSeparator();
+        menu->addAction(tr("Save a PDF copy..."), this, &ReaderTab::pdfCopyWanted)->setObjectName(QStringLiteral("savePdfCopy"));
     }
 }
 
