@@ -196,6 +196,17 @@ QList<std::pair<QString, CitationItem>> fixtureItems()
     ukCase.year = 2021;
     ukCase.caseCitationForm = QStringLiteral("uk");
     items << std::make_pair(QStringLiteral("case_uk"), citationItem(ukCase));
+
+    // A made-up product's datasheet, under its manufacturer.
+    Publication manual = publication(PublicationType::DatasheetManual, QStringLiteral("PX-100 Pretend Voltage Regulator"));
+    manual.publisher = QStringLiteral("Example Devices");
+    manual.place = QStringLiteral("Leeds");
+    manual.reportNumber = QStringLiteral("EXD-0042");
+    manual.standardRevision = QStringLiteral("C");
+    manual.productNumbers = QStringLiteral("PX-100, PX-100A");
+    manual.year = 2023;
+    manual.url = QStringLiteral("https://example.org/px100.pdf");
+    items << std::make_pair(QStringLiteral("manual"), citationItem(manual));
     return items;
 }
 
@@ -288,7 +299,7 @@ private slots:
                 QVERIFY2(fixtures.contains(name), qPrintable(styleKey(style) + QStringLiteral(" has no ") + name));
                 kinds.insert(item.kind);
             }
-            QCOMPARE(kinds.size(), 13);
+            QCOMPARE(kinds.size(), 14);
         }
     }
 
@@ -536,6 +547,13 @@ private slots:
         QVERIFY(bib.contains(QStringLiteral("  number = {EA-2020-04},")));
         QVERIFY(bib.contains(QStringLiteral("  eprint = {2101.00001},")));
         QVERIFY(bib.contains(QStringLiteral("  author = {{Example Charity}},")));
+        // A datasheet is a manual, made by its organisation, with its number and version in a note too for classic
+        // BibTeX.
+        QVERIFY(bib.contains(QStringLiteral("@manual{")));
+        QVERIFY(bib.contains(QStringLiteral("  number = {EXD-0042},")));
+        QVERIFY(bib.contains(QStringLiteral("  organization = {Example Devices},")));
+        QVERIFY(bib.contains(QStringLiteral("  version = {C},")));
+        QVERIFY(bib.contains(QStringLiteral("  note = {Document no. EXD-0042, Rev. C},")));
     }
 
     void bibTeXEscapesAndProtects()
@@ -572,6 +590,8 @@ private slots:
         QVERIFY(ris.contains(QStringLiteral("TY  - STAND\r\n")));
         QVERIFY(ris.contains(QStringLiteral("AU  - Example Charity\r\n")));
         QVERIFY(ris.contains(QStringLiteral("DA  - 2021/05//\r\n")));
+        QVERIFY(ris.contains(QStringLiteral("TY  - GEN\r\nTI  - PX-100 Pretend Voltage Regulator\r\n")));
+        QVERIFY(ris.contains(QStringLiteral("PB  - Example Devices\r\nM1  - EXD-0042\r\nM3  - Manual\r\nN1  - Revision: C\r\n")));
         // Every line is a tag, two spaces, a hyphen and a space.
         static const QRegularExpression line(QStringLiteral("^[A-Z][A-Z0-9]  - .*$"));
         for (const QString &text : ris.split(QStringLiteral("\r\n"), Qt::SkipEmptyParts))
@@ -622,6 +642,16 @@ private slots:
         QCOMPARE(ukCase.value(QStringLiteral("authority")).toString(), QStringLiteral("Court of Appeal (Civil Division)"));
         QCOMPARE(ukCase.value(QStringLiteral("container-title")).toString(), QStringLiteral("WLR"));
         QVERIFY(ukCase.value(QStringLiteral("note")).toString().contains(QStringLiteral("[2021] EWCA Civ 1234")));
+
+        QJsonObject manual;
+        for (const QJsonValue &value : array) {
+            if (value.toObject().value(QStringLiteral("title")).toString().startsWith(QStringLiteral("PX-100")))
+                manual = value.toObject();
+        }
+        QCOMPARE(manual.value(QStringLiteral("type")).toString(), QStringLiteral("report"));
+        QCOMPARE(manual.value(QStringLiteral("publisher")).toString(), QStringLiteral("Example Devices"));
+        QCOMPARE(manual.value(QStringLiteral("number")).toString(), QStringLiteral("EXD-0042"));
+        QCOMPARE(manual.value(QStringLiteral("version")).toString(), QStringLiteral("C"));
     }
 
     // What Papertrail exports, another copy of it can import, as anything else that reads these formats would.
@@ -663,6 +693,36 @@ private slots:
                 QVERIFY2(again.kind == item.kind, qPrintable(name));
             }
         }
+    }
+
+    void manualsReadBackWithTheirNumbers_data()
+    {
+        QTest::addColumn<int>("format");
+        QTest::newRow("bibtex") << int(ExportFormat::BibTeX);
+        QTest::newRow("ris") << int(ExportFormat::Ris);
+    }
+
+    void manualsReadBackWithTheirNumbers()
+    {
+        QFETCH(int, format);
+        CitationItem manual;
+        for (const auto &[name, item] : fixtureItems()) {
+            if (name == QLatin1StringView("manual"))
+                manual = item;
+        }
+        const ParsedReferences parsed = parseReferences(exportCitations({manual}, ExportFormat(format)));
+        QCOMPARE(parsed.entries.size(), 1);
+        const ImportedReference &back = parsed.entries.first();
+        QCOMPARE(back.publication.type, PublicationType::DatasheetManual);
+        QCOMPARE(back.publication.publisher, QStringLiteral("Example Devices"));
+        QCOMPARE(back.publication.reportNumber, QStringLiteral("EXD-0042"));
+        QCOMPARE(back.publication.standardRevision, QStringLiteral("C"));
+        QVERIFY2(back.note.isEmpty(), qPrintable(back.note)); // What the export wrote for classic BibTeX isn't a note.
+
+        // A generic RIS entry is still only a document.
+        const ParsedReferences generic = parseReferences("TY  - GEN\r\nTI  - Pretend Notes\r\nPY  - 2020\r\nER  - \r\n");
+        QCOMPARE(generic.entries.size(), 1);
+        QCOMPARE(generic.entries.first().publication.type, PublicationType::Other);
     }
 
     void casesAreCitedInEitherForm()

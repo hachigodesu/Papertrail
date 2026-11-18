@@ -127,7 +127,7 @@ const QList<LibraryTab> kTabs = {
     LibraryTab::All,       LibraryTab::JournalIssues,         LibraryTab::JournalArticles,
     LibraryTab::Preprints, LibraryTab::ConferencePapers,       LibraryTab::Textbooks,
     LibraryTab::ThesesAndDissertations, LibraryTab::TechnicalReports, LibraryTab::Standards,
-    LibraryTab::CaseLaw,   LibraryTab::Other,
+    LibraryTab::DatasheetsManuals, LibraryTab::CaseLaw, LibraryTab::Other,
 };
 
 struct RowRange {
@@ -540,7 +540,7 @@ void MainWindow::buildToolbar()
     example(QStringLiteral("note:welds"), tr("In your highlights and notes"));
     example(QStringLiteral("in:\"nature 2024\""), tr("Articles in an issue, proceedings or book with this title"));
     heading(tr("Kind and date"));
-    example(QStringLiteral("type:thesis"), tr("Of a type: thesis, issue, book, standard..."));
+    example(QStringLiteral("type:thesis"), tr("Of a type: thesis, issue, book, standard, datasheet..."));
     example(QStringLiteral("year:2020"), tr("From a year"));
     example(QStringLiteral("year:>2010"), tr("After a year. Also <, >= and <="));
     example(QStringLiteral("year:2015..2020"), tr("From a range of years"));
@@ -1512,6 +1512,7 @@ const QList<QPair<LibraryTab, QString>> kTabKeys = {
     {LibraryTab::ThesesAndDissertations, QStringLiteral("theses_and_dissertations")},
     {LibraryTab::TechnicalReports, QStringLiteral("technical_reports")},
     {LibraryTab::Standards, QStringLiteral("standards")},
+    {LibraryTab::DatasheetsManuals, QStringLiteral("datasheets_manuals")},
     {LibraryTab::CaseLaw, QStringLiteral("case_law")},
     {LibraryTab::Other, QStringLiteral("other")},
 };

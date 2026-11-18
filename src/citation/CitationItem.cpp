@@ -41,6 +41,7 @@ Kind kindFor(const Publication &publication)
     case PublicationType::Preprint: return Kind::Preprint;
     case PublicationType::Other: return Kind::Document;
     case PublicationType::CaseLaw: return Kind::Case;
+    case PublicationType::DatasheetManual: return Kind::Manual;
     }
     return Kind::Document;
 }
@@ -52,7 +53,7 @@ bool lacksDetails(const CitationItem &item)
         return item.title.isEmpty() || !item.year
                || (item.containerTitle.isEmpty() && item.neutralCitation.isEmpty() && item.caseNumber.isEmpty());
     // A report or document with nobody named is cited under the organisation responsible for it.
-    const bool organisation = (item.kind == Kind::Report || item.kind == Kind::Document)
+    const bool organisation = (item.kind == Kind::Report || item.kind == Kind::Document || item.kind == Kind::Manual)
         && (!item.institution.isEmpty() || !item.publisher.isEmpty());
     const bool nobody = item.authors.isEmpty() && item.editors.isEmpty() && item.standardBody.isEmpty() && !organisation;
     const bool notInAnything = (item.kind == Kind::Article || item.kind == Kind::Chapter || item.kind == Kind::Paper)
@@ -111,6 +112,7 @@ CitationItem citationItem(const Publication &p, const std::optional<Publication>
     item.reportNumber = p.reportNumber.trimmed();
     item.standardNumber = p.standardNumber.trimmed();
     item.standardBody = p.standardBody.simplified();
+    item.revision = p.standardRevision.simplified();
     item.court = p.court.simplified();
     item.jurisdiction = p.jurisdiction.simplified();
     item.neutralCitation = p.neutralCitation.simplified();

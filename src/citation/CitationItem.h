@@ -32,6 +32,7 @@ struct CitationItem {
         Preprint,
         Document,     // Anything else.
         Case,         // A court's judgment, cited in a legal form whatever the style: see caseCitation.
+        Manual,       // A product's datasheet or manual, under its manufacturer, which is its publisher.
     };
 
     Kind kind = Kind::Document;
@@ -70,6 +71,7 @@ struct CitationItem {
     QString reportNumber;
     QString standardNumber;
     QString standardBody;
+    QString revision; // A standard's, datasheet's or manual's, such as "C".
 
     // A case's. Its name is the title, and its law report the container, with the volume and first page.
     QString court;

@@ -135,6 +135,9 @@ private slots:
         // An issue is stored under its old name, but searched for by its current one.
         QCOMPARE(parseSearch(QStringLiteral("type:issue")).types, QList<PublicationType>{PublicationType::JournalIssue});
         QCOMPARE(parseSearch(QStringLiteral("type:\"journal issue\"")).types, QList<PublicationType>{PublicationType::JournalIssue});
+        // A datasheet or manual is found by either word.
+        QCOMPARE(parseSearch(QStringLiteral("type:datasheet")).types, QList<PublicationType>{PublicationType::DatasheetManual});
+        QCOMPARE(parseSearch(QStringLiteral("type:manual")).types, QList<PublicationType>{PublicationType::DatasheetManual});
         QCOMPARE(parseSearch(QStringLiteral("type:nonsense")).ftsMatch, QStringLiteral("\"nonsense\"*"));
     }
 

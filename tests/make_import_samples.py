@@ -413,6 +413,17 @@ def judgment_pdf(path):
              extra_pages=[[(10, "1. This made-up appeal concerns a made-up contract.")]])
 
 
+def datasheet_pdf(path):
+    """A made-up product's datasheet, laid out as a manufacturer's first page would be."""
+    text_pdf(path, [(10, "Example Devices"),
+                    (22, "PX-100 Pretend Voltage Regulator"),
+                    (14, "Datasheet"),
+                    (10, "Document No. EXD-0042, Rev. C, March 2023"),
+                    (10, "Features: an output of 1.2 V to 37 V, up to 1.5 A, with thermal shutdown.")],
+             info={"Title": "PX-100 Pretend Voltage Regulator"},
+             extra_pages=[[(10, "1. Pin configuration of the made-up PX-100 and PX-100A.")]])
+
+
 def reading_ruler_pdf(path):
     """Three made-up pages for the reading ruler: a running head and a page number in the margins, a notice running up
     the side of the page, as publishers' downloads have, a heading set in two pieces on one row, then three paragraphs,
@@ -1130,6 +1141,7 @@ def main():
     reading_figures_pdf(out / "reading_figures.pdf")
     smart_jump_contents_pdf(out / "smart_jump_contents.pdf")
     judgment_pdf(out / "judgment.pdf")
+    datasheet_pdf(out / "datasheet.pdf")
     (out / "blank.pdf").write_bytes(build_pdf([b""]))
     encrypted_pdf(out / "encrypted.pdf", [(20, "Locked Paper"), (10, "You should not be able to read this text.")])
 

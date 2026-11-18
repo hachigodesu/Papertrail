@@ -10,6 +10,7 @@ const QList<PublicationType> &allPublicationTypes()
         PublicationType::Textbook, PublicationType::Book, PublicationType::BookChapter,
         PublicationType::Thesis, PublicationType::Dissertation, PublicationType::TechnicalReport,
         PublicationType::Standard, PublicationType::Preprint, PublicationType::Other, PublicationType::CaseLaw,
+        PublicationType::DatasheetManual,
     };
     return types;
 }
@@ -52,6 +53,7 @@ QString toDbString(PublicationType type)
     case PublicationType::Preprint: return QStringLiteral("preprint");
     case PublicationType::Other: return QStringLiteral("other");
     case PublicationType::CaseLaw: return QStringLiteral("case_law");
+    case PublicationType::DatasheetManual: return QStringLiteral("datasheet_manual");
     }
     return QStringLiteral("other");
 }
@@ -86,6 +88,8 @@ QList<PublicationType> typesForTab(LibraryTab tab)
         return {PublicationType::TechnicalReport};
     case LibraryTab::Standards:
         return {PublicationType::Standard};
+    case LibraryTab::DatasheetsManuals:
+        return {PublicationType::DatasheetManual};
     case LibraryTab::CaseLaw:
         return {PublicationType::CaseLaw};
     case LibraryTab::Other:

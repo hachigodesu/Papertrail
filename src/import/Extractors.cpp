@@ -953,6 +953,49 @@ Classification classify(const ClassificationInput &input)
         return {PublicationType::Standard, true};
     }
 
+    // What a datasheet, manual or guideline calls itself is in its heading: the title and the page's first lines. A
+    // paper only mentions them further down, and has an abstract.
+    QStringList firstLines;
+    for (const QString &line : input.firstPage.split(u'\n')) {
+        if (!line.trimmed().isEmpty())
+            firstLines << line.simplified();
+        if (firstLines.size() == 10)
+            break;
+    }
+    const QString headingText = input.title + u'\n' + firstLines.join(u'\n').left(600);
+    const QString heading = headingText.toLower();
+    const bool paperLike = text.contains(QStringLiteral("abstract"));
+
+    // A guideline or code of practice, with its number.
+    static const QRegularExpression guideline(QStringLiteral(
+        "\\b(clinical guideline|nice guideline|guideline|recommended practice|code of practice|design guide)"
+        "s?\\s*(?:no\\.?|number)?\\s*[:#]?\\s*[a-z]{0,4}\\s*-?\\s*\\d+"));
+    if (!paperLike && guideline.match(heading).hasMatch())
+        return {PublicationType::Standard, false};
+
+    // A datasheet or manual, with a product's number or a revised document's on its first page. An application note
+    // is more like a paper, and isn't one.
+    if (!paperLike && !heading.contains(QStringLiteral("application note"))
+        && containsAny(heading, {QStringLiteral("datasheet"), QStringLiteral("data sheet"), QStringLiteral("user manual"),
+                                 QStringLiteral("user's manual"), QStringLiteral("users manual"), QStringLiteral("user guide"),
+                                 QStringLiteral("user's guide"), QStringLiteral("owner's manual"),
+                                 QStringLiteral("reference manual"), QStringLiteral("installation manual"),
+                                 QStringLiteral("installation guide"), QStringLiteral("instruction manual"),
+                                 QStringLiteral("operating instructions"), QStringLiteral("operating manual"),
+                                 QStringLiteral("service manual"), QStringLiteral("programming manual"),
+                                 QStringLiteral("programmer's manual")})) {
+        // Such as "LM317", "PX-100" or "ATmega328P": capitals and digits in one word.
+        static const QRegularExpression partNumber(QStringLiteral("\\b[A-Z][A-Za-z]{0,6}-?\\d{2,}[A-Za-z0-9-]*\\b"));
+        static const QRegularExpression revision(
+            QStringLiteral("\\brev(?:ision)?\\.?\\s*[:#]?\\s*[a-z0-9][a-z0-9.]{0,5}\\b"), QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression documentNumber(
+            QStringLiteral("\\b(?:document|doc\\.?)\\s*(?:no\\.?|number|#|id)?\\s*[:#]?\\s*[A-Z0-9][A-Z0-9-]{3,}\\b"),
+            QRegularExpression::CaseInsensitiveOption);
+        const bool revised = revision.match(input.firstPage).hasMatch() && documentNumber.match(input.firstPage).hasMatch();
+        if (partNumber.match(input.firstPage).hasMatch() || partNumber.match(input.title).hasMatch() || revised)
+            return {PublicationType::DatasheetManual, false};
+    }
+
     if (longEnoughForThesis) {
         if (containsAny(front, {QStringLiteral("doctor of philosophy"), QStringLiteral("doctoral dissertation"),
                                 QStringLiteral("doctoral thesis"), QStringLiteral("phd dissertation"),

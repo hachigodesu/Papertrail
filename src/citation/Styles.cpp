@@ -79,6 +79,12 @@ Lead leadFor(const CitationItem &item, bool conferenceCanLead)
         if (!body.isEmpty())
             return {{organisation(body)}, false};
     }
+    // A datasheet or manual is its manufacturer's.
+    if (item.kind == Kind::Manual) {
+        const QString body = item.publisher.isEmpty() ? item.institution : item.publisher;
+        if (!body.isEmpty())
+            return {{organisation(body)}, false};
+    }
     if (conferenceCanLead && item.kind == Kind::Proceedings && !item.conferenceName.isEmpty())
         return {{organisation(item.conferenceName)}, false};
     return {};
@@ -419,6 +425,19 @@ RichText harvardReference(const CitationItem &item, const QString &year, const S
         text.add(where).endSentence().add(QStringLiteral(" "));
         break;
     }
+    case Kind::Manual: {
+        text.italic(item.title).add(online).endSentence().add(QStringLiteral(" "));
+        if (!edition.isEmpty())
+            text.add(edition).add(QStringLiteral(" "));
+        if (!item.revision.isEmpty())
+            text.add(QStringLiteral("Rev. ") + item.revision).endSentence().add(QStringLiteral(" "));
+        const QString publication = harvardPublication(item, false);
+        if (!publication.isEmpty())
+            text.add(publication).endSentence().add(QStringLiteral(" "));
+        if (!item.reportNumber.isEmpty())
+            text.add(u'(' + item.reportNumber + QStringLiteral("). "));
+        break;
+    }
     case Kind::Report:
     case Kind::Case: // Cited by caseCitation instead, so never here.
     case Kind::Document: {
@@ -651,6 +670,31 @@ RichText apaReference(const CitationItem &item, const QString &year)
             text.add(publisher).endSentence().add(QStringLiteral(" "));
         break;
     }
+    case Kind::Manual: {
+        // Its edition, then its document number and revision, in one bracket after the title.
+        QStringList numbers;
+        if (!item.reportNumber.isEmpty())
+            numbers << QStringLiteral("Document No. ") + item.reportNumber;
+        if (!item.revision.isEmpty())
+            numbers << QStringLiteral("Rev. ") + item.revision;
+        QStringList details;
+        if (!edition.isEmpty())
+            details << edition;
+        if (!numbers.isEmpty())
+            details << numbers.join(QStringLiteral("; "));
+        const QString bracket = details.join(QStringLiteral(", "));
+        if (!titleLeads) {
+            text.italic(item.title);
+            if (!bracket.isEmpty())
+                text.add(QStringLiteral(" (") + bracket + u')');
+            text.endSentence().add(QStringLiteral(" "));
+        } else if (!numbers.isEmpty()) {
+            text.add(u'(' + numbers.join(QStringLiteral("; ")) + QStringLiteral("). "));
+        }
+        if (!publisher.isEmpty())
+            text.add(publisher).endSentence().add(QStringLiteral(" "));
+        break;
+    }
     case Kind::Preprint:
         if (!titleLeads)
             text.italic(item.title).add(QStringLiteral(" [Preprint]")).endSentence().add(QStringLiteral(" "));
@@ -857,6 +901,18 @@ RichText ieeeReference(const CitationItem &item)
         text.italic(item.title).add(QStringLiteral(", "));
         ieeeTail(text, {item.standardNumber, year}, item);
         break;
+    case Kind::Manual:
+        // IEEE's form for a manual, which names its company after the title. Only people lead it.
+        if (!item.authors.isEmpty()) {
+            ieeeNames(text, item.authors, false);
+            text.add(QStringLiteral(", "));
+        }
+        text.italic(item.title).add(QStringLiteral(", "));
+        ieeeTail(text,
+                 {edition, item.reportNumber, item.revision.isEmpty() ? QString() : QStringLiteral("Rev. ") + item.revision,
+                  item.publisher, item.place, year},
+                 item);
+        break;
     case Kind::Preprint:
         ieeeAuthor(text, item);
         quotedTitle(text, item.title, QStringLiteral(","));
@@ -1028,6 +1084,22 @@ RichText chicagoReference(const CitationItem &item, const QString &year)
             && lead.people.first().family.compare(item.publisher, Qt::CaseInsensitive) == 0;
         if (!item.publisher.isEmpty() && !publisherLeads)
             text.add(item.publisher).endSentence().add(QStringLiteral(" "));
+        break;
+    }
+    case Kind::Manual: {
+        if (!edition.isEmpty())
+            text.add(edition).endSentence().add(QStringLiteral(" "));
+        if (!item.revision.isEmpty())
+            text.add(QStringLiteral("Rev. ") + item.revision).endSentence().add(QStringLiteral(" "));
+        if (!item.reportNumber.isEmpty())
+            text.add(QStringLiteral("Document no. ") + item.reportNumber).endSentence().add(QStringLiteral(" "));
+        const bool publisherLeads = lead.people.size() == 1 && isOrganisation(lead.people.first())
+            && lead.people.first().family.compare(item.publisher, Qt::CaseInsensitive) == 0;
+        if (!item.publisher.isEmpty() && !publisherLeads) {
+            text.add(item.place.isEmpty() ? item.publisher : item.place + QStringLiteral(": ") + item.publisher)
+                .endSentence()
+                .add(QStringLiteral(" "));
+        }
         break;
     }
     case Kind::Standard: {

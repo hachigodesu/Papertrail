@@ -292,22 +292,26 @@ private slots:
     {
         QTest::addColumn<QString>("file");
         QTest::addColumn<int>("type");
-        QTest::newRow("thesis") << "thesis.pdf" << int(PublicationType::Thesis);
-        QTest::newRow("dissertation") << "dissertation.pdf" << int(PublicationType::Dissertation);
-        QTest::newRow("report") << "report.pdf" << int(PublicationType::TechnicalReport);
-        QTest::newRow("standard") << "standard.pdf" << int(PublicationType::Standard);
-        QTest::newRow("conference") << "conference.pdf" << int(PublicationType::ConferencePaper);
-        QTest::newRow("preprint wording isn't either") << "preprint_stamp.pdf" << int(PublicationType::JournalArticle);
+        QTest::addColumn<bool>("toCheck");
+        QTest::newRow("thesis") << "thesis.pdf" << int(PublicationType::Thesis) << false;
+        QTest::newRow("dissertation") << "dissertation.pdf" << int(PublicationType::Dissertation) << false;
+        QTest::newRow("report") << "report.pdf" << int(PublicationType::TechnicalReport) << false;
+        QTest::newRow("standard") << "standard.pdf" << int(PublicationType::Standard) << false;
+        QTest::newRow("conference") << "conference.pdf" << int(PublicationType::ConferencePaper) << false;
+        QTest::newRow("preprint wording isn't either") << "preprint_stamp.pdf" << int(PublicationType::JournalArticle) << false;
+        // Only ever a guess, so always looked at by someone.
+        QTest::newRow("datasheet") << "datasheet.pdf" << int(PublicationType::DatasheetManual) << true;
     }
 
     void eachKindOfDocumentIsClassified()
     {
         QFETCH(QString, file);
         QFETCH(int, type);
+        QFETCH(bool, toCheck);
         copySample(file.toUtf8().constData());
         const Publication p = importOne();
         QCOMPARE(int(p.type), type);
-        QVERIFY(!p.needsReview);
+        QCOMPARE(p.needsReview, toCheck);
     }
 
     void aJudgmentIsCaseLawToBeChecked()

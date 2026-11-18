@@ -73,3 +73,7 @@ cite: [1]
 [case_uk]
 ref: [1] *Made-Up Holdings Ltd v Another Example Plc* [2021] EWCA Civ 1234, [2021] 1 WLR 567
 cite: [1]
+
+[manual]
+ref: [1] *PX-100 Pretend Voltage Regulator*, EXD-0042, Rev. C, Example Devices, Leeds, 2023. [Online]. Available: https://example.org/px100.pdf
+cite: [1]

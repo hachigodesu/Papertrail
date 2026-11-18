@@ -641,7 +641,8 @@ void DetailsPanel::reload()
         where << tr("Pages %1").arg(p.pages);
     addFact(tr("Where"), where.join(QStringLiteral(", ")));
 
-    addFact(tr("Publisher"), p.publisher);
+    const bool datasheet = p.type == PublicationType::DatasheetManual;
+    addFact(datasheet ? tr("Manufacturer") : tr("Publisher"), p.publisher);
     addFact(tr("Place"), p.place);
     addFact(tr("Edition"), p.edition);
     addFact(tr("Series"), p.series);
@@ -650,7 +651,8 @@ void DetailsPanel::reload()
     addFact(tr("Institution"), p.institution);
     addFact(tr("Department"), p.department);
     addFact(tr("Degree"), p.degree);
-    addFact(tr("Report no."), p.reportNumber);
+    addFact(datasheet ? tr("Document no.") : tr("Report no."), p.reportNumber);
+    addFact(tr("Products"), p.productNumbers);
     addFact(tr("Standard"), p.standardNumber);
     addFact(tr("Issued by"), p.standardBody);
     addFact(tr("Revision"), p.standardRevision);

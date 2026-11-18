@@ -692,6 +692,38 @@ private slots:
         QVERIFY(!typeChange(PublicationType::Thesis, PublicationType::Dissertation));
         QVERIFY(!typeChange(PublicationType::Preprint, PublicationType::JournalArticle)); // Only the user decides.
         QVERIFY(!typeChange(PublicationType::JournalArticle, PublicationType::Preprint));
+        // Sources call a datasheet or manual a report or a book, so nothing moves to or from one.
+        QVERIFY(!typeChange(PublicationType::DatasheetManual, PublicationType::TechnicalReport));
+        QVERIFY(!typeChange(PublicationType::DatasheetManual, PublicationType::Book));
+        QVERIFY(!typeChange(PublicationType::Other, PublicationType::DatasheetManual));
+        QVERIFY(!typeChange(PublicationType::TechnicalReport, PublicationType::DatasheetManual));
+    }
+
+    void aDatasheetIsOnlyLookedUpByItsIdentifiers()
+    {
+        Publication p;
+        p.type = PublicationType::DatasheetManual;
+        p.title = QStringLiteral("PX-100 Pretend Voltage Regulator with Thermal Shutdown");
+        p.publisher = QStringLiteral("Example Devices");
+        const qint64 id = m_publications->create(p);
+        // Its title is mostly a product's name, which a source of papers would only match to something else.
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"), true, true);
+        run();
+        QCOMPARE(m_fake->count(), 0);
+
+        // A DOI it carries is looked up, but never by its title, and it stays what it is.
+        Publication withDoi = *m_publications->get(id);
+        withDoi.doi = QStringLiteral("10.1000/example.2020.7");
+        m_publications->update(withDoi);
+        m_fake->answer(QStringLiteral("api.crossref.org/works/"), fixture("crossref_work.json"));
+        m_lookups->enqueue({id}, QStringLiteral("online_auto"), true, true);
+        run();
+        QVERIFY(m_fake->count() > 0);
+        for (const QString &asked : std::as_const(m_fake->asked)) {
+            QVERIFY2(!asked.contains(QStringLiteral("query.bibliographic")) && !asked.contains(QStringLiteral("search=")),
+                     qPrintable(asked));
+        }
+        QCOMPARE(m_publications->get(id)->type, PublicationType::DatasheetManual);
     }
 
     // ---- The modes ----

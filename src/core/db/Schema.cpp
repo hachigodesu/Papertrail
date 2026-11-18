@@ -806,6 +806,125 @@ ON publication BEGIN
 END;
 )sql";
 
+// Datasheets and manuals, a type of their own, with the products, parts or models each covers. The table is made
+// again as migration 20 made it, for the type's check.
+const char *const kDatasheetTable = R"sql(
+CREATE TABLE publication_new (
+    id                  INTEGER PRIMARY KEY,
+    uuid                TEXT NOT NULL UNIQUE,
+    type                TEXT NOT NULL CHECK (type IN (
+                            'journal_volume', 'journal_article', 'conference_proceedings',
+                            'conference_paper', 'textbook', 'book', 'book_chapter', 'thesis',
+                            'dissertation', 'technical_report', 'standard', 'preprint', 'other', 'case_law',
+                            'datasheet_manual')),
+    parent_id           INTEGER REFERENCES publication(id) ON DELETE CASCADE,
+    page_start          INTEGER,
+    page_end            INTEGER,
+
+    title               TEXT NOT NULL DEFAULT '',
+    subtitle            TEXT,
+    abstract            TEXT,
+    year                INTEGER,
+    month               INTEGER CHECK (month BETWEEN 1 AND 12),
+    day                 INTEGER CHECK (day BETWEEN 1 AND 31),
+    language            TEXT,
+    url                 TEXT,
+    edition             TEXT,
+    series              TEXT,
+
+    doi                 TEXT,
+    isbn10              TEXT,
+    isbn13              TEXT,
+    issn                TEXT,
+    eissn               TEXT,
+    arxiv_id            TEXT,
+    pmid                TEXT,
+
+    container_title     TEXT,
+    volume              TEXT,
+    issue               TEXT,
+    pages               TEXT,
+    publisher           TEXT,
+    place               TEXT,
+
+    conference_name     TEXT,
+    conference_location TEXT,
+
+    institution         TEXT,
+    department          TEXT,
+    degree              TEXT,
+
+    report_number       TEXT,
+
+    standard_number     TEXT,
+    standard_body       TEXT,
+    standard_revision   TEXT,
+    standard_status     TEXT,
+
+    read_status         TEXT NOT NULL DEFAULT 'unread'
+                        CHECK (read_status IN ('unread', 'reading', 'read')),
+    rating              INTEGER CHECK (rating BETWEEN 1 AND 5),
+    notes               TEXT,
+    extra_json          TEXT,
+
+    needs_review        INTEGER NOT NULL DEFAULT 0 CHECK (needs_review IN (0, 1)),
+
+    title_sort          TEXT NOT NULL DEFAULT '',
+    first_author_sort   TEXT NOT NULL DEFAULT '',
+    authors_display     TEXT NOT NULL DEFAULT '',
+
+    created_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL,
+
+    court               TEXT,
+    jurisdiction        TEXT,
+    neutral_citation    TEXT,
+    case_number         TEXT,
+    case_citation_form  TEXT CHECK (case_citation_form IN ('uk', 'us')),
+
+    product_numbers     TEXT
+) STRICT;
+)sql";
+
+const char *const kDatasheetColumns =
+    "id, uuid, type, parent_id, page_start, page_end, title, subtitle, abstract, year, month, day, language, url, edition, "
+    "series, doi, isbn10, isbn13, issn, eissn, arxiv_id, pmid, container_title, volume, issue, pages, publisher, place, "
+    "conference_name, conference_location, institution, department, degree, report_number, standard_number, standard_body, "
+    "standard_revision, standard_status, read_status, rating, notes, extra_json, needs_review, title_sort, first_author_sort, "
+    "authors_display, created_at, updated_at, court, jurisdiction, neutral_citation, case_number, case_citation_form";
+
+// The products covered are searched as identifiers, so publication_fts itself doesn't change.
+const char *const kDatasheetSearchTriggers = R"sql(
+DROP TRIGGER IF EXISTS publication_fts_insert;
+DROP TRIGGER IF EXISTS publication_fts_update;
+CREATE TRIGGER publication_fts_insert AFTER INSERT ON publication BEGIN
+    INSERT INTO publication_fts (rowid, title, abstract, authors, tags, container, publisher, identifiers)
+    VALUES (new.id,
+            trim(new.title || ' ' || coalesce(new.subtitle, '')),
+            new.abstract, '', '',
+            coalesce(new.container_title, '') || ' ' || coalesce(new.conference_name, ''),
+            concat_ws(' ', new.publisher, new.institution, new.standard_body, new.court),
+            concat_ws(' ', new.doi, new.isbn10, new.isbn13, new.issn, new.eissn, new.arxiv_id, new.pmid,
+                      new.report_number, new.standard_number, new.neutral_citation, new.case_number,
+                      new.product_numbers));
+END;
+CREATE TRIGGER publication_fts_update AFTER UPDATE OF
+    title, subtitle, abstract, container_title, conference_name, publisher, institution, standard_body,
+    doi, isbn10, isbn13, issn, eissn, arxiv_id, pmid, report_number, standard_number, court, neutral_citation, case_number,
+    product_numbers
+ON publication BEGIN
+    UPDATE publication_fts SET
+        title = trim(new.title || ' ' || coalesce(new.subtitle, '')),
+        abstract = new.abstract,
+        container = coalesce(new.container_title, '') || ' ' || coalesce(new.conference_name, ''),
+        publisher = concat_ws(' ', new.publisher, new.institution, new.standard_body, new.court),
+        identifiers = concat_ws(' ', new.doi, new.isbn10, new.isbn13, new.issn, new.eissn, new.arxiv_id, new.pmid,
+                                new.report_number, new.standard_number, new.neutral_citation, new.case_number,
+                                new.product_numbers)
+    WHERE rowid = new.id;
+END;
+)sql";
+
 // Bookmarks inside documents, papers related to a publication as OpenAlex lists them, and sorting by rating and
 // by when something was last opened.
 //
@@ -893,14 +1012,17 @@ CREATE INDEX IF NOT EXISTS publication_rating ON publication(rating) WHERE ratin
 CREATE INDEX IF NOT EXISTS reading_state_last_opened ON reading_state(last_opened);
 )sql";
 
-void addCaseLaw(Database &db)
+// Makes `publication` again from `table`, which creates `publication_new`, copying `columns`, unless the table's SQL
+// already has `marker`. Its indexes and triggers are made again as they were, then `searchTriggers` replaces those.
+void rebuildPublications(Database &db, const QString &marker, const char *table, const char *columns,
+                         const char *searchTriggers)
 {
     // Each read of the schema is finished with before it's changed, which an unfinished one would stop.
     {
-        auto table = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'publication'");
-        if (!table->step())
+        auto existing = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'publication'");
+        if (!existing->step())
             throw DbError(0, "the library has no publications table");
-        if (table->textAt(0).contains(QStringLiteral("'case_law'")))
+        if (existing->textAt(0).contains(marker))
             return; // Made already.
     }
 
@@ -916,15 +1038,25 @@ void addCaseLaw(Database &db)
     // The others' references to the table are by name, so they find the new one, which mustn't change them as it's
     // renamed.
     db.exec("PRAGMA legacy_alter_table = ON");
-    db.exec(kCaseLawTable);
-    db.exec((QByteArray("INSERT INTO publication_new (") + kCaseLawColumns + ") SELECT " + kCaseLawColumns + " FROM publication")
-                .constData());
+    db.exec(table);
+    db.exec((QByteArray("INSERT INTO publication_new (") + columns + ") SELECT " + columns + " FROM publication").constData());
     db.exec("DROP TABLE publication");
     db.exec("ALTER TABLE publication_new RENAME TO publication");
     db.exec("PRAGMA legacy_alter_table = OFF");
     for (const QByteArray &sql : std::as_const(again))
         db.exec(sql.constData());
-    db.exec(kCaseLawSearchTriggers);
+    db.exec(searchTriggers);
+}
+
+void addCaseLaw(Database &db)
+{
+    rebuildPublications(db, QStringLiteral("'case_law'"), kCaseLawTable, kCaseLawColumns, kCaseLawSearchTriggers);
+}
+
+void addDatasheets(Database &db)
+{
+    rebuildPublications(db, QStringLiteral("'datasheet_manual'"), kDatasheetTable, kDatasheetColumns,
+                        kDatasheetSearchTriggers);
 }
 
 } // namespace
@@ -955,6 +1087,7 @@ const std::vector<Migration> &libraryMigrations()
         {21, kMigration21},
         {22, kMigration22},
         {23, kMigration23},
+        {24, nullptr, addDatasheets, true},
     };
     return migrations;
 }
