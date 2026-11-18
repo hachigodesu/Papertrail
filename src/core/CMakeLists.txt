@@ -57,6 +57,8 @@ add_library(papertrail_core STATIC
     text/References.cpp
     text/References.h
     text/Sentences.cpp
+    text/TableCells.cpp
+    text/TableCells.h
     text/Sentences.h)
 
 target_include_directories(papertrail_core PUBLIC ${CMAKE_SOURCE_DIR}/src)

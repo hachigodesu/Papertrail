@@ -6,6 +6,7 @@
 #include "ui/DocumentClient.h"
 #include "ui/PageView.h"
 #include "ui/ReferencePreview.h"
+#include "ui/TableDialog.h"
 
 #include <QList>
 #include <QRectF>
@@ -195,6 +196,11 @@ public:
     QMenu *areaMenu(int page, const QRectF &rect, QWidget *parent);
     // Puts a picture of an area on the clipboard, once it's made.
     void copyAreaPicture(qint64 id);
+    // Reads the table in part of a page, or in a kept area, and shows it to copy into a spreadsheet or save as CSV.
+    void copyAsTable(int page, const QRectF &rect);
+    void copyAreaAsTable(qint64 id);
+    // The table last shown, while it's open. For tests.
+    TableDialog *tableDialog() const { return m_tableDialog; }
 
     // What the words at a point on a page refer to, such as "Figure 3", shown in a preview to go to from. As Ctrl and a
     // click does it.
@@ -298,6 +304,7 @@ private:
     void onReference(const papertrail::ui::ReaderReference &reference);
     void showReferencePreview(const QImage &picture);
     void onAreaText(qint64 token, int page, const QString &text);
+    void onTable(qint64 token, int page, const papertrail::core::TableGrid &table);
     void onAreaPicture(qint64 token, int page, const QImage &image);
     void requestAreaPictures();
     void askToEditNote(qint64 id);
@@ -321,6 +328,8 @@ private:
     };
     QHash<qint64, DraftAnnotation> m_drafts;
     qint64 m_nextDraft = 1;
+    qint64 m_tableWanted = 0; // The table last asked for, as only that one's shown.
+    QPointer<TableDialog> m_tableDialog;
     QHash<qint64, core::Annotation> m_areaDrafts; // Areas waiting for the words inside them, by draft.
     QHash<qint64, QImage> m_areaPictures;         // For the Notes panel, by annotation.
     QSet<qint64> m_areaPicturesAsked;

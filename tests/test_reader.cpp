@@ -19,6 +19,7 @@
 #include "ui/ReadAloudBar.h"
 #include "ui/ReaderTab.h"
 #include "ui/StitchDialog.h"
+#include "ui/TableDialog.h"
 #include "core/repo/StitchRepository.h"
 #include "import/Stitching.h"
 #include "import/ImportService.h"
@@ -28,6 +29,8 @@
 #include "ui/Theme.h"
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QMimeData>
 #include <QClipboard>
 #include <QComboBox>
 #include <QCryptographicHash>
@@ -46,6 +49,7 @@
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
@@ -592,6 +596,118 @@ private slots:
                      qPrintable(row + QStringLiteral(" in: ") + m_speaker->said.join(QStringLiteral(" | "))));
         }
         reader->stopReadingAloud();
+    }
+
+    void anAreaOverATableIsReadAsRowsOfCells()
+    {
+        using Rows = QList<QStringList>;
+        // In points from the top of the page, which the made-up files give from the foot.
+        const auto fromTop = [](double left, double bottom, double right, double top) {
+            return QRectF(left, 842 - top, right - left, top - bottom);
+        };
+        {
+            DocumentClient client(worker());
+            QSignalSpy opened(&client, &DocumentClient::opened);
+            QSignalSpy tables(&client, &DocumentClient::tableReady);
+            client.open(sample(QStringLiteral("reading_table.pdf")), {});
+            QVERIFY(opened.wait(kWaitMs));
+            // Its words line up in columns, with no rules. The caption above and the notes below are left out.
+            client.requestAreaTable(3, 0, fromTop(36, 612, 295, 726));
+            QVERIFY(tables.wait(kWaitMs));
+            QCOMPARE(tables.first().at(0).toLongLong(), qint64(3));
+            const auto table = tables.first().at(2).value<papertrail::core::TableGrid>();
+            QVERIFY(!table.ruled);
+            QCOMPARE(table.columns, 4);
+            const Rows rows = papertrail::core::tableRows(table, true);
+            QCOMPARE(rows, (Rows{{QString(), QStringLiteral("Group A"), QStringLiteral("Group B"), QStringLiteral("Total")},
+                                 {QStringLiteral("Number"), QStringLiteral("30 (60%)"), QStringLiteral("20 (40%)"), QStringLiteral("50")},
+                                 {QStringLiteral("Made-up section"), QString(), QString(), QString()},
+                                 {QStringLiteral("First"), QStringLiteral("12 (40%)"), QStringLiteral("8 (40%)"), QStringLiteral("20 (40%)")},
+                                 {QStringLiteral("Second"), QStringLiteral("18 (60%)"), QStringLiteral("12 (60%)"), QStringLiteral("30 (60%)")},
+                                 {QStringLiteral("Mean size of the measure"), QStringLiteral("3.1 (0.4)"), QStringLiteral("3.3 (0.5)"),
+                                  QStringLiteral("3.2 (0.4)")},
+                                 {QStringLiteral("Other"), QStringLiteral("1 (3%)"), QStringLiteral("2 (10%)"), QStringLiteral("3 (6%)")}}));
+            QCOMPARE(papertrail::core::tableRows(table, false).size(), 8);
+
+            // Nothing there, and a page that isn't there, are answered with no rows.
+            client.requestAreaTable(4, 0, fromTop(400, 100, 500, 200));
+            QVERIFY(tables.wait(kWaitMs));
+            QVERIFY(tables.last().at(2).value<papertrail::core::TableGrid>().rows.isEmpty());
+            client.requestAreaTable(5, 9, fromTop(36, 612, 295, 726));
+            QVERIFY(tables.wait(kWaitMs));
+            QVERIFY(tables.last().at(2).value<papertrail::core::TableGrid>().rows.isEmpty());
+        }
+        {
+            DocumentClient client(worker());
+            QSignalSpy opened(&client, &DocumentClient::opened);
+            QSignalSpy tables(&client, &DocumentClient::tableReady);
+            client.open(sample(QStringLiteral("table_ruled.pdf")), {});
+            QVERIFY(opened.wait(kWaitMs));
+            // Its columns from its rules, and a cell over two lines between two rules, its first column filled on both.
+            client.requestAreaTable(1, 0, fromTop(45, 648, 435, 764));
+            QVERIFY(tables.wait(kWaitMs));
+            const auto table = tables.first().at(2).value<papertrail::core::TableGrid>();
+            QVERIFY(table.ruled);
+            QCOMPARE(papertrail::core::tableRows(table, true),
+                     (Rows{{QStringLiteral("Part"), QStringLiteral("Material"), QStringLiteral("Change (%)"), QStringLiteral("Note")},
+                           {QStringLiteral("Made-up long bracket"), QStringLiteral("Steel"), QStringLiteral("-3.2"), QStringLiteral("Two lines of note")},
+                           {QStringLiteral("Bolt"), QStringLiteral("Brass"), QStringLiteral("+1.5"), QString()},
+                           {QStringLiteral("Nut"), QStringLiteral("Made-up alloy"), QStringLiteral("0"), QStringLiteral("=Not a formula")},
+                           {QStringLiteral("Washer"), QStringLiteral("Steel"), QStringLiteral("-0.4"), QStringLiteral("Last row")}}));
+        }
+
+        // From the menu after drawing an area, shown to check, copied and saved for a spreadsheet.
+        ReaderTab *reader = openSample(QStringLiteral("table_ruled.pdf"));
+        QVERIFY(reader && reader->isReady());
+        const QRectF area = fromTop(45, 648, 435, 764);
+        std::unique_ptr<QMenu> menu(reader->areaMenu(0, area, nullptr));
+        QAction *copy = menu->findChild<QAction *>(QStringLiteral("copyAsTable"));
+        QVERIFY(copy);
+        copy->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(reader->tableDialog() && reader->tableDialog()->isVisible(), kWaitMs);
+        TableDialog *dialog = reader->tableDialog();
+        auto *preview = dialog->findChild<QTableWidget *>(QStringLiteral("tablePreview"));
+        QVERIFY(preview);
+        QCOMPARE(preview->rowCount(), 5);
+        QCOMPARE(preview->columnCount(), 4);
+        QCOMPARE(preview->item(3, 3)->text(), QStringLiteral("=Not a formula"));
+        auto *join = dialog->findChild<QCheckBox *>(QStringLiteral("joinLines"));
+        QVERIFY(join && join->isEnabled() && join->isChecked());
+        join->setChecked(false);
+        QCOMPARE(preview->rowCount(), 6);
+        QCOMPARE(preview->item(2, 0)->text(), QStringLiteral("bracket"));
+        join->setChecked(true);
+
+        dialog->copyToClipboard();
+        const QMimeData *copied = QApplication::clipboard()->mimeData();
+        QVERIFY(copied);
+        QVERIFY2(copied->text().startsWith(QStringLiteral("Part\tMaterial\tChange (%)\tNote\nMade-up long bracket\tSteel\t-3.2\t")),
+                 qPrintable(copied->text()));
+        // A cell a spreadsheet would take for a formula is kept as text.
+        QVERIFY(copied->text().contains(QStringLiteral("\t'=Not a formula\n")));
+        QVERIFY(copied->html().contains(QStringLiteral("<td>Made-up long bracket</td>")));
+
+        const QString saved = m_dir->filePath(QStringLiteral("table.csv"));
+        QVERIFY(dialog->saveTo(saved));
+        QFile file(saved);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray csv = file.readAll();
+        QVERIFY(csv.startsWith("\xEF\xBB\xBFPart,Material,Change (%),Note\r\nMade-up long bracket,Steel,-3.2,Two lines of note\r\n"));
+        QVERIFY(csv.contains("Bolt,Brass,+1.5,\r\n"));
+        QVERIFY(csv.endsWith("Washer,Steel,-0.4,Last row\r\n"));
+        QCOMPARE(TableDialog::suggestedFileName(QStringLiteral("A Made-Up: Paper/Title?"), 2), QStringLiteral("A Made-Up Paper Title, page 3.csv"));
+        dialog->close();
+        QTRY_VERIFY(!reader->tableDialog());
+
+        // And from a kept area's own menu.
+        QSignalSpy changed(reader, &ReaderTab::annotationsChanged);
+        reader->annotateArea(0, area);
+        QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), kWaitMs);
+        const qint64 kept = reader->annotations().last().id;
+        reader->copyAreaAsTable(kept);
+        QTRY_VERIFY_WITH_TIMEOUT(reader->tableDialog(), kWaitMs);
+        QCOMPARE(reader->tableDialog()->rows().size(), 5);
+        reader->tableDialog()->close();
     }
 
     void aFigureIsOneRulerStopAndItsLabelsArentRead()

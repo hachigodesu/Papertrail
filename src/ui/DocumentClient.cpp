@@ -31,6 +31,29 @@ QList<QRectF> rectsFromJson(const QJsonValue &value)
     return rects;
 }
 
+// A table as the reader's process gives it, every row as long as the rest.
+core::TableGrid tableFrom(const QJsonObject &reply)
+{
+    constexpr int kMostColumns = 500;
+    constexpr qsizetype kMostRows = 20000;
+    core::TableGrid table;
+    table.columns = qBound(0, reply.value(QStringLiteral("columns")).toInt(), kMostColumns);
+    table.ruled = reply.value(QStringLiteral("ruled")).toBool();
+    const QJsonArray rows = reply.value(QStringLiteral("rows")).toArray();
+    const QJsonArray continues = reply.value(QStringLiteral("continues")).toArray();
+    for (qsizetype r = 0; r < rows.size() && r < kMostRows && table.columns > 0; ++r) {
+        const QJsonArray cells = rows.at(r).toArray();
+        QStringList row;
+        for (int c = 0; c < table.columns; ++c)
+            row << (c < cells.size() ? cells.at(c).toString() : QString());
+        table.rows << row;
+        table.continues << (r > 0 && continues.at(r).toBool());
+    }
+    if (table.rows.isEmpty())
+        table.columns = 0;
+    return table;
+}
+
 } // namespace
 
 DocumentClient::DocumentClient(const QString &workerPath, QObject *parent)
@@ -287,6 +310,9 @@ void DocumentClient::handleReply(const QJsonObject &reply, const QByteArray &dat
     case Kind::AreaText:
         emit areaTextReady(request.token, request.page, ok ? reply.value(QStringLiteral("text")).toString() : QString());
         break;
+    case Kind::AreaTable:
+        emit tableReady(request.token, request.page, ok ? tableFrom(reply) : core::TableGrid{});
+        break;
     case Kind::Lines: {
         QList<ReaderTextLine> lines;
         for (const QJsonValue &value : reply.value(QStringLiteral("lines")).toArray()) {
@@ -444,6 +470,9 @@ void DocumentClient::handleLostRequest()
         break;
     case Kind::AreaText:
         emit areaTextReady(request.token, request.page, QString());
+        break;
+    case Kind::AreaTable:
+        emit tableReady(request.token, request.page, core::TableGrid{});
         break;
     case Kind::Lines:
         emit linesReady(request.page, {});
@@ -622,6 +651,19 @@ void DocumentClient::requestAreaText(qint64 token, int page, const QRectF &rect)
     request.token = token;
     request.page = page;
     request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("areatext")},
+                               {QStringLiteral("page"), page},
+                               {QStringLiteral("rect"), QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()}}};
+    m_urgent << request;
+    pump();
+}
+
+void DocumentClient::requestAreaTable(qint64 token, int page, const QRectF &rect)
+{
+    Request request;
+    request.kind = Kind::AreaTable;
+    request.token = token;
+    request.page = page;
+    request.body = QJsonObject{{QStringLiteral("op"), QStringLiteral("areatable")},
                                {QStringLiteral("page"), page},
                                {QStringLiteral("rect"), QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()}}};
     m_urgent << request;
