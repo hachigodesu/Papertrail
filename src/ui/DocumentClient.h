@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/text/TableCells.h"
+
 #include <QImage>
 #include <QJsonObject>
 #include <QList>
@@ -133,6 +135,9 @@ public:
     void requestAreaPicture(qint64 token, int page, const QRectF &rect, double scale, bool now);
     // The text inside part of a page. The answer always comes, empty if there's none or it couldn't be read.
     void requestAreaText(qint64 token, int page, const QRectF &rect);
+    // The table inside part of a page, as rows of cells, wanted now. The answer always comes, with no rows if there's
+    // no text there or it couldn't be read.
+    void requestAreaTable(qint64 token, int page, const QRectF &rect);
     // A page's lines of text, with where each character is.
     // A page's lines, in the background unless `now`, as when reading along needs them at once.
     void requestLines(int page, bool now = false);
@@ -175,6 +180,7 @@ signals:
     void thumbnailReady(int page, const QImage &image);
     void areaPictureReady(qint64 token, int page, const QImage &image);
     void areaTextReady(qint64 token, int page, const QString &text);
+    void tableReady(qint64 token, int page, const papertrail::core::TableGrid &table);
     void linesReady(int page, const QList<papertrail::ui::ReaderTextLine> &lines);
     void referenceReady(const papertrail::ui::ReaderReference &reference);
     void outlineReady(const QList<papertrail::ui::ReaderOutlineItem> &items);
@@ -197,7 +203,7 @@ signals:
 private:
     enum class Kind {
         Open, Layout, Sizes, Render, Thumbnail, Outline, Links, Images, Heading, Select, Bookmark, Anchor, Locate, Find,
-        Search, AreaPicture, AreaText, Lines, Reference, Recognise, RereadWords
+        Search, AreaPicture, AreaText, Lines, Reference, Recognise, RereadWords, AreaTable
     };
 
     struct Request {
@@ -267,3 +273,4 @@ Q_DECLARE_METATYPE(papertrail::ui::ReaderOutlineItem)
 Q_DECLARE_METATYPE(papertrail::ui::ReaderLink)
 Q_DECLARE_METATYPE(papertrail::ui::ReaderTextLine)
 Q_DECLARE_METATYPE(papertrail::ui::ReaderReference)
+Q_DECLARE_METATYPE(papertrail::core::TableGrid)

@@ -222,6 +222,14 @@ private slots:
                         ++pagesShown;
                     else if (pageFailed.isEmpty() && failSpy.isEmpty())
                         stuck << copy.name + QStringLiteral(" (its first page)");
+                    // So does reading a table from it, which reads its text and drawings.
+                    QSignalSpy table(&client, &ui::DocumentClient::tableReady);
+                    client.requestAreaTable(1, 0, QRectF(0, 0, 612, 842));
+                    timer.restart();
+                    while (table.isEmpty() && failSpy.isEmpty() && timer.elapsed() < kMostPerRequestMs)
+                        QTest::qWait(20);
+                    if (table.isEmpty() && failSpy.isEmpty())
+                        stuck << copy.name + QStringLiteral(" (a table on its first page)");
                 } else if (!failSpy.isEmpty()) {
                     ++failed;
                 } else {

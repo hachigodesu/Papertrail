@@ -75,6 +75,8 @@ add_library(papertrail_ui STATIC
     LibraryCheckDialog.h
     SummaryDialog.cpp
     SummaryDialog.h
+    TableDialog.cpp
+    TableDialog.h
     VolumeDialogs.cpp
     VolumeDialogs.h
     ReviewTab.cpp
