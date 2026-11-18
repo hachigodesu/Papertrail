@@ -104,6 +104,10 @@ const QList<SettingDefinition> &settingDefinitions()
         {QStringLiteral("speech.natural_offered"), false, K::ThisComputer, {}},
         // What the reading ruler marks.
         {QStringLiteral("reader.ruler"), QStringLiteral("line"), K::Value, {QStringLiteral("line"), QStringLiteral("paragraph")}},
+        // Looking up a selection: on Wikipedia and Wiktionary as well as in the library, without asking each time,
+        // and which Wikipedia, as its language's code. Empty means the window's language.
+        {QStringLiteral("lookup.online"), false, K::Value, {}},
+        {QStringLiteral("lookup.language"), QStringLiteral(""), K::Value, {}},
         {QStringLiteral("citation.style"), QStringLiteral("harvard"), K::Value,
          {QStringLiteral("harvard"), QStringLiteral("apa"), QStringLiteral("ieee"), QStringLiteral("chicago")}},
     };

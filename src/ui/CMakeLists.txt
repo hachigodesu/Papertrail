@@ -21,6 +21,8 @@ add_library(papertrail_ui STATIC
     LibraryFoldersDialog.h
     LibrarySession.cpp
     LibrarySession.h
+    LookUpPanel.cpp
+    LookUpPanel.h
     LookupThread.cpp
     LookupThread.h
     MainWindow.cpp

@@ -220,11 +220,23 @@ SettingsDialog::SettingsDialog(LibrarySession &session, const SettingsActions &a
     }
 
     auto *online = new QGroupBox(tr("Online"), this);
-    auto *onlineLayout = new QHBoxLayout(online);
+    auto *onlineColumn = new QVBoxLayout(online);
+    auto *onlineLayout = new QHBoxLayout;
     onlineLayout->addWidget(buttonFor(tr("Online lookups..."), tr("Whether and how details are looked up online"),
                                       actions.showOnlineLookups, online));
     onlineLayout->addWidget(buttonFor(tr("Claude API key..."), tr("The key used for summaries from Claude"), actions.showApiKey, online));
     onlineLayout->addStretch(1);
+    onlineColumn->addLayout(onlineLayout);
+    auto *lookUpOnline = new QCheckBox(tr("Look up selections on Wikipedia and Wiktionary without asking"), online);
+    lookUpOnline->setObjectName(QStringLiteral("lookUpOnline"));
+    lookUpOnline->setToolTip(tr("Look up, in a document's menu, then sends the chosen words to Wikipedia and Wiktionary "
+                                "at once, as well as finding them in the library. Only while lookups are online."));
+    try {
+        lookUpOnline->setChecked(m_session.settings().value(QStringLiteral("lookup.online")).toBool());
+    } catch (const std::exception &) {
+    }
+    connect(lookUpOnline, &QCheckBox::toggled, this, [this](bool on) { save(QStringLiteral("lookup.online"), on); });
+    onlineColumn->addWidget(lookUpOnline);
     layout->addWidget(online);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);

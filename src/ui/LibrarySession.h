@@ -95,6 +95,10 @@ public:
     core::SettingsStore &settings() { return *m_settings; }
     core::LibraryQuery &query() { return *m_query; }
 
+    // Whether a lookup mode has been chosen and it isn't offline, which anything going online must check first.
+    // False if the settings can't be read.
+    bool lookupsAreOnline();
+
 private:
     LibraryPaths m_paths;
     std::unique_ptr<QLockFile> m_lock;
