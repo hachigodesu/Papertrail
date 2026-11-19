@@ -3,7 +3,6 @@
 #include "ZipBook.h"
 
 #include "core/text/References.h"
-#include "core/text/TableCells.h"
 #include "engine/Document.h"
 #include "import/Extractors.h"
 
@@ -257,33 +256,34 @@ using TableRows = QList<QList<int>>;
 QList<TableRows> tablesAmong(const QList<engine::TextLine> &lines, const QList<bool> &candidate, const QList<bool> &full)
 {
     QList<int> order;
-    QList<QRectF> boxes;
     for (int i = 0; i < lines.size(); ++i) {
-        if (candidate.at(i) && !lines.at(i).rect.isEmpty()) {
+        if (candidate.at(i) && !lines.at(i).rect.isEmpty())
             order << i;
-            boxes << lines.at(i).rect;
-        }
     }
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return lines.at(a).rect.center().y() < lines.at(b).rect.center().y(); });
 
-    // The rows: lines side by side, whose heights mostly overlap the topmost's.
+    // The rows: lines side by side, whose heights mostly overlap the first's.
     struct Row {
         QList<int> pieces;
         QRectF rect;
         QRectF first;
     };
     QList<Row> rows;
-    for (const QList<int> &grouped : core::rowsOfBoxes(boxes)) {
-        Row row;
-        int top = grouped.first();
-        for (int k : grouped) {
-            row.pieces << order.at(k);
-            row.rect = row.rect.united(boxes.at(k));
-            if (boxes.at(k).center().y() < boxes.at(top).center().y() || (boxes.at(k).center().y() == boxes.at(top).center().y() && k < top))
-                top = k;
+    for (int i : std::as_const(order)) {
+        const QRectF rect = lines.at(i).rect;
+        if (!rows.isEmpty()) {
+            Row &row = rows.last();
+            const double overlap = qMin(row.first.bottom(), rect.bottom()) - qMax(row.first.top(), rect.top());
+            if (overlap > qMin(row.first.height(), rect.height()) * 0.5) {
+                row.pieces << i;
+                row.rect = row.rect.united(rect);
+                continue;
+            }
         }
-        row.first = boxes.at(top);
-        rows << row;
+        rows << Row{{i}, rect, rect};
     }
+    for (Row &row : rows)
+        std::sort(row.pieces.begin(), row.pieces.end(), [&](int a, int b) { return lines.at(a).rect.left() < lines.at(b).rect.left(); });
 
     // A row's cells: its pieces, with those that touch, such as a superscript, taken together.
     const auto cellsOf = [&](const QList<int> &pieces) {
@@ -842,8 +842,6 @@ public:
                 lines(request, reply);
             else if (op == QStringLiteral("areatext"))
                 areaText(request, reply);
-            else if (op == QStringLiteral("areatable"))
-                areaTable(request, reply);
             else if (op == QStringLiteral("reference"))
                 reference(request, reply);
             else if (op == QStringLiteral("outline"))
@@ -1227,37 +1225,6 @@ private:
         applyPageFaults(m_path, number);
         reply.insert(QStringLiteral("page"), number);
         reply.insert(QStringLiteral("text"), m_document->textInRect(number, rectFromJson(request.value(QStringLiteral("rect")))));
-    }
-
-    // The table inside an area marked on a page, as rows of cells, from the characters inside it and the rules drawn
-    // across it.
-    void areaTable(const QJsonObject &request, QJsonObject &reply)
-    {
-        const int number = page(request);
-        const QRectF area = rectFromJson(request.value(QStringLiteral("rect")));
-        QList<core::TableLine> lines;
-        for (const engine::TextLine &line : linesOn(number))
-            lines << core::TableLine{line.text, line.chars, line.size};
-        QList<core::TableDrawing> drawings;
-        try {
-            for (const engine::Drawing &drawing : m_document->drawings(number)) {
-                if (!drawing.picture)
-                    drawings << core::TableDrawing{drawing.rect, drawing.rectangle};
-            }
-        } catch (const engine::EngineError &) {
-        }
-        const core::TableGrid grid = core::tableIn(lines, drawings, area);
-        QJsonArray rows;
-        for (const QStringList &row : grid.rows)
-            rows.append(QJsonArray::fromStringList(row));
-        QJsonArray continues;
-        for (bool carriesOn : grid.continues)
-            continues.append(carriesOn);
-        reply.insert(QStringLiteral("page"), number);
-        reply.insert(QStringLiteral("rows"), rows);
-        reply.insert(QStringLiteral("continues"), continues);
-        reply.insert(QStringLiteral("columns"), grid.columns);
-        reply.insert(QStringLiteral("ruled"), grid.ruled);
     }
 
     void outline(QJsonObject &reply)

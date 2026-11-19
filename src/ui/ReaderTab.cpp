@@ -4,7 +4,6 @@
 #include "ui/NaturalSpeaker.h"
 #include "ui/ReadAloudBar.h"
 #include "ui/Speaker.h"
-#include "ui/TableDialog.h"
 
 #include "metadata/NaturalVoices.h"
 
@@ -959,7 +958,6 @@ void ReaderTab::connectClient()
                               "with its text size."));
     });
     connect(m_client, &DocumentClient::areaTextReady, this, &ReaderTab::onAreaText);
-    connect(m_client, &DocumentClient::tableReady, this, &ReaderTab::onTable);
     connect(m_client, &DocumentClient::referenceReady, this, &ReaderTab::onReference);
     connect(m_view, &PageView::referenceWanted, this, &ReaderTab::showReferenceAt);
     connect(m_client, &DocumentClient::areaPictureReady, this, &ReaderTab::onAreaPicture);
@@ -1779,46 +1777,7 @@ QMenu *ReaderTab::areaMenu(int page, const QRectF &rect, QWidget *parent)
         if (ok)
             annotateArea(page, rect, note.trimmed());
     });
-    QAction *table = menu->addAction(tr("Copy as a table..."), this, [this, page, rect] { copyAsTable(page, rect); });
-    table->setObjectName(QStringLiteral("copyAsTable"));
     return menu;
-}
-
-void ReaderTab::copyAsTable(int page, const QRectF &rect)
-{
-    if (m_reflowable || page < 0 || rect.isEmpty())
-        return;
-    m_tableWanted = m_nextDraft++;
-    m_client->requestAreaTable(m_tableWanted, page, rect);
-}
-
-void ReaderTab::copyAreaAsTable(qint64 id)
-{
-    for (const Annotation &annotation : std::as_const(m_annotations)) {
-        if (annotation.id != id || !annotation.isArea())
-            continue;
-        const AnnotationPart &part = annotation.parts.first();
-        if (!part.rects.isEmpty())
-            copyAsTable(part.page, part.rects.first());
-        return;
-    }
-}
-
-void ReaderTab::onTable(qint64 token, int page, const core::TableGrid &table)
-{
-    if (token != m_tableWanted)
-        return;
-    m_tableWanted = 0;
-    if (table.rows.isEmpty()) {
-        emit statusMessage(tr("There's no text in that area to make a table from."));
-        return;
-    }
-    if (m_tableDialog)
-        m_tableDialog->close();
-    auto *dialog = new TableDialog(table, TableDialog::suggestedFileName(m_fullTitle, page), this);
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    m_tableDialog = dialog;
-    dialog->show();
 }
 
 void ReaderTab::onAreaChosen(int page, const QRectF &rect, const QPoint &viewportPoint)
@@ -2202,8 +2161,6 @@ void ReaderTab::addAnnotationActions(QMenu *menu, const QPoint &viewportPoint)
         addColourMenu(menu, annotation);
         if (area) {
             menu->addAction(tr("Copy picture"), this, [this, annotation] { copyAreaPicture(annotation); });
-            menu->addAction(tr("Copy as a table..."), this, [this, annotation] { copyAreaAsTable(annotation); })
-                ->setObjectName(QStringLiteral("copyAreaAsTable"));
             menu->addAction(tr("Delete area"), this, [this, annotation] { deleteAnnotation(annotation); });
         } else {
             menu->addAction(tr("Delete highlight"), this, [this, annotation] { deleteAnnotation(annotation); });

@@ -30,8 +30,6 @@ constexpr double kFrameLimitMs = 16.7;
 // Finding what a reference points at when it's nowhere, which reads the most pages it ever does.
 constexpr int kReferenceLimitMs = 2000;
 constexpr int kReferencePage = 1500;
-// Reading a table from an area over a whole page of text, never read before, with its drawings.
-constexpr int kTableLimitMs = 500;
 
 // A book with a page of ordinary text on each page, and some simple drawing, as a textbook has.
 void writeBook(const QString &path)
@@ -178,18 +176,6 @@ private slots:
             QVERIFY(!reference.found);
             check(QString::fromLatin1(what), double(timer.elapsed()), kReferenceLimitMs);
         }
-    }
-
-    void readingATableFromAWholePage()
-    {
-        QSignalSpy ready(m_client.get(), &DocumentClient::tableReady);
-        QElapsedTimer timer;
-        timer.start();
-        m_client->requestAreaTable(1, 2000, QRectF(0, 0, 595, 842));
-        QVERIFY(ready.wait(60000));
-        report("Reading a table from a whole page", timer.elapsed());
-        QVERIFY(!ready.first().at(2).value<papertrail::core::TableGrid>().rows.isEmpty());
-        check(QStringLiteral("Reading a table from a whole page"), double(timer.elapsed()), kTableLimitMs);
     }
 
     void scrollingStaysSmooth()

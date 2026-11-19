@@ -704,31 +704,6 @@ def reading_table_pdf(path):
     path.write_bytes(build_pdf([placed(items)]))
 
 
-
-def table_ruled_pdf(path):
-    """A made-up table drawn with a rule between every column and row, for copying as a table: a row of headings, two
-    cells each over two lines, an empty cell, a cell that looks like a formula, and numbers with signs. Each rule is a
-    line of its own, as most files draw them, and a caption above it is outside the table."""
-
-    def placed(items):
-        """`items` is a list of (x, y, text), in points from the bottom left, all set in 9 points."""
-        return "\n".join(f"BT /F1 9 Tf {x} {y} Td ({escape_pdf(text)}) Tj ET" for x, y, text in items)
-
-    columns = [50, 150, 250, 330, 430]
-    rows = [760, 740, 712, 692, 672, 652]
-    rules = ["0.5 w"]
-    rules += [f"{x} {rows[0]} m {x} {rows[-1]} l S" for x in columns]
-    rules += [f"{columns[0]} {y} m {columns[-1]} {y} l S" for y in rows]
-    cells = [(54, 771, "Table 2 A made-up ruled table")]
-    cells += [(54, 746, "Part"), (154, 746, "Material"), (254, 746, "Change (%)"), (334, 746, "Note")]
-    cells += [(54, 726, "Made-up long"), (54, 716, "bracket"), (154, 726, "Steel"), (254, 726, "-3.2"),
-              (334, 726, "Two lines"), (334, 716, "of note")]
-    cells += [(54, 698, "Bolt"), (154, 698, "Brass"), (254, 698, "+1.5")]
-    cells += [(54, 678, "Nut"), (154, 678, "Made-up alloy"), (254, 678, "0"), (334, 678, "=Not a formula")]
-    cells += [(54, 658, "Washer"), (154, 658, "Steel"), (254, 658, "-0.4"), (334, 658, "Last row")]
-    content = "\n".join(rules) + "\n" + placed(cells)
-    path.write_bytes(build_pdf([content.encode("latin-1")]))
-
 def smart_jump_headings_pdf(path):
     """A made-up paper whose mentions of Appendix E and Figure 4 wrap onto the start of lines in the middle of a
     paragraph, looking like a heading and a caption, before the real caption on page 2 and the real heading, in bold
@@ -1251,7 +1226,6 @@ def main():
     smart_jump_headings_pdf(out / "smart_jump_headings.pdf")
     reading_ruler_pdf(out / "reading_ruler.pdf")
     reading_table_pdf(out / "reading_table.pdf")
-    table_ruled_pdf(out / "table_ruled.pdf")
     reading_page_ends_pdf(out / "reading_page_ends.pdf")
     reading_figures_pdf(out / "reading_figures.pdf")
     smart_jump_contents_pdf(out / "smart_jump_contents.pdf")
