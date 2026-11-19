@@ -10,6 +10,7 @@
 #include "ui/DocumentClient.h"
 #include "ui/ImportThread.h"
 #include "ui/LibrarySession.h"
+#include "ui/Delegates.h"
 #include "ui/LookUpPanel.h"
 #include "ui/MainWindow.h"
 #include "ui/PageView.h"
@@ -2606,6 +2607,8 @@ private slots:
         QListWidget *list = reader->bookmarkList();
         QCOMPARE(list->count(), 1);
         QCOMPARE(list->item(0)->text(), QStringLiteral("Page 4"));
+        QVERIFY(qobject_cast<ArticleDelegate *>(list->itemDelegate()));
+        QVERIFY(list->item(0)->data(ArticleDelegate::PagesRole).toString().isEmpty()); // Its name says its page already.
 
         // Renamed in place, and kept.
         list->item(0)->setText(QStringLiteral("Made-up place"));
@@ -2638,6 +2641,8 @@ private slots:
         list = reader->bookmarkList();
         QCOMPARE(list->count(), 1);
         QCOMPARE(list->item(0)->text(), QStringLiteral("Made-up place"));
+        // With its page beneath its name.
+        QCOMPARE(list->item(0)->data(ArticleDelegate::PagesRole).toString(), QStringLiteral("Page 4"));
         list->setCurrentRow(0);
         QAction *remove = nullptr;
         for (QAction *action : list->actions()) {

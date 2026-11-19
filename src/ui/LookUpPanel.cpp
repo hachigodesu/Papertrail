@@ -4,6 +4,7 @@
 #include "core/repo/FullTextIndex.h"
 #include "core/settings/SettingsStore.h"
 #include "metadata/Transport.h"
+#include "ui/Delegates.h"
 #include "ui/LibrarySession.h"
 
 #include <QCheckBox>
@@ -25,7 +26,8 @@ using metadata::SelectionLookup;
 
 namespace {
 
-enum Role { KindRole = Qt::UserRole, PublicationRole, FileRole, PageRole, AnnotationRole, ThisDocumentRole, KeyRole };
+// Clear of ArticleDelegate's roles, which draw each entry.
+enum Role { KindRole = Qt::UserRole + 16, PublicationRole, FileRole, PageRole, AnnotationRole, ThisDocumentRole, KeyRole };
 
 QLabel *heading(const QString &text, QWidget *parent)
 {
@@ -56,20 +58,28 @@ QString titleWithYear(const Mention &mention)
     return title;
 }
 
-QString mentionText(const Mention &mention)
+// Where it's mentioned, and the words around it, shown apart by ArticleDelegate.
+QString mentionWhere(const Mention &mention)
 {
     const QString where = mention.thisDocument ? LookUpPanel::tr("This document") : titleWithYear(mention);
     switch (mention.kind) {
     case Mention::Kind::Page:
-        return LookUpPanel::tr("%1, page %2\n%3").arg(where).arg(mention.page + 1).arg(mention.snippet);
+        return LookUpPanel::tr("%1, page %2").arg(where).arg(mention.page + 1);
     case Mention::Kind::Highlight:
         if (mention.page >= 0)
-            return LookUpPanel::tr("A highlight in %1, page %2\n%3").arg(where).arg(mention.page + 1).arg(mention.snippet);
-        return LookUpPanel::tr("A highlight in %1\n%2").arg(where, mention.snippet);
+            return LookUpPanel::tr("A highlight in %1, page %2").arg(where).arg(mention.page + 1);
+        return LookUpPanel::tr("A highlight in %1").arg(where);
     case Mention::Kind::Details:
         break;
     }
-    return LookUpPanel::tr("%1\nIn its details or notes").arg(where);
+    return where;
+}
+
+QString mentionContext(const Mention &mention)
+{
+    if (mention.kind == Mention::Kind::Details)
+        return LookUpPanel::tr("In its details or notes");
+    return mention.snippet.simplified();
 }
 
 } // namespace
@@ -112,6 +122,7 @@ LookUpPanel::LookUpPanel(LibrarySession &session, qint64 publicationId, QWidget 
     m_libraryList->setResizeMode(QListView::Adjust);
     m_libraryList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_libraryList->setMinimumHeight(160);
+    m_libraryList->setItemDelegate(new ArticleDelegate(m_libraryList));
     m_libraryList->hide();
     connect(m_libraryList, &QListWidget::itemActivated, this, &LookUpPanel::activateMention);
     connect(m_libraryList, &QListWidget::itemClicked, this, &LookUpPanel::activateMention);
@@ -240,7 +251,12 @@ QString LookUpPanel::wikiLanguage() const
         chosen = m_session.settings().value(QStringLiteral("lookup.language")).toString();
     } catch (const std::exception &) {
     }
-    return metadata::isWikiLanguage(chosen) ? chosen : metadata::wikiLanguageFor(QLocale().name());
+    if (metadata::isWikiLanguage(chosen))
+        return chosen;
+    // The language the system shows itself in, not its regional formats: someone reading English with dates
+    // set out the Japanese way wants English Wikipedia.
+    const QStringList languages = QLocale::system().uiLanguages();
+    return metadata::wikiLanguageFor(languages.isEmpty() ? QLocale::system().name() : languages.first());
 }
 
 metadata::SelectionLookup &LookUpPanel::lookup()
@@ -344,7 +360,10 @@ void LookUpPanel::showMentions(const core::Mentions &mentions, const QString &fa
     }
     m_libraryStatus->setText(tr("%n publication(s) mention “%1”.", nullptr, int(mentions.publications)).arg(m_words));
     for (const Mention &mention : mentions.found) {
-        auto *item = new QListWidgetItem(mentionText(mention), m_libraryList);
+        // The item's text holds both parts, for screen readers and tests.
+        auto *item = new QListWidgetItem(mentionWhere(mention) + u'\n' + mentionContext(mention), m_libraryList);
+        item->setData(ArticleDelegate::TitleRole, mentionWhere(mention));
+        item->setData(ArticleDelegate::PagesRole, mentionContext(mention));
         item->setData(KindRole, int(mention.kind));
         item->setData(PublicationRole, mention.publicationId);
         item->setData(FileRole, mention.fileId);
@@ -464,6 +483,8 @@ void LookUpPanel::showWikipedia(const metadata::WikipediaSummary &summary, const
             const QString text = page.description.isEmpty() ? page.title : page.title + QStringLiteral(" — ") + page.description;
             auto *item = new QListWidgetItem(text, m_wikipediaOthers);
             item->setData(KeyRole, page.key);
+            item->setData(ArticleDelegate::TitleRole, page.title);
+            item->setData(ArticleDelegate::PagesRole, page.description);
         }
         m_wikipediaOthers->show();
     }

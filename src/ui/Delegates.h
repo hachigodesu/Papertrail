@@ -64,8 +64,10 @@ public:
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
 };
 
-// One article in an issue's or book's list: its title wrapped to the list's width, then its pages small
-// and dimmed beneath, with room around it and a rule between entries. Drawn as plain text.
+// One entry of a list in two parts: its title wrapped to the list's width, then a line small and dimmed
+// beneath, with room around it and a rule between entries. Drawn as plain text. An article's pages, a place
+// a selection is mentioned, a bookmark's page. Without TitleRole, the item's own text is the title, so it
+// can still be edited in place.
 class ArticleDelegate : public QStyledItemDelegate {
     Q_OBJECT
 

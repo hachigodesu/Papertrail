@@ -76,7 +76,8 @@ public:
     bool isCopying() const { return m_copyRequest != 0; }
 
     // The styles there are, with a preview of these publications, and a way to add one from a file. One at a time.
-    CitationStylesDialog *showStylesDialog(const QList<qint64> &ids = {});
+    // `parent` is the window it belongs to, such as the Settings window, which would otherwise block it.
+    CitationStylesDialog *showStylesDialog(const QList<qint64> &ids = {}, QWidget *parent = nullptr);
 
     // Asks for a file, then exports in the background.
     void askAndExport(const QList<qint64> &ids, const QString &suggestedName = QString());

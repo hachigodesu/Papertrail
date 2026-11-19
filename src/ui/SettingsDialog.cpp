@@ -242,7 +242,7 @@ SettingsDialog::SettingsDialog(LibrarySession &session, const SettingsActions &a
         auto *more = new QPushButton(tr("More styles..."), citing);
         more->setObjectName(QStringLiteral("moreCitationStyles"));
         more->setToolTip(tr("Every style, with a preview, and adding one from a file"));
-        connect(more, &QPushButton::clicked, this, [citations] { citations->showStylesDialog(); });
+        connect(more, &QPushButton::clicked, this, [this, citations] { citations->showStylesDialog({}, this); });
         styleRow->addWidget(more);
         citingForm->addRow(tr("Style:"), styleRow);
 

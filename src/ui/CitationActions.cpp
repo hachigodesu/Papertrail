@@ -347,10 +347,16 @@ bool CitationActions::copyInTextCitation(const QList<qint64> &ids)
     return true;
 }
 
-CitationStylesDialog *CitationActions::showStylesDialog(const QList<qint64> &ids)
+CitationStylesDialog *CitationActions::showStylesDialog(const QList<qint64> &ids, QWidget *parent)
 {
+    // A modal window, such as Settings, blocks every window but its own, so the dialog has to be the one asking's.
+    QWidget *owner = parent ? parent : m_window;
+    if (m_stylesDialog && m_stylesDialog->parentWidget() != owner) {
+        m_stylesDialog->close();
+        m_stylesDialog = nullptr;
+    }
     if (!m_stylesDialog) {
-        m_stylesDialog = new CitationStylesDialog(m_session, *this, m_window);
+        m_stylesDialog = new CitationStylesDialog(m_session, *this, owner);
         m_stylesDialog->setAttribute(Qt::WA_DeleteOnClose);
     }
     m_stylesDialog->showPreviewOf(itemsFor(ids.mid(0, CitationStylesDialog::kMaxPreviewed)));

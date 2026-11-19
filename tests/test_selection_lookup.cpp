@@ -12,6 +12,7 @@
 #include "metadata/SelectionLookup.h"
 #include "metadata/Transport.h"
 #include "ui/LibrarySession.h"
+#include "ui/Delegates.h"
 #include "ui/LookUpPanel.h"
 
 #include <QCheckBox>
@@ -30,6 +31,7 @@ using namespace papertrail::core;
 using namespace papertrail::metadata;
 using papertrail::ui::LibraryPaths;
 using papertrail::ui::LibrarySession;
+using papertrail::ui::ArticleDelegate;
 using papertrail::ui::LookUpPanel;
 
 namespace {
@@ -345,9 +347,19 @@ private slots:
     void nothingGoesOnlineWhileOffline()
     {
         openPanel(false);
+        core::Publication mentioning;
+        mentioning.title = QStringLiteral("Pretend Lattice Vibrations");
+        mentioning.year = 2021;
+        m_session->publications().create(mentioning);
         m_panel->lookUp(QStringLiteral("lattice"));
         QSignalSpy shown(m_panel.get(), &LookUpPanel::libraryShown);
         QVERIFY(shown.wait());
+        // Each place is shown as where it is, then what's there, drawn apart so one runs into the next less.
+        auto *places = m_panel->findChild<QListWidget *>(QStringLiteral("lookUpLibrary"));
+        QCOMPARE(places->count(), 1);
+        QVERIFY(qobject_cast<ArticleDelegate *>(places->itemDelegate()));
+        QCOMPARE(places->item(0)->data(ArticleDelegate::TitleRole).toString(), QStringLiteral("Pretend Lattice Vibrations (2021)"));
+        QCOMPARE(places->item(0)->data(ArticleDelegate::PagesRole).toString(), QStringLiteral("In its details or notes"));
         QVERIFY(!button(QStringLiteral("lookUpWikipedia"))->isVisibleTo(m_panel.get()));
         QVERIFY(!button(QStringLiteral("lookUpWiktionary"))->isVisibleTo(m_panel.get()));
         QVERIFY(!m_panel->findChild<QCheckBox *>(QStringLiteral("lookUpAlways"))->isEnabled());

@@ -657,6 +657,10 @@ void ReaderTab::buildSidePanel()
     m_bookmarkList->setAccessibleName(tr("Bookmarks"));
     m_bookmarkList->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
     m_bookmarkList->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_bookmarkList->setWordWrap(true);
+    m_bookmarkList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    // Its name, then its page beneath, small and dimmed, with a rule between bookmarks.
+    m_bookmarkList->setItemDelegate(new ArticleDelegate(m_bookmarkList));
     connect(m_bookmarkList, &QListWidget::itemActivated, this,
             [this](QListWidgetItem *item) { goToBookmark(item->data(Qt::UserRole).toLongLong()); });
     connect(m_bookmarkList, &QListWidget::itemChanged, this, [this](QListWidgetItem *item) {
@@ -768,8 +772,11 @@ void ReaderTab::refreshBookmarkList()
     for (const Bookmark &bookmark : std::as_const(ordered)) {
         const int page = bookmarkPage(bookmark.id);
         // Shown as text, so whatever it's called stays text.
-        auto *item = new QListWidgetItem(bookmark.label.isEmpty() ? tr("Page %1").arg(page - first + 1) : bookmark.label);
+        const QString pageName = tr("Page %1").arg(page - first + 1);
+        auto *item = new QListWidgetItem(bookmark.label.isEmpty() ? pageName : bookmark.label);
         item->setData(Qt::UserRole, bookmark.id);
+        if (!bookmark.label.isEmpty() && bookmark.label != pageName)
+            item->setData(ArticleDelegate::PagesRole, pageName);
         item->setFlags(item->flags() | Qt::ItemIsEditable);
         item->setToolTip(tr("Page %1. Rename with F2, or delete with Delete.").arg(page - first + 1));
         if (!pageIsShown(page))

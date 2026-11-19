@@ -1958,6 +1958,13 @@ private slots:
         SettingsDialog settings(*m_session, actions, m_window.get());
         QComboBox *box = settings.citationStyleBox();
         QVERIFY(box);
+        // From Settings, the styles dialog is the Settings window's own, so the modal Settings window doesn't block it.
+        dialog->close();
+        settings.findChild<QPushButton *>(QStringLiteral("moreCitationStyles"))->click();
+        dialog = settings.findChild<CitationStylesDialog *>();
+        QVERIFY(dialog);
+        QCOMPARE(dialog->parentWidget(), &settings);
+        QCOMPARE(citations->showStylesDialog({}, &settings), dialog);
         QCOMPARE(box->currentData().toString(), tiny);
         box->setCurrentIndex(box->findData(nature));
         emit box->activated(box->currentIndex());

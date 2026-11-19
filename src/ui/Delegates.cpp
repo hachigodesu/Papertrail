@@ -257,7 +257,9 @@ int layOutAnnotation(QPainter *painter, const QStyleOptionViewItem &option, cons
 // Lays out one article of a list, drawing it when given a painter, and returns its height.
 int layOutArticle(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index, const QRect &area)
 {
-    const QString title = index.data(ArticleDelegate::TitleRole).toString();
+    QString title = index.data(ArticleDelegate::TitleRole).toString();
+    if (title.isEmpty())
+        title = index.data(Qt::DisplayRole).toString();
     const QString pages = index.data(ArticleDelegate::PagesRole).toString();
     QColor dimmed = itemTextColour(option);
     dimmed.setAlphaF(0.65f);
