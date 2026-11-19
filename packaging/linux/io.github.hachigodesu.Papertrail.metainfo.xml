@@ -22,7 +22,7 @@
       <li>Fill in details from Crossref, OpenAlex, arXiv and Open Library, if you choose to</li>
       <li>Split journal issues into their articles, and gather publications into collections</li>
       <li>Search inside your documents</li>
-      <li>Copy references in Harvard, APA, IEEE or Chicago style, and export BibTeX, RIS or CSL-JSON</li>
+      <li>Copy references in Harvard, APA, IEEE or Chicago style, or in CSL styles such as Vancouver, Nature and MLA, and export BibTeX, RIS or CSL-JSON</li>
       <li>Move your library to another computer, even with your files in different folders</li>
       <li>Get summaries from Claude with your own API key, if you choose to</li>
     </ul>
@@ -60,6 +60,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.6.0" date="2026-11-19">
+      <description>
+        <p>CSL citation styles, with 35 included and any other added from a file, words looked up in the library and, if chosen, on Wikipedia and in Wiktionary, a PDF copy of an EPUB, Kindle book or DjVu, and datasheets and manuals as a kind of publication of their own.</p>
+      </description>
+    </release>
     <release version="1.5.0" date="2026-11-17">
       <description>
         <p>A book downloaded as a zip of PDFs, one for each chapter, as ScienceDirect gives them, is read as one book, in an order worked out from the parts' page numbers and names and checked by the user, without changing the zip. A collection's menu exports citations for everything in it and shows its highlights and notes, and text set at an angle is drawn properly.</p>

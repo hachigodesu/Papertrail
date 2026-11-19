@@ -447,16 +447,16 @@ OCR for scanned documents, Zotero/Mendeley/BibTeX import, full CSL citation styl
 - **1.3.0:** the words of scanned documents recognised with Tesseract, in the background and as they're read, with English included and 26 more languages fetched when chosen, and an old paper whose own text is poor recognised again in full when asked.
 - **1.4.0:** reading aloud, marking each sentence, with the system's voices or Kokoro's natural voices fetched when asked; a reading ruler taking a figure or a table whole; every highlight in a window of its own; checking the library, with publications marked as not the same (migration 22); court cases looked up in Find Case Law, EUR-Lex, CourtListener and CanLII, and never in sources of papers; the scanned pages of partly scanned documents recognised in the background; and an OpenAlex key of the user's own.
 - **1.5.0:** a book downloaded as a zip of PDFs, one a chapter as ScienceDirect gives them, read as one book in an order worked out from the parts and checked by the user, stitched again with highlights, bookmarks and places moving with their parts (migration 23); a collection's menu exporting its citations and showing its highlights; and text turned about 45 degrees drawn from its outlines.
+- **1.6.0:** looking up a selection in the library, then on Wikipedia and in Wiktionary with lookups online and only when asked; a PDF copy of an EPUB, Kindle book, FB2, XPS, CBZ or DjVu, keeping a book's text, links and contents and a DjVu's words; Datasheets & Manuals as a type, cited under the manufacturer (migration 24), with Standards renamed Standards & Guidelines; and CSL citation styles through citeproc-js in QuickJS-ng, with 35 that come with Papertrail and any added from a file, kept in the library (migration 25).
 
-Considered and declined: **publication types of the user's own,** and removing the built-in ones, because citations, exports and article splitting depend on the fixed types.
+Considered and declined: **publication types of the user's own,** and removing the built-in ones, because citations, exports and article splitting depend on the fixed types. **A table to a spreadsheet** (an area over a table copied as CSV) was built for 1.6.0 and taken out after trying it by hand.
 
 ### Ideas to explore later
 
-Candidates for 1.6.0 and after. Sizes are rough.
+Candidates for 1.7.0 and after. Sizes are rough.
 
 - **Open-access copies:** PDFs fetched through Unpaywall for publications with no file, saved to a folder the user chooses. Unpaywall requires an email address with each request, so it would only work once one is entered.
 - **Sentence-case titles** where a citation style asks for them, such as APA. Risky with names and acronyms.
-- **Full CSL styles** alongside the four hand-written ones. Large, as there's no mature CSL processor in C++.
 - **A browser connector** for adding what's open in the browser. Large.
 - **Printed page numbers:** PDFs' page labels, so page boxes and Smart Jump from contents can go by the numbers printed on the pages. Small to medium, in the engine.
 - **A duplicate finder,** citation keys kept and edited, and Markdown notes exported to a folder for Obsidian and the like. Each small to medium.
@@ -464,14 +464,12 @@ Candidates for 1.6.0 and after. Sizes are rough.
 - **Keeping two computers in step** through a shared folder, built on the library export. Medium to large.
 - **Flathub and winget,** so Papertrail installs from the usual stores. Medium, mostly packaging and review.
 
-Gathered on 11 November 2026 from calibre, Zotero, KOReader, Sioyek, JabRef and others, keeping to the rules: nothing changes the user's files, and nothing goes online unless chosen. 1.4.0 took read aloud, the reading ruler, every highlight in one place and checking the library from these. Pinned figures, the Zotero import and fields of the user's own are still to come.
+Gathered on 11 November 2026 from calibre, Zotero, KOReader, Sioyek, JabRef and others, keeping to the rules: nothing changes the user's files, and nothing goes online unless chosen. 1.4.0 took read aloud, the reading ruler, every highlight in one place and checking the library from these, and 1.6.0 looking up a selection and the PDF copy. Pinned figures, the Zotero import and fields of the user's own are still to come.
 
 #### Reading
 
 - **Pinned figures:** an area, or a Smart Jump target, kept floating beside the page while the text about it is read. Like Sioyek's portals. Medium.
-- **Looking up a selection:** first in the library (other papers that mention it), and if chosen, on Wikipedia or in a dictionary, only with lookups online. Like calibre's lookup panel. Small.
 - **Asking Claude about a selection or area:** explaining an equation, translating a paragraph, defining a term, each request confirmed and costed as summaries are. Medium.
-- **A table to a spreadsheet:** an area over a table copied as CSV, from the character boxes the worker already has. Like Tabula. Medium.
 
 #### The library
 
@@ -484,7 +482,6 @@ Gathered on 11 November 2026 from calibre, Zotero, KOReader, Sioyek, JabRef and 
 
 - **Importing a Zotero, Mendeley or calibre library:** their databases read without changing them, with collections, tags, notes, highlights and links to the files. Zotero first. Probably the biggest draw for people switching. Medium each.
 - **Saving copies to a folder,** named by a pattern such as `{author} {year} - {title}`. Copies only, never moving or renaming the originals. Like calibre's Save to disk. Small.
-- **A PDF copy** of an EPUB, DjVu or Kindle book at a chosen page size, made by the worker, for printing or other tools. Like calibre's conversion. Small to medium.
 - **To and from an e-reader:** a selection copied to a Kobo, Kindle or KOReader device, and KOReader's highlights read back from its own files beside the books. Like calibre and KOReader. Medium to large.
 - **Highlights to Anki** as flashcards. Like Readwise. Small.
 

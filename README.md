@@ -216,6 +216,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Two documents side by side** in one tab, or the same one twice at different pages.
 - **Search within a document,** stepping through every match.
 - **Select and copy text,** across pages.
+- **Look up** a selection (**Look up** in its right-click menu, or Ctrl+Shift+L): the side panel lists where else your library mentions the words, the document you're reading first, then other papers' pages, highlights and notes, and details. With lookups online, it can look on Wikipedia, in your system's language, and in Wiktionary too, sending only the words, and only when you ask.
 - **Light, dark and sepia pages,** with pictures left in their own colours on dark pages, and larger or smaller text for EPUB and other reflowable books. **File > Settings...** sets what documents open with.
 - **Links** within a document, and to the web.
 
@@ -232,6 +233,7 @@ Moving from another computer? Choose **Import a library from another computer...
 - **Every highlight and note in your library** in a window of its own, under **View > Highlights and notes...**, that stays open while you read: searched, or chosen by colour, kind, collection, tag or publication, edited there, and exported as Markdown. **Show its highlights** in the library's right-click menu shows one publication's, and **Show its highlights and notes** on a collection in the sidebar shows those of everything in it.
 - **Export to Markdown,** with each quote and note under its page.
 - **Save a copy of a PDF with its highlights and notes** as ordinary PDF annotations, for any other PDF reader. The original is left untouched.
+- **Save a PDF copy** of an EPUB, Kindle book, FB2, XPS, CBZ or DjVu, for printing or another app. A book is laid out at the page size, text size and margins you choose, keeping its text, links and contents, and a DjVu keeps its words, so the copy can still be searched. The book itself is left untouched.
 
 ### Details from online sources
 
@@ -244,6 +246,7 @@ Moving from another computer? Choose **Import a library from another computer...
 ### Citing
 
 - **Copy references and in-text citations** in Harvard, APA (7th edition), IEEE or Chicago (author-date, 18th edition), with italics that paste into a word processor.
+- **CSL styles,** the ones Zotero and Mendeley use: 35 come with Papertrail, from Vancouver, Nature and AMA to MLA, Chicago notes and OSCOLA, and **Cite > Style > More styles...** previews any of them on what you've chosen, and adds any other `.csl` file, such as one from the Zotero Style Repository, to your library. **File > Settings...** chooses the language they're written in. Nothing is fetched online for them.
 - **Reference lists** for any selection, in the style's order, with 2020a and 2020b where needed.
 - **Export** BibTeX, RIS (for Zotero, Mendeley and EndNote) or CSL-JSON, for what you've chosen or, from its menu in the sidebar, for a whole collection.
 - **Case law** is cited in the Bluebook's form, or OSCOLA's if you choose it for a case, in every style. With lookups online, a case's details come from a source of judgments for its jurisdiction: Find Case Law for the UK, for cases you choose to look up, EUR-Lex for the EU's courts, and CourtListener for the US or CanLII for Canada with a free key of your own.
@@ -284,7 +287,7 @@ To move your library to another computer, use **File > Export library...** rathe
 ## Your files and your privacy
 
 - **Your documents are never changed.** Highlights, notes and details are kept in Papertrail's own library.
-- **Papertrail stays offline until you choose otherwise.** If you turn lookups on, it sends a document's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library, DOIs to Crossref to check for retractions, a DOI to OpenAlex when you ask for a publication's related papers, a court case's name, citation or case number to Find Case Law, EUR-Lex, CourtListener or CanLII, and, when you choose a language for recognising scanned text, asks GitHub for that language's file, or, when you ask for the natural voices, Hugging Face for theirs. It never sends your files, notes or tags. An email address goes to Crossref and OpenAlex only if you enter one, which they ask for to contact heavy users. A free OpenAlex key of your own, if you enter one under **Online lookups**, goes only to OpenAlex, and is kept in your computer's credential store, never in Papertrail's database, settings or exports.
+- **Papertrail stays offline until you choose otherwise.** If you turn lookups on, it sends a document's DOI, ISBN, arXiv number or title to Crossref, OpenAlex, arXiv or Open Library, DOIs to Crossref to check for retractions, a DOI to OpenAlex when you ask for a publication's related papers, a court case's name, citation or case number to Find Case Law, EUR-Lex, CourtListener or CanLII, words you look up to Wikipedia and Wiktionary when you ask, and, when you choose a language for recognising scanned text, asks GitHub for that language's file, or, when you ask for the natural voices, Hugging Face for theirs. It never sends your files, notes or tags. An email address goes to Crossref and OpenAlex only if you enter one, which they ask for to contact heavy users. A free OpenAlex key of your own, if you enter one under **Online lookups**, goes only to OpenAlex, and is kept in your computer's credential store, never in Papertrail's database, settings or exports.
 - **Summaries are sent to Anthropic only when you ask,** using your own API key. You're shown what will be sent and an estimated cost first. It sends identifying details such as the DOI and title, and Claude looks for the paper online. Your file is only sent if you choose that, with a confirmation of its own. The key is kept in your system's credential store, never in the library or its exports.
 - **Exports aren't encrypted.** A `.papertrail` file holds your notes and settings, so keep it as private as they are.
 - **There's no telemetry,** and nothing is sent anywhere else.
