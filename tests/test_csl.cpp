@@ -359,6 +359,51 @@ private slots:
         // A numeric style keeps its number.
         const Rendered nature = render(kStyles + QStringLiteral("nature"), cases);
         QVERIFY(nature.entries.first().plain().startsWith(QStringLiteral("1.")));
+
+        // An in-text citation names the case with "v" as its legal form does, whatever the stored name says: the made-up
+        // US case is stored with "v" and the UK one with "v.".
+        Options options;
+        options.each = true;
+        for (const QString &name : {QStringLiteral("elsevier-harvard"), QStringLiteral("modern-language-association")}) {
+            const Rendered rendered = render(kStyles + name, cases, options);
+            QVERIFY2(rendered.error.isEmpty(), qPrintable(rendered.error));
+            for (qsizetype i = 0; i < cases.size(); ++i) {
+                QVERIFY(caseName(cases.at(i)) != cases.at(i).title.simplified());
+                QVERIFY2(rendered.each.at(i).plain().contains(caseName(cases.at(i))),
+                         qPrintable(name + u' ' + rendered.each.at(i).plain()));
+            }
+        }
+    }
+
+    // A report, standard or manual with no authors starts with its organisation in a CSL style, as it does in the
+    // hand-written ones, rather than with its title or nothing at all.
+    void organisationsLeadWhatHasNoAuthors()
+    {
+        QList<CitationItem> items;
+        for (const auto &[key, item] : fixtureItems()) {
+            if (key == u"report" || key == u"standard" || key == u"manual") {
+                QVERIFY(item.authors.isEmpty());
+                QVERIFY(!leadingOrganisation(item).isEmpty());
+                items << item;
+            }
+        }
+        QCOMPARE(items.size(), 3);
+        Options options;
+        options.each = true;
+        for (const QString &name : {QStringLiteral("elsevier-harvard"), QStringLiteral("springer-basic-author-date"),
+                                    QStringLiteral("cse-name-year"), QStringLiteral("apa")}) {
+            const Rendered rendered = render(kStyles + name, items, options);
+            QVERIFY2(rendered.error.isEmpty(), qPrintable(rendered.error));
+            for (qsizetype i = 0; i < rendered.entries.size(); ++i) {
+                const QString entry = rendered.entries.at(i).plain();
+                const QString body = leadingOrganisation(items.at(rendered.order.at(i)));
+                QVERIFY2(entry.startsWith(body), qPrintable(name + u' ' + entry));
+                QVERIFY2(!entry.contains(QStringLiteral(". .")), qPrintable(name + u' ' + entry));
+            }
+            for (qsizetype i = 0; i < items.size(); ++i)
+                QVERIFY2(rendered.each.at(i).plain().contains(leadingOrganisation(items.at(i))),
+                         qPrintable(name + u' ' + rendered.each.at(i).plain()));
+        }
     }
 
     void stylesThatLoopOrRunAwayAreStopped()

@@ -50,6 +50,32 @@ QString styleName(CitationStyle style)
     return {};
 }
 
+QString leadingOrganisation(const CitationItem &item)
+{
+    if (!item.authors.isEmpty())
+        return {};
+    // A chapter's, paper's or article's editors are the book's or proceedings', so they don't lead.
+    const bool ownEditors = item.kind != Kind::Chapter && item.kind != Kind::Paper && item.kind != Kind::Article;
+    if (ownEditors && !item.editors.isEmpty())
+        return {};
+    QString body;
+    if (item.kind == Kind::Standard)
+        body = item.standardBody;
+    else if (item.kind == Kind::Report || item.kind == Kind::Document)
+        body = item.institution.isEmpty() ? item.publisher : item.institution;
+    else if (item.kind == Kind::Manual) // A datasheet or manual is its manufacturer's.
+        body = item.publisher.isEmpty() ? item.institution : item.publisher;
+    return body.simplified();
+}
+
+QString caseName(const CitationItem &item)
+{
+    QString name = item.title.simplified();
+    static const QRegularExpression versus(QStringLiteral("\\s+(?:v|vs)\\.?\\s+"));
+    name.replace(versus, item.oscola ? QStringLiteral(" v ") : QStringLiteral(" v. "));
+    return name;
+}
+
 namespace {
 
 // Who a reference starts with.
@@ -72,19 +98,8 @@ Lead leadFor(const CitationItem &item, bool conferenceCanLead)
     const bool ownEditors = item.kind != Kind::Chapter && item.kind != Kind::Paper && item.kind != Kind::Article;
     if (ownEditors && !item.editors.isEmpty())
         return {item.editors, true};
-    if (item.kind == Kind::Standard && !item.standardBody.isEmpty())
-        return {{organisation(item.standardBody)}, false};
-    if (item.kind == Kind::Report || item.kind == Kind::Document) {
-        const QString body = item.institution.isEmpty() ? item.publisher : item.institution;
-        if (!body.isEmpty())
-            return {{organisation(body)}, false};
-    }
-    // A datasheet or manual is its manufacturer's.
-    if (item.kind == Kind::Manual) {
-        const QString body = item.publisher.isEmpty() ? item.institution : item.publisher;
-        if (!body.isEmpty())
-            return {{organisation(body)}, false};
-    }
+    if (const QString body = leadingOrganisation(item); !body.isEmpty())
+        return {{organisation(body)}, false};
     if (conferenceCanLead && item.kind == Kind::Proceedings && !item.conferenceName.isEmpty())
         return {{organisation(item.conferenceName)}, false};
     return {};
@@ -135,15 +150,6 @@ QString volumeAndIssue(const CitationItem &item)
 }
 
 // ---------------------------------------------------------------------------------------------------- Cases
-
-// A case's name with "v" as its form writes it: "v" for OSCOLA, "v." for the Bluebook.
-QString caseName(const CitationItem &item)
-{
-    QString name = item.title.simplified();
-    static const QRegularExpression versus(QStringLiteral("\\s+(?:v|vs)\\.?\\s+"));
-    name.replace(versus, item.oscola ? QStringLiteral(" v ") : QStringLiteral(" v. "));
-    return name;
-}
 
 // Where a report starts, as a case is cited: "562" from "562-580".
 QString firstPage(const QString &pages)

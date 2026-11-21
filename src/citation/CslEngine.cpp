@@ -1,6 +1,7 @@
 #include "citation/CslEngine.h"
 
 #include "citation/Exporters.h"
+#include "citation/Styles.h"
 
 #include "quickjs.h"
 
@@ -280,6 +281,13 @@ QByteArray itemsJson(const QList<CitationItem> &items, const QString &prefix, co
         // Nothing a style shows, and the abstract can be long.
         object.remove(QStringLiteral("abstract"));
         object.remove(QStringLiteral("keyword"));
+        // An organisation leads a report, standard or manual with no authors, as in the hand-written styles, rather
+        // than its title standing in for one.
+        if (const QString body = leadingOrganisation(item); !body.isEmpty())
+            object.insert(QStringLiteral("author"), QJsonArray{QJsonObject{{QStringLiteral("literal"), body}}});
+        // A case's name says "v" as its legal form does, as its in-text citation shows it.
+        if (item.kind == CitationItem::Kind::Case)
+            object.insert(QStringLiteral("title"), caseName(item));
         // A page on the web, rather than a work with a DOI, says when it was looked at, as the Harvard style does.
         if (!item.url.isEmpty() && item.doi.isEmpty() && options.accessed.isValid()) {
             object.insert(QStringLiteral("accessed"),

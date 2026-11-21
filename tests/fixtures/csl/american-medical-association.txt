@@ -47,11 +47,11 @@ ref: 12. Novak M. *Pretend Materials in Practice*. MSc. Example Institute; 2017.
 cite: ^1^
 
 [report]
-ref: 13. *Annual Report on Pretend Data*. Example Agency; 2020. Accessed November 7, 2026. https://example.org/report.pdf
+ref: 13. Example Agency. *Annual Report on Pretend Data*. Example Agency; 2020. Accessed November 7, 2026. https://example.org/report.pdf
 cite: ^1^
 
 [standard]
-ref: 14. Specification for Pretend Bolts. Published online 2019:ESB 1234.
+ref: 14. Example Standards Body. Specification for Pretend Bolts. Published online 2019:ESB 1234.
 cite: ^1^
 
 [preprint]
@@ -71,7 +71,7 @@ ref: 18. *Made-Up Holdings Ltd v Another Example Plc* [2021] EWCA Civ 1234, [202
 cite: ^1^
 
 [manual]
-ref: 19. *PX-100 Pretend Voltage Regulator*. Example Devices; 2023. Accessed November 7, 2026. https://example.org/px100.pdf
+ref: 19. Example Devices. *PX-100 Pretend Voltage Regulator*. Example Devices; 2023. Accessed November 7, 2026. https://example.org/px100.pdf
 cite: ^1^
 
 [all]
