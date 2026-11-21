@@ -57,7 +57,11 @@ signals:
     // The library's part has been shown, for tests.
     void libraryShown();
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
+    void fitWikipediaOthers();
     void startLookUp();
     void readLibrary();
     void showMentions(const core::Mentions &mentions, const QString &failure);
@@ -88,7 +92,9 @@ private:
     QLabel *m_wikipediaTitle = nullptr;
     QLabel *m_wikipediaDescription = nullptr;
     QLabel *m_wikipediaExtract = nullptr;
+    QLabel *m_wikipediaOthersHeading = nullptr;
     QListWidget *m_wikipediaOthers = nullptr;
+    int m_wikipediaOthersWidth = -1; // The width its height was last fitted to.
     QPushButton *m_wikipediaOpen = nullptr;
     QLabel *m_wikipediaCredit = nullptr;
     QString m_wikipediaKey;

@@ -398,6 +398,21 @@ private slots:
         auto *extract = m_panel->findChild<QLabel *>(QStringLiteral("lookUpWikipediaExtract"));
         QTRY_VERIFY(extract->text().contains(QStringLiteral("made-up summary")));
         QCOMPARE(extract->textFormat(), Qt::PlainText);
+        // The other articles are drawn as the library's results are, a title with what it is beneath, and the list is
+        // tall enough to show them whole.
+        auto *others = m_panel->findChild<QListWidget *>(QStringLiteral("lookUpWikipediaOthers"));
+        QVERIFY(others);
+        QTRY_VERIFY(others->isVisibleTo(m_panel.get()));
+        QVERIFY(qobject_cast<ArticleDelegate *>(others->itemDelegate()));
+        QVERIFY(others->count() > 0);
+        for (int row = 0; row < others->count(); ++row)
+            QVERIFY(!others->item(row)->data(ArticleDelegate::TitleRole).toString().isEmpty());
+        // The article shown isn't listed again.
+        QCOMPARE(others->item(0)->data(ArticleDelegate::TitleRole).toString(), QStringLiteral("Grain boundary strengthening"));
+        QVERIFY(others->height() >= others->sizeHintForRow(0) * others->count());
+        auto *description = m_panel->findChild<QLabel *>(QStringLiteral("lookUpWikipediaDescription"));
+        QCOMPARE(description->text(), QStringLiteral("Interface between crystallites"));
+        QCOMPARE(description->foregroundRole(), QPalette::PlaceholderText);
 
         button(QStringLiteral("lookUpWiktionary"))->click();
         auto *definitions = m_panel->findChild<QLabel *>(QStringLiteral("lookUpWiktionaryText"));

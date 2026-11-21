@@ -8,6 +8,7 @@
 #include "ui/LibrarySession.h"
 
 #include <QCheckBox>
+#include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -46,6 +47,26 @@ QLabel *plainLabel(QWidget *parent)
     label->setWordWrap(true);
     label->setTextInteractionFlags(Qt::TextSelectableByMouse);
     return label;
+}
+
+// Smaller, in the theme's dimmed text colour, which follows the theme when it changes.
+QLabel *dimmedLabel(QWidget *parent)
+{
+    QLabel *label = plainLabel(parent);
+    label->setForegroundRole(QPalette::PlaceholderText);
+    QFont font = label->font();
+    font.setPointSizeF(font.pointSizeF() * 0.9);
+    label->setFont(font);
+    return label;
+}
+
+// The summary's extract leaves out formulas, so an extract that stops short says there's more on the page.
+QString shownExtract(const QString &extract)
+{
+    const QString text = extract.trimmed();
+    if (text.isEmpty() || QStringLiteral(".!?…)\"”").contains(text.back()))
+        return text;
+    return text + QStringLiteral(" …");
 }
 
 QString titleWithYear(const Mention &mention)
@@ -134,9 +155,11 @@ LookUpPanel::LookUpPanel(LibrarySession &session, qint64 publicationId, QWidget 
     layout->addWidget(m_searchLibrary);
 
     // 2. Wikipedia, and 3. Wiktionary: nothing goes to either until it's asked for.
+    layout->addSpacing(12);
     m_onlineStatus = plainLabel(content);
     layout->addWidget(m_onlineStatus);
 
+    layout->addSpacing(4);
     layout->addWidget(heading(tr("Wikipedia"), content));
     m_wikipediaButton = new QPushButton(tr("Look on Wikipedia"), content);
     m_wikipediaButton->setObjectName(QStringLiteral("lookUpWikipedia"));
@@ -144,28 +167,23 @@ LookUpPanel::LookUpPanel(LibrarySession &session, qint64 publicationId, QWidget 
     layout->addWidget(m_wikipediaButton, 0, Qt::AlignLeft);
     m_wikipediaStatus = plainLabel(content);
     layout->addWidget(m_wikipediaStatus);
+
+    // The article: its title a little larger, what it is beneath, dimmed, then its first paragraph with room around it.
     m_wikipediaTitle = plainLabel(content);
-    QFont bold = m_wikipediaTitle->font();
-    bold.setBold(true);
-    m_wikipediaTitle->setFont(bold);
+    m_wikipediaTitle->setObjectName(QStringLiteral("lookUpWikipediaTitle"));
+    QFont title = m_wikipediaTitle->font();
+    title.setBold(true);
+    title.setPointSizeF(title.pointSizeF() * 1.15);
+    m_wikipediaTitle->setFont(title);
+    m_wikipediaTitle->setContentsMargins(0, 4, 0, 0);
     layout->addWidget(m_wikipediaTitle);
-    m_wikipediaDescription = plainLabel(content);
-    QFont italic = m_wikipediaDescription->font();
-    italic.setItalic(true);
-    m_wikipediaDescription->setFont(italic);
+    m_wikipediaDescription = dimmedLabel(content);
+    m_wikipediaDescription->setObjectName(QStringLiteral("lookUpWikipediaDescription"));
     layout->addWidget(m_wikipediaDescription);
     m_wikipediaExtract = plainLabel(content);
     m_wikipediaExtract->setObjectName(QStringLiteral("lookUpWikipediaExtract"));
+    m_wikipediaExtract->setContentsMargins(0, 6, 0, 6);
     layout->addWidget(m_wikipediaExtract);
-    m_wikipediaOthers = new QListWidget(content);
-    m_wikipediaOthers->setAccessibleName(tr("Other Wikipedia articles"));
-    m_wikipediaOthers->setWordWrap(true);
-    m_wikipediaOthers->setMaximumHeight(110);
-    connect(m_wikipediaOthers, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
-        m_wikipediaStatus->setText(tr("Looking on Wikipedia..."));
-        lookup().showWikipediaPage(item->data(KeyRole).toString(), m_wikipediaAskedLanguage);
-    });
-    layout->addWidget(m_wikipediaOthers);
     m_wikipediaOpen = new QPushButton(tr("Read on Wikipedia"), content);
     connect(m_wikipediaOpen, &QPushButton::clicked, this, [this] {
         const QUrl url = metadata::wikipediaPageLink(m_wikipediaAskedLanguage, m_wikipediaKey);
@@ -173,10 +191,33 @@ LookUpPanel::LookUpPanel(LibrarySession &session, qint64 publicationId, QWidget 
             emit openLinkWanted(url);
     });
     layout->addWidget(m_wikipediaOpen, 0, Qt::AlignLeft);
-    m_wikipediaCredit = plainLabel(content);
+
+    // Other articles that matched, each its title with what it is beneath, as the library's results are drawn.
+    m_wikipediaOthersHeading = dimmedLabel(content);
+    m_wikipediaOthersHeading->setText(tr("Other articles"));
+    m_wikipediaOthersHeading->setContentsMargins(0, 8, 0, 0);
+    layout->addWidget(m_wikipediaOthersHeading);
+    m_wikipediaOthers = new QListWidget(content);
+    m_wikipediaOthers->setObjectName(QStringLiteral("lookUpWikipediaOthers"));
+    m_wikipediaOthers->setAccessibleName(tr("Other Wikipedia articles"));
+    m_wikipediaOthers->setWordWrap(true);
+    m_wikipediaOthers->setResizeMode(QListView::Adjust);
+    m_wikipediaOthers->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_wikipediaOthers->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_wikipediaOthers->setItemDelegate(new ArticleDelegate(m_wikipediaOthers));
+    m_wikipediaOthers->installEventFilter(this);
+    connect(m_wikipediaOthers, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
+        m_wikipediaStatus->setText(tr("Looking on Wikipedia..."));
+        lookup().showWikipediaPage(item->data(KeyRole).toString(), m_wikipediaAskedLanguage);
+    });
+    connect(m_wikipediaOthers, &QListWidget::itemClicked, m_wikipediaOthers, &QListWidget::itemActivated);
+    layout->addWidget(m_wikipediaOthers);
+    m_wikipediaCredit = dimmedLabel(content);
     m_wikipediaCredit->setText(tr("From Wikipedia, under the Creative Commons Attribution-ShareAlike licence."));
+    m_wikipediaCredit->setContentsMargins(0, 4, 0, 0);
     layout->addWidget(m_wikipediaCredit);
 
+    layout->addSpacing(12);
     layout->addWidget(heading(tr("Wiktionary"), content));
     m_wiktionaryButton = new QPushButton(tr("Look in Wiktionary"), content);
     m_wiktionaryButton->setObjectName(QStringLiteral("lookUpWiktionary"));
@@ -194,7 +235,7 @@ LookUpPanel::LookUpPanel(LibrarySession &session, qint64 publicationId, QWidget 
             emit openLinkWanted(url);
     });
     layout->addWidget(m_wiktionaryOpen, 0, Qt::AlignLeft);
-    m_wiktionaryCredit = plainLabel(content);
+    m_wiktionaryCredit = dimmedLabel(content);
     m_wiktionaryCredit->setText(tr("From Wiktionary, under the Creative Commons Attribution-ShareAlike licence."));
     layout->addWidget(m_wiktionaryCredit);
 
@@ -433,7 +474,8 @@ void LookUpPanel::clearOnline()
         label->clear();
     m_wikipediaOthers->clear();
     for (QWidget *widget : std::initializer_list<QWidget *>{m_wikipediaTitle, m_wikipediaDescription, m_wikipediaExtract,
-                                                            m_wikipediaOthers, m_wikipediaOpen, m_wikipediaCredit,
+                                                            m_wikipediaOthersHeading, m_wikipediaOthers, m_wikipediaOpen,
+                                                            m_wikipediaCredit,
                                                             m_wiktionaryText, m_wiktionaryOpen, m_wiktionaryCredit})
         widget->hide();
 }
@@ -471,7 +513,7 @@ void LookUpPanel::showWikipedia(const metadata::WikipediaSummary &summary, const
     m_wikipediaDescription->setText(summary.description);
     m_wikipediaExtract->setText(summary.disambiguation ? tr("“%1” can mean several things. Choose one below, "
                                                             "or read the list on Wikipedia.").arg(summary.title)
-                                                       : summary.extract);
+                                                       : shownExtract(summary.extract));
     m_wikipediaTitle->show();
     m_wikipediaDescription->setVisible(!summary.description.isEmpty());
     m_wikipediaExtract->show();
@@ -480,14 +522,37 @@ void LookUpPanel::showWikipedia(const metadata::WikipediaSummary &summary, const
     if (!others.isEmpty()) {
         m_wikipediaOthers->clear();
         for (const metadata::WikipediaPage &page : others) {
-            const QString text = page.description.isEmpty() ? page.title : page.title + QStringLiteral(" — ") + page.description;
-            auto *item = new QListWidgetItem(text, m_wikipediaOthers);
+            auto *item = new QListWidgetItem(page.title, m_wikipediaOthers);
             item->setData(KeyRole, page.key);
             item->setData(ArticleDelegate::TitleRole, page.title);
             item->setData(ArticleDelegate::PagesRole, page.description);
+            item->setToolTip(page.description.isEmpty() ? page.title : page.title + u'\n' + page.description);
         }
+        m_wikipediaOthersHeading->show();
         m_wikipediaOthers->show();
+        m_wikipediaOthersWidth = -1;
+        fitWikipediaOthers();
     }
+}
+
+// The list is as tall as its first five entries, wrapped to its width, so a few show whole without a scroll bar.
+void LookUpPanel::fitWikipediaOthers()
+{
+    const int width = m_wikipediaOthers->viewport()->width();
+    if (width == m_wikipediaOthersWidth)
+        return;
+    m_wikipediaOthersWidth = width;
+    int height = 0;
+    for (int row = 0; row < qMin(m_wikipediaOthers->count(), 5); ++row)
+        height += m_wikipediaOthers->sizeHintForRow(row);
+    m_wikipediaOthers->setFixedHeight(height + 2 * m_wikipediaOthers->frameWidth());
+}
+
+bool LookUpPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_wikipediaOthers && event->type() == QEvent::Resize && m_wikipediaOthers->count() > 0)
+        fitWikipediaOthers();
+    return QWidget::eventFilter(watched, event);
 }
 
 void LookUpPanel::showWiktionary(const QList<metadata::WiktionaryEntry> &entries)
